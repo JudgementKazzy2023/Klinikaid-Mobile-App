@@ -53,3 +53,4 @@ app.*.map.json
 /supabase/
 /web_reference/
 /files/
+/files.zip
