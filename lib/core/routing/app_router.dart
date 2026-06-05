@@ -1,10 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/auth/presentation/screens/register_screen.dart';
 import '../../features/auth/presentation/screens/consent_screen.dart';
 import '../../features/auth/presentation/screens/onboarding_screen.dart';
+import '../../features/dashboard/presentation/screens/dashboard_screen.dart';
+import '../../features/dashboard/presentation/screens/profile_screen.dart';
+import '../../features/documents/presentation/screens/submit_document_screen.dart';
+import '../../features/records/presentation/screens/records_screen.dart';
+import '../../features/records/presentation/providers/records_provider.dart';
+import '../../features/queue/presentation/screens/queue_screen.dart';
+import '../../features/queue/presentation/providers/queue_provider.dart';
+import '../../features/documents/presentation/screens/document_status_screen.dart';
+import '../../features/documents/presentation/providers/document_status_provider.dart';
+import '../../features/chatbot/presentation/screens/chatbot_screen.dart';
+import '../../features/chatbot/presentation/providers/chatbot_provider.dart';
+import '../../features/dashboard/presentation/providers/dashboard_provider.dart';
+import '../../features/documents/presentation/providers/document_submission_provider.dart';
+import '../cache/local_database.dart';
 
 /// AppRouter defines the structural gating/redirection rules for the application.
 class AppRouter {
@@ -79,108 +94,162 @@ class AppRouter {
         path: '/onboarding',
         builder: (context, state) => const OnboardingScreen(),
       ),
-      GoRoute(
-        path: '/',
-        builder: (context, state) => const DashboardPlaceholderScreen(),
+      ShellRoute(
+        builder: (context, state, child) {
+          return AppShell(child: child);
+        },
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (context, state) => const DashboardScreen(),
+          ),
+          GoRoute(
+            path: '/submit',
+            builder: (context, state) => const SubmitDocumentScreen(),
+          ),
+          GoRoute(
+            path: '/records',
+            builder: (context, state) => const RecordsScreen(),
+          ),
+          GoRoute(
+            path: '/queue',
+            builder: (context, state) => const QueueScreen(),
+          ),
+          GoRoute(
+            path: '/documents/status',
+            builder: (context, state) => const DocumentStatusScreen(),
+          ),
+          GoRoute(
+            path: '/chatbot',
+            builder: (context, state) => const ChatbotScreen(),
+          ),
+          GoRoute(
+            path: '/profile',
+            builder: (context, state) => const ProfileScreen(),
+          ),
+        ],
       ),
     ],
   );
 }
 
-/// Temporary placeholder for the Dashboard (implemented in Phase 3)
-class DashboardPlaceholderScreen extends StatelessWidget {
-  const DashboardPlaceholderScreen({super.key});
+/// AppShell serves as the persistent layout wrapper that manages the bottom navigation bar and shared DashboardProvider lifecycle.
+class AppShell extends StatelessWidget {
+  final Widget child;
+
+  const AppShell({super.key, required this.child});
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0B0E14),
-      appBar: AppBar(
-        title: const Text('Klinikaid Dashboard', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        backgroundColor: const Color(0xFF0F131D),
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.white70),
-            onPressed: () {
-              // Access AuthProvider and call signOut
-              GoRouter.of(context).read<AuthProvider>().signOut();
-            },
-          ),
-        ],
-      ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2E5BFF).withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.dashboard_customize_outlined, size: 64, color: Color(0xFF2E5BFF)),
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                'Welcome to KlinikAid!',
-                style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Your account is authenticated, consented, and onboarded. The full dashboard features will unlock in Phase 3.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white70, fontSize: 14),
-              ),
-            ],
-          ),
+    final localDb = Provider.of<LocalDatabase>(context, listen: false);
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider<DashboardProvider>(
+          create: (_) => DashboardProvider(localDb),
         ),
+        ChangeNotifierProvider<DocumentSubmissionProvider>(
+          create: (_) => DocumentSubmissionProvider(localDb),
+        ),
+        ChangeNotifierProvider<ChatbotProvider>(
+          create: (_) => ChatbotProvider(),
+        ),
+        ChangeNotifierProvider<RecordsProvider>(
+          create: (_) => RecordsProvider(localDb),
+        ),
+        ChangeNotifierProvider<QueueProvider>(
+          create: (_) => QueueProvider(localDb),
+        ),
+        ChangeNotifierProvider<DocumentStatusProvider>(
+          create: (_) => DocumentStatusProvider(localDb),
+        ),
+      ],
+      child: Scaffold(
+        body: child,
+        bottomNavigationBar: const _AppBottomNavBar(),
       ),
     );
   }
 }
 
-extension on GoRouter {
-  T read<T>() {
-    final context = routerDelegate.navigatorKey.currentContext!;
-    return GoRouterHelper(context).read<T>();
+class _AppBottomNavBar extends StatelessWidget {
+  const _AppBottomNavBar();
+
+  int _calculateSelectedIndex(BuildContext context) {
+    final String location = GoRouterState.of(context).matchedLocation;
+    if (location == '/submit') return 1;
+    if (location == '/records') return 2;
+    if (location == '/chatbot') return 3;
+    if (location == '/profile') return 4;
+    return 0;
   }
-}
 
-class GoRouterHelper {
-  final BuildContext context;
-  GoRouterHelper(this.context);
-  T read<T>() => Navigator.of(context).context.read<T>();
-}
-
-// Simple extension helper to avoid importing provider direct in GoRouter helper extension
-extension on BuildContext {
-  T read<T>() => WatchContext(this).read<T>();
-}
-
-class WatchContext {
-  final BuildContext context;
-  WatchContext(this.context);
-  T read<T>() => watchProvider<T>(context);
-}
-
-// Top level method to resolve provider using flutter widgets tree context safely
-T watchProvider<T>(BuildContext context) {
-  try {
-    return WatchContextHelper.dependOn<T>(context);
-  } catch (_) {
-    throw Exception('Provider<$T> not found in context.');
+  void _onItemTapped(int index, BuildContext context) {
+    switch (index) {
+      case 0:
+        context.go('/');
+        break;
+      case 1:
+        context.go('/submit');
+        break;
+      case 2:
+        context.go('/records');
+        break;
+      case 3:
+        context.go('/chatbot');
+        break;
+      case 4:
+        context.go('/profile');
+        break;
+    }
   }
-}
 
-class WatchContextHelper {
-  static T dependOn<T>(BuildContext context) {
-    // Uses context.read<T>() under the hood, but resolves dependency dynamically
-    // to bypass direct import warnings if provider is imported via other wrappers.
-    // Provider package exports 'read' extension method.
-    // We can resolve it by casting context to dynamic.
-    return (context as dynamic).read<T>();
+  @override
+  Widget build(BuildContext context) {
+    final selectedIndex = _calculateSelectedIndex(context);
+
+    return Container(
+      decoration: const BoxDecoration(
+        border: Border(
+          top: BorderSide(color: Colors.white10, width: 1),
+        ),
+      ),
+      child: BottomNavigationBar(
+        currentIndex: selectedIndex,
+        onTap: (index) => _onItemTapped(index, context),
+        backgroundColor: const Color(0xFF0F131D),
+        selectedItemColor: const Color(0xFF2E5BFF),
+        unselectedItemColor: Colors.white38,
+        type: BottomNavigationBarType.fixed,
+        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, fontFamily: 'Outfit'),
+        unselectedLabelStyle: const TextStyle(fontSize: 11, fontFamily: 'Outfit'),
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.dashboard_outlined),
+            activeIcon: Icon(Icons.dashboard_rounded),
+            label: 'Dashboard',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.document_scanner_outlined),
+            activeIcon: Icon(Icons.document_scanner_rounded),
+            label: 'Submit',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.receipt_long_outlined),
+            activeIcon: Icon(Icons.receipt_long_rounded),
+            label: 'Records',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.chat_bubble_outline_rounded),
+            activeIcon: Icon(Icons.chat_bubble_rounded),
+            label: 'Chat',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_outline_rounded),
+            activeIcon: Icon(Icons.person_rounded),
+            label: 'Profile',
+          ),
+        ],
+      ),
+    );
   }
 }

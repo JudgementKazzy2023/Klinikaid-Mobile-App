@@ -48,3 +48,8 @@ app.*.map.json
 /lib/core/config/env.dart
 *.env
 *.env.local
+/Reviews/
+/test/
+/supabase/
+/web_reference/
+/files/

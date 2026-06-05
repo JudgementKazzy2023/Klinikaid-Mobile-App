@@ -16,12 +16,14 @@ class AuthProvider extends ChangeNotifier {
   User? _user;
   Session? _session;
   Profile? _profile;
+  Patient? _patient;
   bool _hasConsented = false;
   bool _isOnboarded = false;
   bool _isLoading = true;
   String? _errorMessage;
 
   Profile? get profile => _profile;
+  Patient? get patient => _patient;
 
   StreamSubscription<AuthState>? _authStateSubscription;
 
@@ -85,9 +87,10 @@ class AuthProvider extends ChangeNotifier {
 
     // 3. Evaluate Onboarding Status (linked patients row)
     try {
-      final patient = await _patientsRepo.getPatientByProfileId(currentUser.id);
-      _isOnboarded = patient != null;
+      _patient = await _patientsRepo.getPatientByProfileId(currentUser.id);
+      _isOnboarded = _patient != null;
     } catch (_) {
+      _patient = null;
       _isOnboarded = false;
     }
   }
@@ -235,7 +238,61 @@ class AuthProvider extends ChangeNotifier {
       );
 
       await _patientsRepo.createPatient(patient);
+      _patient = patient;
       _isOnboarded = true;
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } on Failure catch (e) {
+      _errorMessage = e.message;
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    } catch (e) {
+      _errorMessage = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Updates the patient record details.
+  Future<bool> updatePatientDetails({
+    required String firstName,
+    required String lastName,
+    required DateTime dateOfBirth,
+    required Gender gender,
+    required String contactNumber,
+    required String address,
+  }) async {
+    final currentPatient = _patient;
+    if (currentPatient == null) {
+      _errorMessage = 'No active patient profile found.';
+      notifyListeners();
+      return false;
+    }
+
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final updated = Patient(
+        id: currentPatient.id,
+        profileId: currentPatient.profileId,
+        firstName: firstName,
+        lastName: lastName,
+        dateOfBirth: dateOfBirth,
+        gender: gender,
+        contactNumber: contactNumber,
+        email: currentPatient.email,
+        address: address,
+        createdAt: currentPatient.createdAt,
+        updatedAt: DateTime.now(),
+      );
+
+      final result = await _patientsRepo.updatePatient(updated);
+      _patient = result;
       _isLoading = false;
       notifyListeners();
       return true;
@@ -261,6 +318,8 @@ class AuthProvider extends ChangeNotifier {
     } finally {
       _user = null;
       _session = null;
+      _profile = null;
+      _patient = null;
       _hasConsented = false;
       _isOnboarded = false;
       _isLoading = false;

@@ -43,4 +43,19 @@ class ChatbotLogsRepository {
       throw FailureMapper.fromException(e);
     }
   }
+
+  /// Updates the feedback field on a specific log record.
+  /// Throws a [Failure] on error.
+  Future<void> updateLogFeedback(int logId, FeedbackType? feedback) async {
+    try {
+      await _client
+          .from('chatbot_logs')
+          .update({
+            'feedback': feedback?.toJsonValue(),
+          })
+          .eq('id', logId);
+    } catch (e) {
+      throw FailureMapper.fromException(e);
+    }
+  }
 }

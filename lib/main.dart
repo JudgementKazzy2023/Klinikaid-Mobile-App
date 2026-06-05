@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'core/supabase/supabase_client.dart';
 import 'features/auth/presentation/providers/auth_provider.dart';
 import 'core/routing/app_router.dart';
+import 'core/cache/local_database.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,10 +24,12 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   late final AuthProvider _authProvider;
   late final AppRouter _appRouter;
+  late final LocalDatabase _localDatabase;
 
   @override
   void initState() {
     super.initState();
+    _localDatabase = LocalDatabase();
     _authProvider = AuthProvider();
     _appRouter = AppRouter(_authProvider);
   }
@@ -34,13 +37,17 @@ class _MyAppState extends State<MyApp> {
   @override
   void dispose() {
     _authProvider.dispose();
+    _localDatabase.close();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider<AuthProvider>.value(
-      value: _authProvider,
+    return MultiProvider(
+      providers: [
+        Provider<LocalDatabase>.value(value: _localDatabase),
+        ChangeNotifierProvider<AuthProvider>.value(value: _authProvider),
+      ],
       child: MaterialApp.router(
         title: 'KlinikAid',
         debugShowCheckedModeBanner: false,
