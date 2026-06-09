@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:klinikaid_mobile/core/models/profile.dart';
 import '../../../../core/cache/local_database.dart';
 import '../../../../core/errors/failures.dart';
 import '../../../../core/models/patient_queue.dart';
