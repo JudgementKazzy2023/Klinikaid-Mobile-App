@@ -26,7 +26,7 @@ class _ConsentScreenState extends State<ConsentScreen> {
     final authProvider = Provider.of<AuthProvider>(context);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0E14),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
@@ -35,27 +35,27 @@ class _ConsentScreenState extends State<ConsentScreen> {
             children: [
               const SizedBox(height: 12),
               // Header
-              const Icon(
+              Icon(
                 Icons.privacy_tip_outlined,
                 size: 40,
-                color: Color(0xFF00C1D4),
+                color: Theme.of(context).colorScheme.primary,
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'Data Privacy Consent',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: Colors.white,
+                  color: Theme.of(context).colorScheme.onSurface,
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(height: 4),
-              const Text(
+              Text(
                 'Republic Act No. 10173 (Philippine Data Privacy Act)',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: Colors.white30,
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
                 ),
@@ -67,9 +67,9 @@ class _ConsentScreenState extends State<ConsentScreen> {
                 child: Container(
                   padding: const EdgeInsets.all(16.0),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0F131D),
+                    color: Theme.of(context).cardColor,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFF1C2230)),
+                    border: Border.all(color: Theme.of(context).colorScheme.outline),
                   ),
                   child: Scrollbar(
                     thumbVisibility: true,
@@ -78,52 +78,52 @@ class _ConsentScreenState extends State<ConsentScreen> {
                         padding: const EdgeInsets.only(right: 12.0),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          children: const [
+                          children: [
                             Text(
                               'Introduction & Processing Scope',
-                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.bold, fontSize: 15),
                             ),
-                            SizedBox(height: 8),
+                            const SizedBox(height: 8),
                             Text(
                               'KlinikAid Mobile ("App") is a patient-facing clinical integration system. To digitize your intake records and clinical document submissions, we require your explicit permission to collect and process your personal and sensitive health data.',
-                              style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7), fontSize: 13, height: 1.5),
                             ),
-                            SizedBox(height: 16),
+                            const SizedBox(height: 16),
                             Text(
                               '1. Collected Information',
-                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.bold, fontSize: 14),
                             ),
-                            SizedBox(height: 8),
+                            const SizedBox(height: 8),
                             Text(
                               'We process:\n'
                               '• Personal Identity: Name, contact details, date of birth, gender, and address.\n'
                               '• Health Data: Laboratory results, diagnostic files, and doctor referrals.\n'
                               '• Chatbot Logs: Administrative queries and message histories.',
-                              style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7), fontSize: 13, height: 1.5),
                             ),
-                            SizedBox(height: 16),
+                            const SizedBox(height: 16),
                             Text(
                               '2. Usage & Storage Boundaries',
-                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.bold, fontSize: 14),
                             ),
-                            SizedBox(height: 8),
+                            const SizedBox(height: 8),
                             Text(
                               'Your information is stored in a shared secure cloud database (Supabase) accessed exclusively by authorized clinic personnel at Bloodcare Medical Laboratory.\n\n'
                               'All chatbot transactions are processed on secure servers. Under no circumstances is clinical diagnosis generated by the AI; all medical evaluations stay with clinic staff.',
-                              style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7), fontSize: 13, height: 1.5),
                             ),
-                            SizedBox(height: 16),
+                            const SizedBox(height: 16),
                             Text(
                               '3. Your Rights Under RA 10173',
-                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.bold, fontSize: 14),
                             ),
-                            SizedBox(height: 8),
+                            const SizedBox(height: 8),
                             Text(
                               'You retain the right to:\n'
                               '• Access, inspect, and update your patient record.\n'
                               '• Request restriction or deletion of your data.\n'
                               '• File a complaint with the National Privacy Commission.',
-                              style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7), fontSize: 13, height: 1.5),
                             ),
                           ],
                         ),
@@ -135,35 +135,29 @@ class _ConsentScreenState extends State<ConsentScreen> {
               const SizedBox(height: 20),
 
               // Checkbox 1: Privacy
-              Theme(
-                data: ThemeData(unselectedWidgetColor: Colors.white30),
-                child: CheckboxListTile(
-                  value: _acceptedPrivacy,
-                  onChanged: (val) => setState(() => _acceptedPrivacy = val ?? false),
-                  title: const Text(
-                    'I read and accept the Data Privacy Statement under RA 10173.',
-                    style: TextStyle(color: Colors.white70, fontSize: 13),
-                  ),
-                  controlAffinity: ListTileControlAffinity.leading,
-                  activeColor: const Color(0xFF2E5BFF),
-                  contentPadding: EdgeInsets.zero,
+              CheckboxListTile(
+                value: _acceptedPrivacy,
+                onChanged: (val) => setState(() => _acceptedPrivacy = val ?? false),
+                title: Text(
+                  'I read and accept the Data Privacy Statement under RA 10173.',
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7), fontSize: 13),
                 ),
+                controlAffinity: ListTileControlAffinity.leading,
+                activeColor: Theme.of(context).colorScheme.primary,
+                contentPadding: EdgeInsets.zero,
               ),
 
               // Checkbox 2: Terms
-              Theme(
-                data: ThemeData(unselectedWidgetColor: Colors.white30),
-                child: CheckboxListTile(
-                  value: _acceptedTerms,
-                  onChanged: (val) => setState(() => _acceptedTerms = val ?? false),
-                  title: const Text(
-                    'I agree to the Terms of Service of KlinikAid.',
-                    style: TextStyle(color: Colors.white70, fontSize: 13),
-                  ),
-                  controlAffinity: ListTileControlAffinity.leading,
-                  activeColor: const Color(0xFF2E5BFF),
-                  contentPadding: EdgeInsets.zero,
+              CheckboxListTile(
+                value: _acceptedTerms,
+                onChanged: (val) => setState(() => _acceptedTerms = val ?? false),
+                title: Text(
+                  'I agree to the Terms of Service of KlinikAid.',
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7), fontSize: 13),
                 ),
+                controlAffinity: ListTileControlAffinity.leading,
+                activeColor: Theme.of(context).colorScheme.primary,
+                contentPadding: EdgeInsets.zero,
               ),
               const SizedBox(height: 20),
 
@@ -172,13 +166,13 @@ class _ConsentScreenState extends State<ConsentScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.redAccent.withValues(alpha: 0.1),
+                    color: Theme.of(context).colorScheme.error.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.redAccent.withValues(alpha: 0.3)),
+                    border: Border.all(color: Theme.of(context).colorScheme.error.withValues(alpha: 0.3)),
                   ),
                   child: Text(
                     authProvider.errorMessage!,
-                    style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+                    style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 13),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -192,20 +186,20 @@ class _ConsentScreenState extends State<ConsentScreen> {
                       ? _submit
                       : null,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2E5BFF),
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: const Color(0xFF2E5BFF).withValues(alpha: 0.3),
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                    disabledBackgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12.0),
                     ),
                   ),
                   child: authProvider.isLoading
-                      ? const SizedBox(
+                      ? SizedBox(
                           height: 24,
                           width: 24,
                           child: CircularProgressIndicator(
                             strokeWidth: 2.5,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.onPrimary),
                           ),
                         )
                       : const Text(
@@ -220,7 +214,7 @@ class _ConsentScreenState extends State<ConsentScreen> {
               TextButton(
                 onPressed: () => authProvider.signOut(),
                 style: TextButton.styleFrom(
-                  foregroundColor: Colors.white54,
+                  foregroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                 ),
                 child: const Text('Cancel & Sign Out'),
               ),

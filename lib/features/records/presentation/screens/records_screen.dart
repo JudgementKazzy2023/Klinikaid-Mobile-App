@@ -30,24 +30,23 @@ class _RecordsScreenState extends State<RecordsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0E14),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           'My Medical Records',
           style: TextStyle(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.primary,
             fontWeight: FontWeight.bold,
-            fontFamily: 'Outfit',
           ),
         ),
-        backgroundColor: const Color(0xFF0F131D),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
       ),
       body: Consumer<RecordsProvider>(
         builder: (context, provider, child) {
           if (provider.isLoading) {
-            return const Center(
-              child: CircularProgressIndicator(color: Color(0xFF2E5BFF)),
+            return Center(
+              child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary),
             );
           }
 
@@ -58,20 +57,17 @@ class _RecordsScreenState extends State<RecordsScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 48),
+                    Icon(Icons.error_outline_rounded, color: Theme.of(context).colorScheme.error, size: 48),
                     const SizedBox(height: 16),
                     Text(
                       provider.errorMessage!,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white70, fontFamily: 'Outfit'),
+                      style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7)),
                     ),
                     const SizedBox(height: 16),
                     ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF2E5BFF),
-                      ),
                       onPressed: _loadRecords,
-                      child: const Text('Try Again', style: TextStyle(color: Colors.white)),
+                      child: const Text('Try Again'),
                     ),
                   ],
                 ),
@@ -82,7 +78,7 @@ class _RecordsScreenState extends State<RecordsScreen> {
           if (provider.records.isEmpty) {
             return RefreshIndicator(
               onRefresh: () async => _loadRecords(),
-              color: const Color(0xFF2E5BFF),
+              color: Theme.of(context).colorScheme.primary,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 children: [
@@ -96,33 +92,31 @@ class _RecordsScreenState extends State<RecordsScreen> {
                           Container(
                             padding: const EdgeInsets.all(24),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF2E5BFF).withAlpha(20),
+                              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(
+                            child: Icon(
                               Icons.assignment_turned_in_outlined,
                               size: 64,
-                              color: Color(0xFF2E5BFF),
+                              color: Theme.of(context).colorScheme.primary,
                             ),
                           ),
                           const SizedBox(height: 24),
-                          const Text(
+                          Text(
                             'No Records Found',
                             style: TextStyle(
-                              color: Colors.white,
+                              color: Theme.of(context).colorScheme.onSurface,
                               fontSize: 20,
                               fontWeight: FontWeight.bold,
-                              fontFamily: 'Outfit',
                             ),
                           ),
                           const SizedBox(height: 8),
-                          const Text(
+                          Text(
                             'Your completed lab tests and diagnostic reports will appear here.',
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                              color: Colors.white54,
+                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                               fontSize: 14,
-                              fontFamily: 'Outfit',
                             ),
                           ),
                         ],
@@ -136,7 +130,7 @@ class _RecordsScreenState extends State<RecordsScreen> {
 
           return RefreshIndicator(
             onRefresh: () async => _loadRecords(),
-            color: const Color(0xFF2E5BFF),
+            color: Theme.of(context).colorScheme.primary,
             child: ListView.builder(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),
@@ -154,15 +148,9 @@ class _RecordsScreenState extends State<RecordsScreen> {
 
   Widget _buildRecordCard(DepartmentRecord record) {
     return Card(
-      color: const Color(0xFF0F131D),
-      surfaceTintColor: Colors.transparent,
       margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: Colors.white.withAlpha(5), width: 1),
-      ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         onTap: () => _showRecordDetails(record),
         child: Padding(
           padding: const EdgeInsets.all(16.0),
@@ -175,16 +163,15 @@ class _RecordsScreenState extends State<RecordsScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF2E5BFF).withAlpha(20),
+                      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
                       record.department.name.toUpperCase(),
-                      style: const TextStyle(
-                        color: Color(0xFF2E5BFF),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
-                        fontFamily: 'Outfit',
                       ),
                     ),
                   ),
@@ -194,36 +181,33 @@ class _RecordsScreenState extends State<RecordsScreen> {
               const SizedBox(height: 12),
               Text(
                 record.testType,
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  fontFamily: 'Outfit',
                 ),
               ),
               const SizedBox(height: 8),
               Text(
                 'Date: ${record.createdAt.toLocal().toString().substring(0, 16)}',
-                style: const TextStyle(
-                  color: Colors.white38,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                   fontSize: 13,
-                  fontFamily: 'Outfit',
                 ),
               ),
               const SizedBox(height: 8),
-              const Row(
+              Row(
                 children: [
                   Text(
                     'View Details',
                     style: TextStyle(
-                      color: Color(0xFF2E5BFF),
+                      color: Theme.of(context).colorScheme.primary,
                       fontSize: 13,
                       fontWeight: FontWeight.bold,
-                      fontFamily: 'Outfit',
                     ),
                   ),
-                  SizedBox(width: 4),
-                  Icon(Icons.arrow_forward_rounded, color: Color(0xFF2E5BFF), size: 14),
+                  const SizedBox(width: 4),
+                  Icon(Icons.arrow_forward_rounded, color: Theme.of(context).colorScheme.primary, size: 14),
                 ],
               ),
             ],
@@ -234,34 +218,36 @@ class _RecordsScreenState extends State<RecordsScreen> {
   }
 
   Widget _buildStatusBadge(ReferenceRangeStatus status) {
-    Color color;
+    Color bgColor;
+    Color fgColor;
     switch (status) {
       case ReferenceRangeStatus.normal:
-        color = const Color(0xFF30D158);
+        bgColor = Theme.of(context).colorScheme.primary;
+        fgColor = Theme.of(context).colorScheme.onPrimary;
         break;
       case ReferenceRangeStatus.criticalHigh:
       case ReferenceRangeStatus.criticalLow:
-        color = const Color(0xFFFF453A);
+        bgColor = Theme.of(context).colorScheme.error;
+        fgColor = Colors.white;
         break;
       case ReferenceRangeStatus.inconclusive:
-        color = const Color(0xFFFF9F0A);
+        bgColor = Theme.of(context).colorScheme.secondary;
+        fgColor = Theme.of(context).colorScheme.onSurface;
         break;
     }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withAlpha(15),
+        color: bgColor,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withAlpha(30), width: 1),
       ),
       child: Text(
         status.name.toUpperCase().replaceAll('_', ' '),
         style: TextStyle(
-          color: color,
+          color: fgColor,
           fontSize: 10,
           fontWeight: FontWeight.bold,
-          fontFamily: 'Outfit',
         ),
       ),
     );
@@ -270,7 +256,7 @@ class _RecordsScreenState extends State<RecordsScreen> {
   void _showRecordDetails(DepartmentRecord record) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF0F131D),
+      backgroundColor: Theme.of(context).cardColor,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.only(
           topLeft: Radius.circular(24),
@@ -295,7 +281,7 @@ class _RecordsScreenState extends State<RecordsScreen> {
                       width: 40,
                       height: 4,
                       decoration: BoxDecoration(
-                        color: Colors.white24,
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
@@ -304,47 +290,55 @@ class _RecordsScreenState extends State<RecordsScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        record.testType,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          fontFamily: 'Outfit',
+                      Expanded(
+                        child: Text(
+                          record.testType,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
+                      const SizedBox(width: 12),
                       _buildStatusBadge(record.referenceRangeStatus),
                     ],
                   ),
                   const SizedBox(height: 6),
                   Text(
                     'Department: ${record.department.name.toUpperCase()}',
-                    style: const TextStyle(color: Colors.white54, fontSize: 14, fontFamily: 'Outfit'),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                      fontSize: 14,
+                    ),
                   ),
-                  const Divider(color: Colors.white10, height: 32),
+                  Divider(color: Theme.of(context).colorScheme.outline, height: 32),
                   
                   // Constraint #5: Strictly read-only key-value list (no charts or diagnoses)
-                  const Text(
+                  Text(
                     'Test Results',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.onSurface,
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      fontFamily: 'Outfit',
                     ),
                   ),
                   const SizedBox(height: 12),
                   if (record.testResults.isEmpty)
-                    const Text(
+                    Text(
                       'No quantitative values recorded.',
-                      style: TextStyle(color: Colors.white38, fontSize: 14, fontStyle: FontStyle.italic, fontFamily: 'Outfit'),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
+                        fontSize: 14,
+                        fontStyle: FontStyle.italic,
+                      ),
                     )
                   else
                     Container(
                       decoration: BoxDecoration(
-                        color: const Color(0xFF0B0E14),
+                        color: Theme.of(context).scaffoldBackgroundColor,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white.withAlpha(5), width: 1),
+                        border: Border.all(color: Theme.of(context).colorScheme.outline, width: 1),
                       ),
                       child: Table(
                         columnWidths: const {
@@ -352,7 +346,7 @@ class _RecordsScreenState extends State<RecordsScreen> {
                           1: FlexColumnWidth(1.0),
                         },
                         border: TableBorder.symmetric(
-                          inside: BorderSide(color: Colors.white.withAlpha(5), width: 1),
+                          inside: BorderSide(color: Theme.of(context).colorScheme.outline, width: 1),
                         ),
                         children: record.testResults.entries.map((entry) {
                           return TableRow(
@@ -361,11 +355,10 @@ class _RecordsScreenState extends State<RecordsScreen> {
                                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                                 child: Text(
                                   entry.key.replaceAll('_', ' ').toUpperCase(),
-                                  style: const TextStyle(
-                                    color: Colors.white70,
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
                                     fontSize: 13,
                                     fontWeight: FontWeight.bold,
-                                    fontFamily: 'Outfit',
                                   ),
                                 ),
                               ),
@@ -373,10 +366,9 @@ class _RecordsScreenState extends State<RecordsScreen> {
                                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                                 child: Text(
                                   entry.value.toString(),
-                                  style: const TextStyle(
-                                    color: Colors.white,
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.onSurface,
                                     fontSize: 14,
-                                    fontFamily: 'Outfit',
                                   ),
                                 ),
                               ),
@@ -388,13 +380,12 @@ class _RecordsScreenState extends State<RecordsScreen> {
                   
                   const SizedBox(height: 24),
                   if (record.notes != null && record.notes!.isNotEmpty) ...[
-                    const Text(
+                    Text(
                       'Notes',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.onSurface,
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
-                        fontFamily: 'Outfit',
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -402,16 +393,15 @@ class _RecordsScreenState extends State<RecordsScreen> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF0B0E14),
+                        color: Theme.of(context).scaffoldBackgroundColor,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
                         record.notes!,
-                        style: const TextStyle(
-                          color: Colors.white70,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
                           fontSize: 14,
                           height: 1.4,
-                          fontFamily: 'Outfit',
                         ),
                       ),
                     ),
@@ -425,22 +415,17 @@ class _RecordsScreenState extends State<RecordsScreen> {
                       width: double.infinity,
                       child: ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2E5BFF),
-                          foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
                         ),
                         icon: const Icon(Icons.picture_as_pdf_rounded),
-                        label: const Text('Open Result Attachment', style: TextStyle(fontFamily: 'Outfit')),
+                        label: const Text('Open Result Attachment'),
                         onPressed: () {
                           // Standard detail: in a real environment it loads pdfx,
                           // we trigger a snackbar for demo showing it would load the file.
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text('Loading report attachment: ${record.testResults['pdf_path']}'),
-                              backgroundColor: const Color(0xFF0F131D),
+                              backgroundColor: Theme.of(context).colorScheme.primary,
                             ),
                           );
                         },

@@ -30,24 +30,23 @@ class _DocumentStatusScreenState extends State<DocumentStatusScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0E14),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           'Document Submissions',
           style: TextStyle(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.primary,
             fontWeight: FontWeight.bold,
-            fontFamily: 'Outfit',
           ),
         ),
-        backgroundColor: const Color(0xFF0F131D),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
       ),
       body: Consumer<DocumentStatusProvider>(
         builder: (context, provider, child) {
           if (provider.isLoading && provider.documents.isEmpty) {
-            return const Center(
-              child: CircularProgressIndicator(color: Color(0xFF2E5BFF)),
+            return Center(
+              child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary),
             );
           }
 
@@ -58,20 +57,17 @@ class _DocumentStatusScreenState extends State<DocumentStatusScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 48),
+                    Icon(Icons.error_outline_rounded, color: Theme.of(context).colorScheme.error, size: 48),
                     const SizedBox(height: 16),
                     Text(
                       provider.errorMessage!,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white70, fontFamily: 'Outfit'),
+                      style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7)),
                     ),
                     const SizedBox(height: 16),
                     ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF2E5BFF),
-                      ),
                       onPressed: _loadDocuments,
-                      child: const Text('Try Again', style: TextStyle(color: Colors.white)),
+                      child: const Text('Try Again'),
                     ),
                   ],
                 ),
@@ -81,7 +77,7 @@ class _DocumentStatusScreenState extends State<DocumentStatusScreen> {
 
           return RefreshIndicator(
             onRefresh: () async => _loadDocuments(),
-            color: const Color(0xFF2E5BFF),
+            color: Theme.of(context).colorScheme.primary,
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),
@@ -103,17 +99,18 @@ class _DocumentStatusScreenState extends State<DocumentStatusScreen> {
   }
 
   Widget _buildRealtimeBanner(DocumentStatusProvider provider) {
+    final isOffline = provider.isOffline;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: provider.isOffline
-            ? const Color(0xFFFF9900).withAlpha(15)
-            : const Color(0xFF2E5BFF).withAlpha(15),
+        color: isOffline
+            ? Colors.orange.withValues(alpha: 0.1)
+            : Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: provider.isOffline
-              ? const Color(0xFFFF9900).withAlpha(30)
-              : const Color(0xFF2E5BFF).withAlpha(30),
+          color: isOffline
+              ? Colors.orange.withValues(alpha: 0.3)
+              : Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
           width: 1,
         ),
       ),
@@ -123,21 +120,20 @@ class _DocumentStatusScreenState extends State<DocumentStatusScreen> {
             width: 8,
             height: 8,
             decoration: BoxDecoration(
-              color: provider.isOffline ? const Color(0xFFFF9900) : const Color(0xFF00E676),
+              color: isOffline ? Colors.orange : Colors.green,
               shape: BoxShape.circle,
             ),
           ),
           const SizedBox(width: 8),
           Text(
-            provider.isOffline
+            isOffline
                 ? 'OFFLINE MODE - Caching active'
                 : 'LIVE REALTIME MONITOR ACTIVE',
             style: TextStyle(
-              color: provider.isOffline ? const Color(0xFFFF9900) : const Color(0xFF2E5BFF),
+              color: isOffline ? Colors.orange : Theme.of(context).colorScheme.primary,
               fontSize: 11,
               fontWeight: FontWeight.bold,
               letterSpacing: 0.5,
-              fontFamily: 'Outfit',
             ),
           ),
         ],
@@ -150,15 +146,15 @@ class _DocumentStatusScreenState extends State<DocumentStatusScreen> {
     final isApproved = doc.status == DocumentStatus.approved;
 
     return Card(
-      color: const Color(0xFF0F131D),
+      color: Theme.of(context).cardColor,
       surfaceTintColor: Colors.transparent,
       margin: const EdgeInsets.only(bottom: 16),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
           color: isRejected
-              ? const Color(0xFFFF453A).withAlpha(30)
-              : (isApproved ? const Color(0xFF30D158).withAlpha(30) : Colors.white.withAlpha(5)),
+              ? Theme.of(context).colorScheme.error.withValues(alpha: 0.3)
+              : (isApproved ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.3) : Theme.of(context).colorScheme.outline),
           width: 1.2,
         ),
       ),
@@ -175,11 +171,10 @@ class _DocumentStatusScreenState extends State<DocumentStatusScreen> {
                     doc.fileName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurface,
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      fontFamily: 'Outfit',
                     ),
                   ),
                 ),
@@ -190,47 +185,44 @@ class _DocumentStatusScreenState extends State<DocumentStatusScreen> {
             const SizedBox(height: 8),
             Text(
               'Submitted: ${doc.createdAt.toLocal().toString().substring(0, 16)}',
-              style: const TextStyle(
-                color: Colors.white38,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                 fontSize: 12,
-                fontFamily: 'Outfit',
               ),
             ),
             const SizedBox(height: 4),
             Text(
               'Format: ${doc.fileType.toUpperCase()}',
-              style: const TextStyle(
-                color: Colors.white38,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                 fontSize: 12,
-                fontFamily: 'Outfit',
               ),
             ),
 
-            // If rejected, show the rejection reason in a clean alert box (Reconciliation rule)
+            // If rejected, show the rejection reason in a clean alert box
             if (isRejected && doc.rejectionReason != null && doc.rejectionReason!.isNotEmpty) ...[
-              const Divider(color: Colors.white10, height: 24),
+              Divider(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.5), height: 24),
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFF453A).withAlpha(15),
+                  color: Theme.of(context).colorScheme.error.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFFF453A).withAlpha(30), width: 1),
+                  border: Border.all(color: Theme.of(context).colorScheme.error.withValues(alpha: 0.2), width: 1),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
-                      children: const [
-                        Icon(Icons.report_problem_rounded, color: Color(0xFFFF453A), size: 16),
-                        SizedBox(width: 8),
+                      children: [
+                        Icon(Icons.report_problem_rounded, color: Theme.of(context).colorScheme.error, size: 16),
+                        const SizedBox(width: 8),
                         Text(
                           'Rejection Reason:',
                           style: TextStyle(
-                            color: Color(0xFFFF453A),
+                            color: Theme.of(context).colorScheme.error,
                             fontWeight: FontWeight.bold,
                             fontSize: 13,
-                            fontFamily: 'Outfit',
                           ),
                         ),
                       ],
@@ -238,11 +230,10 @@ class _DocumentStatusScreenState extends State<DocumentStatusScreen> {
                     const SizedBox(height: 6),
                     Text(
                       doc.rejectionReason!,
-                      style: const TextStyle(
-                        color: Colors.white70,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface,
                         fontSize: 13,
                         height: 1.4,
-                        fontFamily: 'Outfit',
                       ),
                     ),
                   ],
@@ -256,33 +247,35 @@ class _DocumentStatusScreenState extends State<DocumentStatusScreen> {
   }
 
   Widget _buildStatusBadge(DocumentStatus status) {
-    Color color;
+    Color bgColor;
+    Color fgColor;
     switch (status) {
       case DocumentStatus.pending:
-        color = const Color(0xFFFF9F0A);
+        bgColor = Theme.of(context).colorScheme.secondary;
+        fgColor = Theme.of(context).colorScheme.onSurface;
         break;
       case DocumentStatus.approved:
-        color = const Color(0xFF30D158);
+        bgColor = Theme.of(context).colorScheme.primary;
+        fgColor = Theme.of(context).colorScheme.onPrimary;
         break;
       case DocumentStatus.rejected:
-        color = const Color(0xFFFF453A);
+        bgColor = Theme.of(context).colorScheme.error;
+        fgColor = Colors.white;
         break;
     }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withAlpha(15),
+        color: bgColor,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withAlpha(30), width: 1),
       ),
       child: Text(
         status.name.toUpperCase(),
         style: TextStyle(
-          color: color,
+          color: fgColor,
           fontSize: 10,
           fontWeight: FontWeight.bold,
-          fontFamily: 'Outfit',
         ),
       ),
     );
@@ -298,33 +291,31 @@ class _DocumentStatusScreenState extends State<DocumentStatusScreen> {
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: Colors.white.withAlpha(5),
+                color: Theme.of(context).colorScheme.secondary.withValues(alpha: 0.3),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.history_rounded,
                 size: 64,
-                color: Colors.white24,
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.38),
               ),
             ),
             const SizedBox(height: 24),
-            const Text(
+            Text(
               'No Submissions Yet',
               style: TextStyle(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.onSurface,
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                fontFamily: 'Outfit',
               ),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Uploaded referrals and diagnostics status logs will render here.',
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: Colors.white38,
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                 fontSize: 13,
-                fontFamily: 'Outfit',
               ),
             ),
           ],

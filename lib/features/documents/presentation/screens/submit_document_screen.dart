@@ -120,22 +120,22 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
     final patient = authProvider.patient;
     
     if (patient == null) {
-      return const Scaffold(
-        backgroundColor: Color(0xFF0B0E14),
+      return Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         body: Center(
-          child: CircularProgressIndicator(color: Color(0xFF2E5BFF)),
+          child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary),
         ),
       );
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0E14),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           'Submit Document',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontFamily: 'Outfit'),
+          style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold),
         ),
-        backgroundColor: const Color(0xFF0F131D),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
       ),
       body: Consumer<DocumentSubmissionProvider>(
@@ -154,13 +154,12 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
                 
                 // Queued Offline Documents Section
                 if (provider.queuedSubmissions.isNotEmpty || provider.orphanedSubmissions.isNotEmpty) ...[
-                  const Text(
+                  Text(
                     'Offline Sync Queue',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.onSurface,
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      fontFamily: 'Outfit',
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -180,43 +179,41 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
       width: double.infinity,
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F131D),
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.05), width: 1),
+        border: Border.all(color: Theme.of(context).colorScheme.outline, width: 1),
       ),
       child: Column(
         children: [
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: const Color(0xFF2E5BFF).withValues(alpha: 0.1),
+              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: const Icon(
+            child: Icon(
               Icons.cloud_upload_outlined,
               size: 48,
-              color: Color(0xFF2E5BFF),
+              color: Theme.of(context).colorScheme.primary,
             ),
           ),
           const SizedBox(height: 20),
-          const Text(
+          Text(
             'Upload Diagnostic Referrals',
             style: TextStyle(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.onSurface,
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              fontFamily: 'Outfit',
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Capture a document with your camera or select from gallery. On-device AI will process details before uploading.',
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: Colors.white54,
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
               fontSize: 13,
               height: 1.4,
-              fontFamily: 'Outfit',
             ),
           ),
           const SizedBox(height: 24),
@@ -225,28 +222,28 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
               Expanded(
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2E5BFF),
-                    foregroundColor: Colors.white,
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   onPressed: () => _pickImage(ImageSource.camera, patient),
                   icon: const Icon(Icons.camera_alt_outlined, size: 20),
-                  label: const Text('Camera', style: TextStyle(fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
+                  label: const Text('Camera', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ),
               const SizedBox(width: 16),
               Expanded(
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+                    foregroundColor: Theme.of(context).colorScheme.primary,
+                    side: BorderSide(color: Theme.of(context).colorScheme.outline),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   onPressed: () => _pickImage(ImageSource.gallery, patient),
                   icon: const Icon(Icons.photo_library_outlined, size: 20),
-                  label: const Text('Gallery', style: TextStyle(fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
+                  label: const Text('Gallery', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ),
             ],
@@ -266,9 +263,9 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F131D),
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.05), width: 1),
+        border: Border.all(color: Theme.of(context).colorScheme.outline, width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -276,12 +273,12 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
+              Text(
                 'Document Review',
-                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'Outfit'),
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.bold),
               ),
               IconButton(
-                icon: const Icon(Icons.close_rounded, color: Colors.white54),
+                icon: Icon(Icons.close_rounded, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
                 onPressed: provider.isLoading ? null : _clearSelection,
               ),
             ],
@@ -309,21 +306,21 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 24.0),
                 child: Column(
-                  children: const [
-                    CircularProgressIndicator(color: Color(0xFF2E5BFF)),
-                    SizedBox(height: 12),
+                  children: [
+                    CircularProgressIndicator(color: Theme.of(context).colorScheme.primary),
+                    const SizedBox(height: 12),
                     Text(
                       'AI Processing document OCR on-device...',
-                      style: TextStyle(color: Colors.white54, fontSize: 13, fontFamily: 'Outfit'),
+                      style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 13),
                     ),
                   ],
                 ),
               ),
             )
           else ...[
-            const Text(
+            Text(
               'On-Device AI Quality Pre-Screen',
-              style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.bold, fontFamily: 'Outfit'),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
             
@@ -338,19 +335,19 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFF9500).withValues(alpha: 0.1),
+                  color: Colors.orange.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFFF9500).withValues(alpha: 0.2)),
+                  border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Icon(Icons.warning_amber_rounded, color: Color(0xFFFF9500), size: 18),
-                    SizedBox(width: 8),
+                  children: [
+                    const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 18),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'Some required clinical details could not be detected. Ensure the document is legible, or re-capture if blurry.',
-                        style: TextStyle(color: Color(0xFFFF9500), fontSize: 11, height: 1.4, fontFamily: 'Outfit'),
+                        style: TextStyle(color: Colors.orange.shade800, fontSize: 11, height: 1.4),
                       ),
                     ),
                   ],
@@ -364,32 +361,32 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
                 Expanded(
                   child: OutlinedButton(
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white54,
-                      side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+                      foregroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                      side: BorderSide(color: Theme.of(context).colorScheme.outline),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     onPressed: provider.isLoading ? null : () => _pickImage(ImageSource.camera, patient),
-                    child: const Text('Retake', style: TextStyle(fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
+                    child: const Text('Retake', style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2E5BFF),
-                      foregroundColor: Colors.white,
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     onPressed: provider.isLoading ? null : () => _submit(patient),
                     child: provider.isLoading
-                        ? const SizedBox(
+                        ? SizedBox(
                             height: 18,
                             width: 18,
-                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                            child: CircularProgressIndicator(color: Theme.of(context).colorScheme.onPrimary, strokeWidth: 2),
                           )
-                        : const Text('Submit Request', style: TextStyle(fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
+                        : const Text('Submit Request', style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ),
               ],
@@ -407,7 +404,7 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
         children: [
           Icon(
             matches ? Icons.check_circle_outline_rounded : Icons.info_outline_rounded,
-            color: matches ? const Color(0xFF34C759) : const Color(0xFFFF9500),
+            color: matches ? Theme.of(context).colorScheme.primary : Colors.orange,
             size: 20,
           ),
           const SizedBox(width: 10),
@@ -415,9 +412,8 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
             child: Text(
               title,
               style: TextStyle(
-                color: matches ? Colors.white70 : Colors.white38,
+                color: matches ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.8) : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
                 fontSize: 13,
-                fontFamily: 'Outfit',
               ),
             ),
           ),
@@ -431,12 +427,12 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F131D),
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isOrphaned 
-              ? const Color(0xFFFF3B30).withValues(alpha: 0.2) 
-              : Colors.white.withValues(alpha: 0.05),
+              ? Theme.of(context).colorScheme.error.withValues(alpha: 0.2) 
+              : Theme.of(context).colorScheme.outline,
           width: 1,
         ),
       ),
@@ -444,7 +440,7 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
         children: [
           Icon(
             isOrphaned ? Icons.account_circle_outlined : Icons.offline_bolt_outlined,
-            color: isOrphaned ? const Color(0xFFFF3B30) : Colors.orange,
+            color: isOrphaned ? Theme.of(context).colorScheme.error : Colors.orange,
             size: 24,
           ),
           const SizedBox(width: 12),
@@ -454,7 +450,7 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
               children: [
                 Text(
                   doc.fileName,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14, fontFamily: 'Outfit'),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.bold, fontSize: 14),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -462,16 +458,15 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
                       ? 'Account Mismatch (Submit blocked)' 
                       : 'Pending reconnect...',
                   style: TextStyle(
-                    color: isOrphaned ? const Color(0xFFFF3B30) : Colors.white54,
+                    color: isOrphaned ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                     fontSize: 11,
-                    fontFamily: 'Outfit',
                   ),
                 ),
               ],
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.delete_outline_rounded, color: Colors.white38, size: 20),
+            icon: Icon(Icons.delete_outline_rounded, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.38), size: 20),
             onPressed: () => provider.removeQueuedItem(doc.id),
           ),
         ],

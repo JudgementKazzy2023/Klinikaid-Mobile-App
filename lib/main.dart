@@ -4,6 +4,7 @@ import 'core/supabase/supabase_client.dart';
 import 'features/auth/presentation/providers/auth_provider.dart';
 import 'core/routing/app_router.dart';
 import 'core/cache/local_database.dart';
+import 'core/theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -51,21 +52,8 @@ class _MyAppState extends State<MyApp> {
       child: MaterialApp.router(
         title: 'KlinikAid',
         debugShowCheckedModeBanner: false,
-        themeMode: ThemeMode.dark, // Default to premium dark theme
-        darkTheme: ThemeData(
-          useMaterial3: true,
-          brightness: Brightness.dark,
-          scaffoldBackgroundColor: const Color(0xFF0B0E14),
-          colorScheme: const ColorScheme.dark(
-            primary: Color(0xFF2E5BFF),
-            secondary: Color(0xFF00C1D4),
-            surface: Color(0xFF0F131D),
-          ),
-          textTheme: const TextTheme(
-            bodyLarge: TextStyle(color: Colors.white, fontFamily: 'Outfit'),
-            bodyMedium: TextStyle(color: Colors.white70, fontFamily: 'Outfit'),
-          ),
-        ),
+        themeMode: ThemeMode.light,
+        theme: AppTheme.lightTheme,
         routerConfig: _appRouter.router,
       ),
     );

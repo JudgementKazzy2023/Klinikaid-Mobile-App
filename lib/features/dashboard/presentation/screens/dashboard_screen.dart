@@ -45,52 +45,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final patient = authProvider.patient;
     
     if (patient == null) {
-      return const Scaffold(
-        backgroundColor: Color(0xFF0B0E14),
+      return Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         body: Center(
-          child: CircularProgressIndicator(color: Color(0xFF2E5BFF)),
+          child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary),
         ),
       );
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0E14),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Consumer<DashboardProvider>(
         builder: (context, provider, child) {
           return RefreshIndicator(
             onRefresh: _refreshData,
-            color: const Color(0xFF2E5BFF),
-            backgroundColor: const Color(0xFF0F131D),
+            color: Theme.of(context).colorScheme.primary,
+            backgroundColor: Theme.of(context).cardColor,
             child: CustomScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               slivers: [
-                // Top App Bar with premium feel
+                // Top App Bar
                 SliverAppBar(
                   expandedHeight: 120.0,
                   floating: false,
                   pinned: true,
-                  backgroundColor: const Color(0xFF0F131D),
+                  backgroundColor: Theme.of(context).scaffoldBackgroundColor,
                   elevation: 0,
                   flexibleSpace: FlexibleSpaceBar(
                     titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
                     title: Text(
                       'KlinikAid',
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.95),
+                        color: Theme.of(context).colorScheme.primary,
                         fontWeight: FontWeight.bold,
-                        fontFamily: 'Outfit',
                         fontSize: 22,
                         letterSpacing: 0.5,
                       ),
                     ),
                     background: Container(
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Color(0xFF0F131D), Color(0xFF0B0E14)],
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                        ),
-                      ),
+                      color: Theme.of(context).scaffoldBackgroundColor,
                     ),
                   ),
                 ),
@@ -102,34 +95,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFF9900).withValues(alpha: 0.15),
+                        color: Colors.orange.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFFFF9900).withValues(alpha: 0.3), width: 1.5),
+                        border: Border.all(color: Colors.orange.withValues(alpha: 0.3), width: 1.5),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.cloud_off_rounded, color: Color(0xFFFF9900), size: 20),
+                          const Icon(Icons.cloud_off_rounded, color: Colors.orange, size: 20),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
-                              children: const [
+                              children: [
                                 Text(
                                   'Offline Mode',
                                   style: TextStyle(
-                                    color: Colors.white,
+                                    color: Theme.of(context).colorScheme.onSurface,
                                     fontWeight: FontWeight.bold,
                                     fontSize: 14,
-                                    fontFamily: 'Outfit',
                                   ),
                                 ),
-                                SizedBox(height: 2),
+                                const SizedBox(height: 2),
                                 Text(
                                   'Displaying cached clinic data. Reconnect to sync.',
                                   style: TextStyle(
-                                    color: Colors.white70,
+                                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
                                     fontSize: 12,
-                                    fontFamily: 'Outfit',
                                   ),
                                 ),
                               ],
@@ -149,16 +140,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       Container(
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF0F131D),
+                          color: Theme.of(context).cardColor,
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.white.withValues(alpha: 0.05), width: 1),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.2),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
+                          border: Border.all(color: Theme.of(context).colorScheme.outline, width: 1),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -166,40 +150,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             Text(
                               _getGreeting(),
                               style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.5),
+                                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                                 fontSize: 14,
-                                fontFamily: 'Outfit',
                               ),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               patient.fullName,
-                              style: const TextStyle(
-                                color: Colors.white,
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurface,
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
-                                fontFamily: 'Outfit',
                               ),
                             ),
                             const SizedBox(height: 12),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF2E5BFF).withValues(alpha: 0.15),
+                                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
-                                children: const [
-                                  Icon(Icons.shield_outlined, color: Color(0xFF2E5BFF), size: 14),
-                                  SizedBox(width: 6),
+                                children: [
+                                  Icon(Icons.shield_outlined, color: Theme.of(context).colorScheme.primary, size: 14),
+                                  const SizedBox(width: 6),
                                   Text(
                                     'BSIT Capstone — KlinikAid Patient Client',
                                     style: TextStyle(
-                                      color: Color(0xFF2E5BFF),
+                                      color: Theme.of(context).colorScheme.primary,
                                       fontSize: 11,
                                       fontWeight: FontWeight.w600,
-                                      fontFamily: 'Outfit',
                                     ),
                                   ),
                                 ],
@@ -211,22 +192,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       
                       const SizedBox(height: 24),
                       
-                      const Text(
+                      Text(
                         'Status Summary',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: Theme.of(context).colorScheme.onSurface,
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
-                          fontFamily: 'Outfit',
                         ),
                       ),
                       const SizedBox(height: 12),
 
                       if (provider.isLoading && provider.pendingDocumentsCount == 0 && provider.activeQueueEntry == null && provider.latestRecord == null)
-                        const Center(
+                        Center(
                           child: Padding(
-                            padding: EdgeInsets.symmetric(vertical: 40.0),
-                            child: CircularProgressIndicator(color: Color(0xFF2E5BFF)),
+                            padding: const EdgeInsets.symmetric(vertical: 40.0),
+                            child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary),
                           ),
                         )
                       else ...[
@@ -235,26 +215,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           context: context,
                           title: 'Pending Submissions',
                           icon: Icons.document_scanner_outlined,
-                          iconColor: const Color(0xFF2E5BFF),
+                          iconColor: Theme.of(context).colorScheme.primary,
                           onTap: () => context.go('/documents/status'),
                           child: Row(
                             children: [
                               Text(
                                 '${provider.pendingDocumentsCount}',
-                                style: const TextStyle(
-                                  color: Colors.white,
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.onSurface,
                                   fontSize: 32,
                                   fontWeight: FontWeight.bold,
-                                  fontFamily: 'Outfit',
                                 ),
                               ),
                               const SizedBox(width: 12),
-                              const Text(
+                              Text(
                                 'Pending document approvals',
                                 style: TextStyle(
-                                  color: Colors.white70,
+                                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
                                   fontSize: 14,
-                                  fontFamily: 'Outfit',
                                 ),
                               ),
                             ],
@@ -268,7 +246,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           context: context,
                           title: 'Triage Queue Status',
                           icon: Icons.people_outline,
-                          iconColor: const Color(0xFF00C1D4),
+                          iconColor: Theme.of(context).colorScheme.primary,
                           onTap: () => context.go('/queue'),
                           child: provider.activeQueueEntry != null
                               ? Column(
@@ -279,11 +257,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       children: [
                                         Text(
                                           'Department: ${provider.activeQueueEntry!.department.toJsonValue().toUpperCase()}',
-                                          style: const TextStyle(
-                                            color: Colors.white,
+                                          style: TextStyle(
+                                            color: Theme.of(context).colorScheme.onSurface,
                                             fontWeight: FontWeight.w600,
                                             fontSize: 14,
-                                            fontFamily: 'Outfit',
                                           ),
                                         ),
                                         _buildPriorityBadge(provider.activeQueueEntry!.priorityLevel),
@@ -292,11 +269,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     const SizedBox(height: 8),
                                     Text(
                                       'Estimated Wait: ${provider.activeQueueEntry!.estimatedWaitMinutes ?? 0} mins',
-                                      style: const TextStyle(
-                                        color: Color(0xFF00C1D4),
+                                      style: TextStyle(
+                                        color: Theme.of(context).colorScheme.primary,
                                         fontSize: 16,
                                         fontWeight: FontWeight.bold,
-                                        fontFamily: 'Outfit',
                                       ),
                                     ),
                                     if (provider.activeQueueEntry!.triageNotes != null) ...[
@@ -305,22 +281,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         'Notes: ${provider.activeQueueEntry!.triageNotes}',
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          color: Colors.white60,
+                                        style: TextStyle(
+                                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                                           fontSize: 12,
                                           fontStyle: FontStyle.italic,
-                                          fontFamily: 'Outfit',
                                         ),
                                       ),
                                     ]
                                   ],
                                 )
-                              : const Text(
+                              : Text(
                                   'Not currently in triage queue.',
                                   style: TextStyle(
-                                    color: Colors.white70,
+                                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
                                     fontSize: 14,
-                                    fontFamily: 'Outfit',
                                   ),
                                 ),
                         ),
@@ -332,7 +306,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           context: context,
                           title: 'Latest Lab Result',
                           icon: Icons.receipt_long_outlined,
-                          iconColor: const Color(0xFF9E00FF),
+                          iconColor: Theme.of(context).colorScheme.primary,
                           onTap: () => context.go('/records'),
                           child: provider.latestRecord != null
                               ? Column(
@@ -340,39 +314,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   children: [
                                     Text(
                                       provider.latestRecord!.testType,
-                                      style: const TextStyle(
-                                        color: Colors.white,
+                                      style: TextStyle(
+                                        color: Theme.of(context).colorScheme.onSurface,
                                         fontWeight: FontWeight.bold,
                                         fontSize: 16,
-                                        fontFamily: 'Outfit',
                                       ),
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
                                       'Department: ${provider.latestRecord!.department.toJsonValue().toUpperCase()}',
-                                      style: const TextStyle(
-                                        color: Colors.white70,
+                                      style: TextStyle(
+                                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
                                         fontSize: 13,
-                                        fontFamily: 'Outfit',
                                       ),
                                     ),
                                     const SizedBox(height: 6),
                                     Text(
                                       'Recorded: ${provider.latestRecord!.createdAt.toLocal().toString().substring(0, 16)}',
-                                      style: const TextStyle(
-                                        color: Colors.white54,
+                                      style: TextStyle(
+                                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                                         fontSize: 12,
-                                        fontFamily: 'Outfit',
                                       ),
                                     ),
                                   ],
                                 )
-                              : const Text(
+                              : Text(
                                   'No clinical records found.',
                                   style: TextStyle(
-                                    color: Colors.white70,
+                                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
                                     fontSize: 14,
-                                    fontFamily: 'Outfit',
                                   ),
                                 ),
                         ),
@@ -403,9 +373,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0xFF0F131D),
+          color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.05), width: 1),
+          border: Border.all(color: Theme.of(context).colorScheme.outline, width: 1),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -416,22 +386,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const SizedBox(width: 10),
                 Text(
                   title,
-                  style: const TextStyle(
-                    color: Colors.white70,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
-                    fontFamily: 'Outfit',
                   ),
                 ),
                 const Spacer(),
                 Icon(
                   Icons.arrow_forward_ios_rounded,
-                  color: Colors.white.withValues(alpha: 0.3),
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3),
                   size: 14,
                 ),
               ],
             ),
-            const Divider(color: Colors.white10, height: 24),
+            Divider(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.5), height: 24),
             child,
           ],
         ),
@@ -466,7 +435,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           color: color,
           fontSize: 10,
           fontWeight: FontWeight.bold,
-          fontFamily: 'Outfit',
         ),
       ),
     );

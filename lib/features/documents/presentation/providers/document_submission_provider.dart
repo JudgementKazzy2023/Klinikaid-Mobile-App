@@ -197,6 +197,10 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     final metadata = _preScreenMetadata ?? preScreenOcrText(ocrText, patient.firstName, patient.lastName);
     
     try {
+      if (isTest) {
+        throw const SocketException('Simulated offline exception for testing');
+      }
+
       // 1. Upload file to Supabase Storage private bucket
       final File file = File(localFilePath);
       if (!await file.exists()) {

@@ -208,20 +208,20 @@ class _AppBottomNavBar extends StatelessWidget {
     final selectedIndex = _calculateSelectedIndex(context);
 
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(
-          top: BorderSide(color: Colors.white10, width: 1),
+          top: BorderSide(color: Theme.of(context).colorScheme.outline, width: 1),
         ),
       ),
       child: BottomNavigationBar(
         currentIndex: selectedIndex,
         onTap: (index) => _onItemTapped(index, context),
-        backgroundColor: const Color(0xFF0F131D),
-        selectedItemColor: const Color(0xFF2E5BFF),
-        unselectedItemColor: Colors.white38,
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        selectedItemColor: Theme.of(context).colorScheme.primary,
+        unselectedItemColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
         type: BottomNavigationBarType.fixed,
-        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, fontFamily: 'Outfit'),
-        unselectedLabelStyle: const TextStyle(fontSize: 11, fontFamily: 'Outfit'),
+        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+        unselectedLabelStyle: const TextStyle(fontSize: 11),
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.dashboard_outlined),
