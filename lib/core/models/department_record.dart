@@ -73,8 +73,15 @@ class DepartmentRecord {
       recorderId: json['recorder_id'] as String,
       department: Department.fromString(json['department'] as String?) ?? Department.laboratory,
       testType: json['test_type'] as String? ?? '',
-      testResults: json['test_results'] as Map<String, dynamic>? ?? {},
-      referenceRangeStatus: ReferenceRangeStatus.fromString(json['reference_range_status'] as String? ?? 'normal'),
+      testResults: json['test_results'] as Map<String, dynamic>? ?? {
+        if (json['test_name'] != null) 'test_name': json['test_name'],
+        if (json['test_value'] != null) 'test_value': json['test_value'],
+        if (json['unit'] != null) 'unit': json['unit'],
+      },
+      referenceRangeStatus: ReferenceRangeStatus.fromString(
+        json['reference_range_status'] as String? ?? 
+        ((json['is_flagged'] as bool? ?? false) ? 'critical_high' : 'normal')
+      ),
       notes: json['notes'] as String?,
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),

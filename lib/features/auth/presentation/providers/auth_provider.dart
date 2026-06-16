@@ -103,10 +103,20 @@ class AuthProvider extends ChangeNotifier {
       return;
     }
 
-    // 2. Evaluate Privacy Consent (check both user metadata and profiles table)
-    final consentAtMetadata = currentUser.userMetadata?['privacy_consent_at'];
+    // 2. Evaluate Privacy Consent (check profiles table, fallback to user metadata with one-time backfill)
     final consentAtProfile = _profile?.acceptedPrivacyAt;
-    _hasConsented = consentAtMetadata != null || consentAtProfile != null;
+    if (consentAtProfile != null) {
+      _hasConsented = true;
+    } else {
+      final consentAtMetadata = currentUser.userMetadata?['privacy_consent_at'];
+      if (consentAtMetadata != null) {
+        _hasConsented = true;
+        // Asynchronous, best-effort back-fill (try-catch wrapped internally)
+        _backfillConsent(currentUser.id, consentAtMetadata);
+      } else {
+        _hasConsented = false;
+      }
+    }
 
     // 3. Evaluate Onboarding Status (linked patients row)
     try {
@@ -115,6 +125,30 @@ class AuthProvider extends ChangeNotifier {
     } catch (_) {
       _patient = null;
       _isOnboarded = false;
+    }
+  }
+
+  /// Performs an asynchronous, best-effort one-time back-fill of consent from metadata to the database.
+  Future<void> _backfillConsent(String userId, String metadataTimestamp) async {
+    try {
+      final profile = _profile ?? await _profilesRepo.getProfile(userId);
+      final parsedTime = DateTime.tryParse(metadataTimestamp) ?? DateTime.now();
+      final updatedProfile = Profile(
+        id: profile.id,
+        fullName: profile.fullName,
+        role: profile.role,
+        department: profile.department,
+        isActive: profile.isActive,
+        acceptedPrivacyAt: parsedTime,
+        createdAt: profile.createdAt,
+        updatedAt: DateTime.now(),
+      );
+      final newProfile = await _profilesRepo.updateProfile(updatedProfile);
+      _profile = newProfile;
+      notifyListeners();
+    } catch (dbError) {
+      // ignore: avoid_print
+      print('Database profile consent backfill failed (skipped): $dbError');
     }
   }
 
@@ -176,42 +210,28 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Updates user metadata and database profile to record RA 10173 consent acceptance.
+  /// Updates database profile to record RA 10173 consent acceptance.
   Future<bool> acceptConsent() async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      // 1. Update user metadata
-      await _client.auth.updateUser(
-        UserAttributes(
-          data: {
-            'privacy_consent_at': DateTime.now().toIso8601String(),
-          },
-        ),
-      );
-
-      // 2. Update profiles table (with fallback if schema columns are not yet deployed)
+      // 1. Update profiles table (write directly to public.profiles.accepted_privacy_at)
       final currentUser = _user;
       if (currentUser != null) {
-        try {
-          final profile = _profile ?? await _profilesRepo.getProfile(currentUser.id);
-          final updatedProfile = Profile(
-            id: profile.id,
-            fullName: profile.fullName,
-            role: profile.role,
-            department: profile.department,
-            isActive: profile.isActive,
-            acceptedPrivacyAt: DateTime.now(),
-            createdAt: profile.createdAt,
-            updatedAt: DateTime.now(),
-          );
-          _profile = await _profilesRepo.updateProfile(updatedProfile);
-        } catch (dbError) {
-          // ignore: avoid_print
-          print('Database profile consent update skipped (possibly column not deployed yet): $dbError');
-        }
+        final profile = _profile ?? await _profilesRepo.getProfile(currentUser.id);
+        final updatedProfile = Profile(
+          id: profile.id,
+          fullName: profile.fullName,
+          role: profile.role,
+          department: profile.department,
+          isActive: profile.isActive,
+          acceptedPrivacyAt: DateTime.now(),
+          createdAt: profile.createdAt,
+          updatedAt: DateTime.now(),
+        );
+        _profile = await _profilesRepo.updateProfile(updatedProfile);
       }
 
       _hasConsented = true;
