@@ -80,6 +80,29 @@ class AuthProvider extends ChangeNotifier {
       _profile = null;
     }
 
+    // If the profile is admin, block access, sign out, and clear state
+    if (_profile?.role == UserRole.admin) {
+      _errorMessage = 'Admin accounts must sign in via the web portal.';
+      await _client.auth.signOut();
+      _user = null;
+      _session = null;
+      _profile = null;
+      _patient = null;
+      _hasConsented = false;
+      _isOnboarded = false;
+      return;
+    }
+
+    // If staff role, bypass consent and onboarding gates
+    if (_profile?.role == UserRole.receptionist ||
+        _profile?.role == UserRole.departmentStaff ||
+        _profile?.role == UserRole.medicalSpecialist) {
+      _hasConsented = true;
+      _isOnboarded = true;
+      _patient = null;
+      return;
+    }
+
     // 2. Evaluate Privacy Consent (check both user metadata and profiles table)
     final consentAtMetadata = currentUser.userMetadata?['privacy_consent_at'];
     final consentAtProfile = _profile?.acceptedPrivacyAt;
@@ -94,6 +117,7 @@ class AuthProvider extends ChangeNotifier {
       _isOnboarded = false;
     }
   }
+
 
   /// Clear active error messages.
   void clearError() {

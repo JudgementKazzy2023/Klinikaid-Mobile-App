@@ -29,11 +29,30 @@ class _LoginScreenState extends State<LoginScreen> {
         _emailController.text.trim(),
         _passwordController.text,
       );
-      if (success && mounted) {
-        // Redirection is handled automatically by GoRouter via AuthProvider state changes
+      if (!success && mounted) {
+        if (authProvider.errorMessage == 'Admin accounts must sign in via the web portal.') {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AlertDialog(
+              title: const Text('Access Denied'),
+              content: const Text('Admin accounts must sign in via the web portal.'),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    authProvider.clearError();
+                    Navigator.pop(context);
+                  },
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        }
       }
     }
   }
+
 
   @override
   Widget build(BuildContext context) {

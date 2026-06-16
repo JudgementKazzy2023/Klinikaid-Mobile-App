@@ -20,6 +20,10 @@ import '../../features/chatbot/presentation/providers/chatbot_provider.dart';
 import '../../features/dashboard/presentation/providers/dashboard_provider.dart';
 import '../../features/documents/presentation/providers/document_submission_provider.dart';
 import '../cache/local_database.dart';
+import '../models/profile.dart';
+import '../../features/staff/presentation/screens/reception_home_screen.dart';
+import '../../features/staff/presentation/screens/department_home_screen.dart';
+import '../../features/staff/presentation/screens/specialist_home_screen.dart';
 
 /// AppRouter defines the structural gating/redirection rules for the application.
 class AppRouter {
@@ -35,6 +39,7 @@ class AppRouter {
       final hasConsented = authProvider.hasConsented;
       final isOnboarded = authProvider.isOnboarded;
       final isLoading = authProvider.isLoading;
+      final role = authProvider.profile?.role;
 
       final isLoggingIn = state.matchedLocation == '/login';
       final isRegistering = state.matchedLocation == '/register';
@@ -54,30 +59,86 @@ class AppRouter {
         return '/login';
       }
 
-      // 3. Authenticated User gating: Data Privacy Consent Gate (RA 10173)
-      if (!hasConsented) {
-        if (isConsenting) {
-          return null; // Stay on consent screen
+      // 3. Admin Account blocking
+      if (role == UserRole.admin) {
+        return '/login';
+      }
+
+      // 4. Role-based routing
+      if (role == UserRole.patient) {
+        // Enforce Privacy Consent Gate (RA 10173)
+        if (!hasConsented) {
+          if (isConsenting) {
+            return null; // Stay on consent screen
+          }
+          return '/consent';
         }
-        return '/consent';
-      }
 
-      // 4. Onboarding Gate (Patient record check)
-      if (!isOnboarded) {
-        if (isOnboarding) {
-          return null; // Stay on onboarding screen
+        // Onboarding Gate (Patient record check)
+        if (!isOnboarded) {
+          if (isOnboarding) {
+            return null; // Stay on onboarding screen
+          }
+          return '/onboarding';
         }
-        return '/onboarding';
+
+        // Authenticated, Consented & Onboarded Patient redirection
+        if (isLoggingIn || isRegistering || isConsenting || isOnboarding || state.matchedLocation == '/') {
+          return '/patient';
+        }
+
+        // Patient trying to access staff routes is redirected to /patient
+        if (state.matchedLocation.startsWith('/staff/')) {
+          return '/patient';
+        }
+
+        return null; // Allow patient routes
       }
 
-      // 5. Authenticated, Consented & Onboarded User redirection
-      if (isLoggingIn || isRegistering || isConsenting || isOnboarding) {
-        return '/'; // Go to home/dashboard
+      // 5. Staff Roles (receptionist, departmentStaff, medicalSpecialist)
+      if (role == UserRole.receptionist ||
+          role == UserRole.departmentStaff ||
+          role == UserRole.medicalSpecialist) {
+        
+        final isStaffPath = state.matchedLocation.startsWith('/staff/');
+        final isCommonPath = isLoggingIn || isRegistering || isConsenting || isOnboarding;
+
+        // Staff trying to access / or patient routes are routed to their home
+        if (!isStaffPath && !isCommonPath) {
+          if (role == UserRole.receptionist) {
+            return '/staff/reception';
+          } else if (role == UserRole.departmentStaff) {
+            final dept = authProvider.profile?.department?.toJsonValue() ?? 'laboratory';
+            return '/staff/department/$dept';
+          } else if (role == UserRole.medicalSpecialist) {
+            return '/staff/specialist';
+          }
+        }
+
+        // Enforce staff role guards (cross-role isolation)
+        if (role == UserRole.receptionist && state.matchedLocation != '/staff/reception') {
+          return '/staff/reception';
+        }
+        if (role == UserRole.departmentStaff) {
+          final dept = authProvider.profile?.department?.toJsonValue() ?? 'laboratory';
+          if (state.matchedLocation != '/staff/department/$dept') {
+            return '/staff/department/$dept';
+          }
+        }
+        if (role == UserRole.medicalSpecialist && state.matchedLocation != '/staff/specialist') {
+          return '/staff/specialist';
+        }
+
+        return null; // Allow staff routes
       }
 
-      return null; // Allow navigation to target route
+      return null;
     },
     routes: [
+      GoRoute(
+        path: '/',
+        builder: (context, state) => const InitialSplashScreen(),
+      ),
       GoRoute(
         path: '/login',
         builder: (context, state) => const LoginScreen(),
@@ -94,13 +155,28 @@ class AppRouter {
         path: '/onboarding',
         builder: (context, state) => const OnboardingScreen(),
       ),
+      GoRoute(
+        path: '/staff/reception',
+        builder: (context, state) => const ReceptionHomeScreen(),
+      ),
+      GoRoute(
+        path: '/staff/department/:dept',
+        builder: (context, state) {
+          final dept = state.pathParameters['dept'] ?? 'laboratory';
+          return DepartmentHomeScreen(department: dept);
+        },
+      ),
+      GoRoute(
+        path: '/staff/specialist',
+        builder: (context, state) => const SpecialistHomeScreen(),
+      ),
       ShellRoute(
         builder: (context, state, child) {
           return AppShell(child: child);
         },
         routes: [
           GoRoute(
-            path: '/',
+            path: '/patient',
             builder: (context, state) => const DashboardScreen(),
           ),
           GoRoute(
@@ -186,7 +262,7 @@ class _AppBottomNavBar extends StatelessWidget {
   void _onItemTapped(int index, BuildContext context) {
     switch (index) {
       case 0:
-        context.go('/');
+        context.go('/patient');
         break;
       case 1:
         context.go('/submit');
@@ -249,6 +325,65 @@ class _AppBottomNavBar extends StatelessWidget {
             label: 'Profile',
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// InitialSplashScreen serves as the loader interface during startup and session evaluation.
+class InitialSplashScreen extends StatelessWidget {
+  const InitialSplashScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.2)),
+              ),
+              child: Icon(
+                Icons.medical_services_outlined,
+                size: 64,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'KlinikAid',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Connecting you to care...',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 32),
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
