@@ -162,8 +162,7 @@ class AppRouter {
       GoRoute(
         path: '/staff/department/:dept',
         builder: (context, state) {
-          final dept = state.pathParameters['dept'] ?? 'laboratory';
-          return DepartmentHomeScreen(department: dept);
+          return const DepartmentHomeScreen();
         },
       ),
       GoRoute(

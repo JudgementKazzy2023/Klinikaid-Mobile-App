@@ -20,13 +20,13 @@ class _SpecialistHomeScreenState extends State<SpecialistHomeScreen> {
   Color _getDeptColor(Department dept) {
     switch (dept) {
       case Department.laboratory:
-        return Colors.emerald.shade700;
+        return const Color(0xFF047857); // Deep Emerald green
       case Department.imaging:
-        return Colors.indigo.shade700;
+        return const Color(0xFF4338CA); // Deep Indigo
       case Department.ultrasound:
-        return Colors.teal.shade700;
+        return const Color(0xFF0F766E); // Deep Teal
       case Department.ecg:
-        return Colors.rose.shade700;
+        return const Color(0xFFBE123C); // Deep Rose
     }
   }
 
