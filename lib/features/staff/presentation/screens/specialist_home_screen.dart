@@ -72,11 +72,11 @@ class _SpecialistHomeScreenState extends State<SpecialistHomeScreen> {
               ],
             ),
             body: SafeArea(
-              child: provider.isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : isPatientSelected
-                      ? _buildPatientTimeline(context, provider)
-                      : _buildPatientSearch(context, provider),
+              child: isPatientSelected
+                  ? (provider.isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : _buildPatientTimeline(context, provider))
+                  : _buildPatientSearch(context, provider),
             ),
           );
         },
@@ -97,15 +97,26 @@ class _SpecialistHomeScreenState extends State<SpecialistHomeScreen> {
             decoration: InputDecoration(
               hintText: 'Search patient by first or last name...',
               prefixIcon: const Icon(Icons.search_rounded),
-              suffixIcon: _searchController.text.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear_rounded),
-                      onPressed: () {
-                        _searchController.clear();
-                        provider.clearAll();
-                      },
+              suffixIcon: provider.isLoading
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: Padding(
+                        padding: EdgeInsets.all(12.0),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                        ),
+                      ),
                     )
-                  : null,
+                  : _searchController.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear_rounded),
+                          onPressed: () {
+                            _searchController.clear();
+                            provider.clearAll();
+                          },
+                        )
+                      : null,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12.0),
               ),
@@ -119,55 +130,57 @@ class _SpecialistHomeScreenState extends State<SpecialistHomeScreen> {
 
           // Search Results
           Expanded(
-            child: provider.searchResults.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.search_off_rounded,
-                          size: 64,
-                          color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+            child: provider.isLoading && provider.searchResults.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : provider.searchResults.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.search_off_rounded,
+                              size: 64,
+                              color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              _searchController.text.isEmpty
+                                  ? 'Search for a patient to view their medical history.'
+                                  : 'No patients found matching your search.',
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 16),
-                        Text(
-                          _searchController.text.isEmpty
-                              ? 'Search for a patient to view their medical history.'
-                              : 'No patients found matching your search.',
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodyLarge?.copyWith(
-                            color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    itemCount: provider.searchResults.length,
-                    itemBuilder: (context, index) {
-                      final patient = provider.searchResults[index];
-                      return Card(
-                        elevation: 1,
-                        margin: const EdgeInsets.symmetric(vertical: 4.0),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10.0),
-                        ),
-                        child: ListTile(
-                          title: Text(
-                            patient.fullName,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: Text(
-                            'DOB: ${patient.dateOfBirth.toString().substring(0, 10)} | Gender: ${patient.gender.name.toUpperCase()}',
-                          ),
-                          trailing: const Icon(Icons.chevron_right_rounded),
-                          onTap: () {
-                            provider.selectPatient(patient);
-                          },
-                        ),
-                      );
-                    },
-                  ),
+                      )
+                    : ListView.builder(
+                        itemCount: provider.searchResults.length,
+                        itemBuilder: (context, index) {
+                          final patient = provider.searchResults[index];
+                          return Card(
+                            elevation: 1,
+                            margin: const EdgeInsets.symmetric(vertical: 4.0),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10.0),
+                            ),
+                            child: ListTile(
+                              title: Text(
+                                patient.fullName,
+                                style: const TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              subtitle: Text(
+                                'DOB: ${patient.dateOfBirth.toString().substring(0, 10)} | Gender: ${patient.gender.name.toUpperCase()}',
+                              ),
+                              trailing: const Icon(Icons.chevron_right_rounded),
+                              onTap: () {
+                                provider.selectPatient(patient);
+                              },
+                            ),
+                          );
+                        },
+                      ),
           ),
         ],
       ),
