@@ -51,14 +51,23 @@ class StaffQueueRepository {
     }
   }
 
-  /// Retrieves the list of documents that are in a 'pending' state.
-  Future<List<Document>> getPendingDocuments() async {
+  /// Retrieves documents by status, optionally filtering by age.
+  Future<List<Document>> getDocumentsByStatus({
+    required DocumentStatus status,
+    Duration? maxAge,
+  }) async {
     try {
-      final response = await _client
+      var query = _client
           .from('documents')
           .select('*, patient:patients(*)')
-          .eq('status', 'pending')
-          .order('created_at', ascending: false);
+          .eq('status', status.toJsonValue());
+
+      if (maxAge != null) {
+        final cutoff = DateTime.now().toUtc().subtract(maxAge).toIso8601String();
+        query = query.gte('updated_at', cutoff);
+      }
+
+      final response = await query.order('updated_at', ascending: false);
 
       return (response as List)
           .map((json) => Document.fromJson(json as Map<String, dynamic>))
@@ -66,6 +75,11 @@ class StaffQueueRepository {
     } catch (e) {
       throw FailureMapper.fromException(e);
     }
+  }
+
+  /// Retrieves the list of documents that are in a 'pending' state.
+  Future<List<Document>> getPendingDocuments() async {
+    return getDocumentsByStatus(status: DocumentStatus.pending);
   }
 
   /// Updates the approval status of a document, optionally attaching a rejection reason.

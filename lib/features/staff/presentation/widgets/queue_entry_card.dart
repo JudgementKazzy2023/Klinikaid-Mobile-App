@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
 import '../../../../core/models/patient_queue.dart';
+import '../../../../core/utils/triage_notes_formatter.dart';
 
 class QueueEntryCard extends StatelessWidget {
   final PatientQueue entry;
   final List<Widget>? actions;
   final VoidCallback? onTap;
+  final bool showActionButtons;
 
   const QueueEntryCard({
     super.key,
     required this.entry,
     this.actions,
     this.onTap,
+    this.showActionButtons = true,
   });
 
   Color _getPriorityColor(BuildContext context, PriorityLevel priority) {
@@ -20,7 +23,6 @@ class QueueEntryCard extends StatelessWidget {
       case PriorityLevel.urgent:
         return Colors.orange.shade700;
       case PriorityLevel.routine:
-      default:
         return Theme.of(context).colorScheme.primary;
     }
   }
@@ -162,16 +164,22 @@ class QueueEntryCard extends StatelessWidget {
               const SizedBox(height: 8),
 
               // Triage Notes
-              if (entry.triageNotes != null && entry.triageNotes!.isNotEmpty) ...[
-                Text(
-                  'Triage Notes: ${entry.triageNotes}',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontStyle: FontStyle.italic,
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
-                  ),
-                ),
-                const SizedBox(height: 12),
-              ],
+              Builder(
+                builder: (context) {
+                  final notes = extractTriageNotes(entry.triageNotes);
+                  if (notes == null) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12.0),
+                    child: Text(
+                      'Triage Notes: $notes',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontStyle: FontStyle.italic,
+                        color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                      ),
+                    ),
+                  );
+                },
+              ),
 
               // Estimated Wait Minutes & Timestamp
               Row(
@@ -193,7 +201,7 @@ class QueueEntryCard extends StatelessWidget {
               ),
 
               // Custom Action Buttons
-              if (actions != null && actions!.isNotEmpty) ...[
+              if (showActionButtons && actions != null && actions!.isNotEmpty) ...[
                 const Divider(height: 24),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,

@@ -64,36 +64,6 @@ class DepartmentProvider extends ChangeNotifier {
     }
   }
 
-  /// Updates queue status.
-  Future<bool> updateQueueStatus(int queueId, QueueStatus status) async {
-    try {
-      await _repo.updateQueueStatus(queueId, status);
-      // Quietly update local list immediately
-      final index = _queueEntries.indexWhere((q) => q.id == queueId);
-      if (index != -1) {
-        final entry = _queueEntries[index];
-        _queueEntries[index] = PatientQueue(
-          id: entry.id,
-          patientId: entry.patientId,
-          status: status,
-          department: entry.department,
-          triageNotes: entry.triageNotes,
-          priorityLevel: entry.priorityLevel,
-          estimatedWaitMinutes: entry.estimatedWaitMinutes,
-          createdAt: entry.createdAt,
-          updatedAt: DateTime.now(),
-          patient: entry.patient,
-        );
-        notifyListeners();
-      }
-      return true;
-    } catch (e) {
-      _errorMessage = FailureMapper.fromException(e).message;
-      notifyListeners();
-      return false;
-    }
-  }
-
   /// Subscribes to realtime events for today's queue scoped strictly to this department.
   void subscribeQueue() {
     if (_queueChannel != null) return;

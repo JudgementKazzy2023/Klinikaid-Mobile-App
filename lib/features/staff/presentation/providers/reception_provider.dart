@@ -6,6 +6,16 @@ import '../../../../core/models/document.dart';
 import '../../../../core/supabase/supabase_client.dart';
 import '../../data/repositories/staff_queue_repository.dart';
 
+/// Reception provider for the receptionist mobile mode.
+///
+/// As of 2026-06-22, the Today's Queue tab is hidden from the receptionist
+/// UI per joint decision with the web team. The queue list state,
+/// loading methods, and Realtime subscription are preserved here so the
+/// data is available for derived UI elements (notification badges,
+/// summary counts) or for re-enabling the queue tab in a future release.
+///
+/// State changes (Mark Arrived, Approve, Reject, etc.) remain unsupported.
+/// The receptionist mobile mode is fully read-only.
 class ReceptionProvider extends ChangeNotifier {
   final _repo = StaffQueueRepository();
 
@@ -13,6 +23,8 @@ class ReceptionProvider extends ChangeNotifier {
   String? _errorMessage;
   List<PatientQueue> _queueEntries = [];
   List<Document> _pendingDocuments = [];
+  List<Document> _approvedDocuments = [];
+  List<Document> _rejectedDocuments = [];
 
   RealtimeChannel? _queueChannel;
   RealtimeChannel? _documentsChannel;
@@ -21,8 +33,10 @@ class ReceptionProvider extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   List<PatientQueue> get queueEntries => _queueEntries;
   List<Document> get pendingDocuments => _pendingDocuments;
+  List<Document> get approvedDocuments => _approvedDocuments;
+  List<Document> get rejectedDocuments => _rejectedDocuments;
 
-  /// Loads today's queue and pending documents, then sets up independent realtime subscriptions.
+  /// Loads today's queue and documents of all statuses, then sets up independent realtime subscriptions.
   Future<void> loadDashboard() async {
     _isLoading = true;
     _errorMessage = null;
@@ -30,12 +44,16 @@ class ReceptionProvider extends ChangeNotifier {
 
     try {
       final queueFuture = _repo.getQueueForToday();
-      final docsFuture = _repo.getPendingDocuments();
+      final pendingFuture = _repo.getDocumentsByStatus(status: DocumentStatus.pending);
+      final approvedFuture = _repo.getDocumentsByStatus(status: DocumentStatus.approved, maxAge: const Duration(days: 30));
+      final rejectedFuture = _repo.getDocumentsByStatus(status: DocumentStatus.rejected, maxAge: const Duration(days: 30));
 
-      final results = await Future.wait([queueFuture, docsFuture]);
+      final results = await Future.wait([queueFuture, pendingFuture, approvedFuture, rejectedFuture]);
 
       _queueEntries = results[0] as List<PatientQueue>;
       _pendingDocuments = results[1] as List<Document>;
+      _approvedDocuments = results[2] as List<Document>;
+      _rejectedDocuments = results[3] as List<Document>;
 
       _isLoading = false;
       notifyListeners();
@@ -62,64 +80,21 @@ class ReceptionProvider extends ChangeNotifier {
     }
   }
 
-  /// Silently refreshes pending documents.
+  /// Silently refreshes all documents.
   Future<void> quietFetchDocuments() async {
     try {
-      final docs = await _repo.getPendingDocuments();
-      _pendingDocuments = docs;
+      final results = await Future.wait([
+        _repo.getDocumentsByStatus(status: DocumentStatus.pending),
+        _repo.getDocumentsByStatus(status: DocumentStatus.approved, maxAge: const Duration(days: 30)),
+        _repo.getDocumentsByStatus(status: DocumentStatus.rejected, maxAge: const Duration(days: 30)),
+      ]);
+      _pendingDocuments = results[0];
+      _approvedDocuments = results[1];
+      _rejectedDocuments = results[2];
       notifyListeners();
     } catch (e) {
       // ignore: avoid_print
       print('Realtime documents refresh failed: $e');
-    }
-  }
-
-  /// Updates queue status.
-  Future<bool> updateQueueStatus(int queueId, QueueStatus status) async {
-    try {
-      await _repo.updateQueueStatus(queueId, status);
-      // Quietly update local list to reflect changes immediately
-      final index = _queueEntries.indexWhere((q) => q.id == queueId);
-      if (index != -1) {
-        final entry = _queueEntries[index];
-        _queueEntries[index] = PatientQueue(
-          id: entry.id,
-          patientId: entry.patientId,
-          status: status,
-          department: entry.department,
-          triageNotes: entry.triageNotes,
-          priorityLevel: entry.priorityLevel,
-          estimatedWaitMinutes: entry.estimatedWaitMinutes,
-          createdAt: entry.createdAt,
-          updatedAt: DateTime.now(),
-          patient: entry.patient,
-        );
-        notifyListeners();
-      }
-      return true;
-    } catch (e) {
-      _errorMessage = FailureMapper.fromException(e).message;
-      notifyListeners();
-      return false;
-    }
-  }
-
-  /// Approves or rejects a document.
-  Future<bool> updateDocumentStatus(
-    String documentId,
-    DocumentStatus status, {
-    String? rejectionReason,
-  }) async {
-    try {
-      await _repo.updateDocumentStatus(documentId, status, rejectionReason: rejectionReason);
-      // Quietly update local list
-      _pendingDocuments.removeWhere((d) => d.id == documentId);
-      notifyListeners();
-      return true;
-    } catch (e) {
-      _errorMessage = FailureMapper.fromException(e).message;
-      notifyListeners();
-      return false;
     }
   }
 

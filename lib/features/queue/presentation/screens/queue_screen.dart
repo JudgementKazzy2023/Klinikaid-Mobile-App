@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../../../features/auth/presentation/providers/auth_provider.dart';
 import '../../../../core/models/patient_queue.dart';
 import '../providers/queue_provider.dart';
+import '../../../../core/utils/triage_notes_formatter.dart';
 
 class QueueScreen extends StatefulWidget {
   const QueueScreen({super.key});
@@ -240,27 +241,33 @@ class _QueueScreenState extends State<QueueScreen> {
               ),
             ],
           ),
-          if (active.triageNotes != null && active.triageNotes!.isNotEmpty) ...[
-            Divider(color: Theme.of(context).colorScheme.outline, height: 24),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Builder(builder: (context) {
+            final notes = extractTriageNotes(active.triageNotes);
+            if (notes == null) return const SizedBox.shrink();
+            return Column(
               children: [
-                Icon(Icons.notes_rounded, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5), size: 16),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    active.triageNotes!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
-                      fontSize: 13,
-                      height: 1.4,
-                      fontStyle: FontStyle.italic,
+                Divider(color: Theme.of(context).colorScheme.outline, height: 24),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.notes_rounded, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5), size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        notes,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                          fontSize: 13,
+                          height: 1.4,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ],
-            ),
-          ],
+            );
+          }),
         ],
       ),
     );

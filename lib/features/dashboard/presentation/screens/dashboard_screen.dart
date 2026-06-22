@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../features/auth/presentation/providers/auth_provider.dart';
 import '../providers/dashboard_provider.dart';
 import '../../../../core/models/patient_queue.dart';
+import '../../../../core/utils/triage_notes_formatter.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -275,19 +276,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
-                                    if (provider.activeQueueEntry!.triageNotes != null) ...[
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        'Notes: ${provider.activeQueueEntry!.triageNotes}',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
-                                          fontSize: 12,
-                                          fontStyle: FontStyle.italic,
+                                    Builder(builder: (context) {
+                                      final notes = extractTriageNotes(provider.activeQueueEntry!.triageNotes);
+                                      if (notes == null) return const SizedBox.shrink();
+                                      return Padding(
+                                        padding: const EdgeInsets.only(top: 4.0),
+                                        child: Text(
+                                          'Notes: $notes',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                                            fontSize: 12,
+                                            fontStyle: FontStyle.italic,
+                                          ),
                                         ),
-                                      ),
-                                    ]
+                                      );
+                                    }),
                                   ],
                                 )
                               : Text(

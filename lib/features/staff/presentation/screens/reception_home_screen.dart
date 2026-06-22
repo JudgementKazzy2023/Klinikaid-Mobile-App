@@ -4,153 +4,19 @@ import 'package:go_router/go_router.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../providers/reception_provider.dart';
 import '../../../../core/models/patient_queue.dart';
-import '../../../../core/models/document.dart';
 import '../widgets/queue_entry_card.dart';
 import '../widgets/document_review_card.dart';
+import '../../../../core/utils/triage_notes_formatter.dart';
 
 class ReceptionHomeScreen extends StatefulWidget {
-  const ReceptionHomeScreen({super.key});
+  final ReceptionProvider? providerOverride;
+  const ReceptionHomeScreen({super.key, this.providerOverride});
 
   @override
   State<ReceptionHomeScreen> createState() => _ReceptionHomeScreenState();
 }
 
-class _ReceptionHomeScreenState extends State<ReceptionHomeScreen> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
-
-  void _showRejectionDialog(BuildContext context, String documentId, ReceptionProvider provider) {
-    final textController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-            left: 20,
-            right: 20,
-            top: 20,
-          ),
-          child: Form(
-            key: formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Reject Document',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Theme.of(context).colorScheme.error,
-                      ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Please select a rejection reason or type a custom one.',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
-                      ),
-                ),
-                const SizedBox(height: 16),
-                // Predefined Chips
-                Wrap(
-                  spacing: 8.0,
-                  runSpacing: 8.0,
-                  children: [
-                    ActionChip(
-                      label: const Text('Blurry Image'),
-                      backgroundColor: Theme.of(context).colorScheme.surface,
-                      onPressed: () => textController.text = 'Blurry Image',
-                    ),
-                    ActionChip(
-                      label: const Text('Incorrect Document Type'),
-                      backgroundColor: Theme.of(context).colorScheme.surface,
-                      onPressed: () => textController.text = 'Incorrect Document Type',
-                    ),
-                    ActionChip(
-                      label: const Text('Missing Signature'),
-                      backgroundColor: Theme.of(context).colorScheme.surface,
-                      onPressed: () => textController.text = 'Missing Signature',
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                // Rejection Reason Text Field
-                TextFormField(
-                  controller: textController,
-                  maxLength: 200,
-                  maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: 'Rejection Reason',
-                    border: OutlineInputBorder(),
-                    hintText: 'Enter reason for rejection...',
-                  ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Rejection reason is required.';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Cancel'),
-                    ),
-                    const SizedBox(width: 12),
-                    ElevatedButton(
-                      onPressed: () async {
-                        if (formKey.currentState?.validate() ?? false) {
-                          final reason = textController.text.trim();
-                          Navigator.pop(context);
-                          final success = await provider.updateDocumentStatus(
-                            documentId,
-                            DocumentStatus.rejected,
-                            rejectionReason: reason,
-                          );
-                          if (context.mounted && !success) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text(provider.errorMessage ?? 'Failed to reject document.')),
-                            );
-                          }
-                        }
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Theme.of(context).colorScheme.error,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: const Text('Confirm Rejection'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
+class _ReceptionHomeScreenState extends State<ReceptionHomeScreen> {
   void _showQueueDetails(BuildContext context, PatientQueue entry) {
     showDialog(
       context: context,
@@ -171,7 +37,11 @@ class _ReceptionHomeScreenState extends State<ReceptionHomeScreen> with SingleTi
               _buildDetailRow(theme, 'Department', entry.department.toJsonValue().toUpperCase()),
               _buildDetailRow(theme, 'Priority', entry.priorityLevel.toJsonValue().toUpperCase()),
               _buildDetailRow(theme, 'Status', entry.status.name.toUpperCase()),
-              _buildDetailRow(theme, 'Triage Notes', entry.triageNotes ?? 'None'),
+              Builder(builder: (context) {
+                final notes = extractTriageNotes(entry.triageNotes);
+                if (notes == null) return const SizedBox.shrink();
+                return _buildDetailRow(theme, 'Triage Notes', notes);
+              }),
               _buildDetailRow(theme, 'Arrived At', entry.createdAt.toLocal().toString().substring(11, 19)),
               const Divider(height: 24),
               if (patient != null) ...[
@@ -227,10 +97,9 @@ class _ReceptionHomeScreenState extends State<ReceptionHomeScreen> with SingleTi
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
-    final profile = authProvider.profile;
 
     return ChangeNotifierProvider<ReceptionProvider>(
-      create: (_) => ReceptionProvider()..loadDashboard(),
+      create: (_) => widget.providerOverride ?? (ReceptionProvider()..loadDashboard()),
       child: Consumer<ReceptionProvider>(
         builder: (context, provider, _) {
           return Scaffold(
@@ -250,106 +119,11 @@ class _ReceptionHomeScreenState extends State<ReceptionHomeScreen> with SingleTi
                   },
                 ),
               ],
-              bottom: TabBar(
-                controller: _tabController,
-                indicatorColor: Theme.of(context).colorScheme.primary,
-                labelColor: Theme.of(context).colorScheme.primary,
-                unselectedLabelColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
-                tabs: const [
-                  Tab(
-                    icon: Icon(Icons.format_list_bulleted_rounded),
-                    text: 'Today\'s Queue',
-                  ),
-                  Tab(
-                    icon: Icon(Icons.rate_review_outlined),
-                    text: 'Document Reviews',
-                  ),
-                ],
-              ),
             ),
             body: SafeArea(
               child: provider.isLoading
                   ? const Center(child: CircularProgressIndicator())
-                  : TabBarView(
-                      controller: _tabController,
-                      children: [
-                        // Today's Queue Tab
-                        RefreshIndicator(
-                          onRefresh: () => provider.loadDashboard(),
-                          child: provider.queueEntries.isEmpty
-                              ? _buildEmptyState(context, 'No active queue entries today.')
-                              : ListView.builder(
-                                  padding: const EdgeInsets.all(16.0),
-                                  itemCount: provider.queueEntries.length,
-                                  itemBuilder: (context, index) {
-                                    final entry = provider.queueEntries[index];
-                                    return QueueEntryCard(
-                                      entry: entry,
-                                      onTap: () => _showQueueDetails(context, entry),
-                                      actions: entry.status == QueueStatus.waiting
-                                          ? [
-                                              ElevatedButton.icon(
-                                                onPressed: () async {
-                                                  final success = await provider.updateQueueStatus(
-                                                    entry.id,
-                                                    QueueStatus.inProgress,
-                                                  );
-                                                  if (context.mounted && !success) {
-                                                    ScaffoldMessenger.of(context).showSnackBar(
-                                                      SnackBar(
-                                                        content: Text(provider.errorMessage ??
-                                                            'Failed to mark patient as arrived.'),
-                                                      ),
-                                                    );
-                                                  }
-                                                },
-                                                icon: const Icon(Icons.check_circle_outline_rounded, size: 16),
-                                                label: const Text('Mark Arrived'),
-                                                style: ElevatedButton.styleFrom(
-                                                  backgroundColor: Theme.of(context).colorScheme.primary,
-                                                  foregroundColor: Colors.white,
-                                                  visualDensity: VisualDensity.compact,
-                                                ),
-                                              ),
-                                            ]
-                                          : null,
-                                    );
-                                  },
-                                ),
-                        ),
-
-                        // Document Reviews Tab
-                        RefreshIndicator(
-                          onRefresh: () => provider.loadDashboard(),
-                          child: provider.pendingDocuments.isEmpty
-                              ? _buildEmptyState(context, 'No pending documents for review.')
-                              : ListView.builder(
-                                  padding: const EdgeInsets.all(16.0),
-                                  itemCount: provider.pendingDocuments.length,
-                                  itemBuilder: (context, index) {
-                                    final doc = provider.pendingDocuments[index];
-                                    return DocumentReviewCard(
-                                      document: doc,
-                                      onApprove: () async {
-                                        final success = await provider.updateDocumentStatus(
-                                          doc.id,
-                                          DocumentStatus.approved,
-                                        );
-                                        if (context.mounted && !success) {
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            SnackBar(
-                                              content: Text(provider.errorMessage ?? 'Failed to approve document.'),
-                                            ),
-                                          );
-                                        }
-                                      },
-                                      onReject: () => _showRejectionDialog(context, doc.id, provider),
-                                    );
-                                  },
-                                ),
-                        ),
-                      ],
-                    ),
+                  : _buildDocumentsNestedTabs(context, provider),
             ),
           );
         },
@@ -357,7 +131,115 @@ class _ReceptionHomeScreenState extends State<ReceptionHomeScreen> with SingleTi
     );
   }
 
-  Widget _buildEmptyState(BuildContext context, String message) {
+  // Queue tab body. Currently unwired from the UI per project decision
+  // 2026-06-22: queue management is owned by the web portal. The widget,
+  // provider, and Realtime subscription are preserved in case the queue
+  // tab is re-enabled in a future release.
+  // ignore: unused_element
+  Widget _queueTabBody(BuildContext context, ReceptionProvider provider) {
+    return RefreshIndicator(
+      onRefresh: () => provider.loadDashboard(),
+      child: provider.queueEntries.isEmpty
+          ? _buildEmptyState(context, 'No active queue entries today.')
+          : ListView.builder(
+              padding: const EdgeInsets.all(16.0),
+              itemCount: provider.queueEntries.length,
+              itemBuilder: (context, index) {
+                final entry = provider.queueEntries[index];
+                return QueueEntryCard(
+                  entry: entry,
+                  onTap: () => _showQueueDetails(context, entry),
+                  showActionButtons: false,
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _buildDocumentsNestedTabs(BuildContext context, ReceptionProvider provider) {
+    final theme = Theme.of(context);
+    return DefaultTabController(
+      length: 3,
+      child: Column(
+        children: [
+          TabBar(
+            indicatorColor: theme.colorScheme.primary,
+            labelColor: theme.colorScheme.primary,
+            unselectedLabelColor: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+            tabs: const [
+              Tab(text: 'Pending'),
+              Tab(text: 'Approved'),
+              Tab(text: 'Rejected'),
+            ],
+          ),
+          Expanded(
+            child: TabBarView(
+              children: [
+                // Pending Tab
+                RefreshIndicator(
+                  onRefresh: () => provider.loadDashboard(),
+                  child: provider.pendingDocuments.isEmpty
+                      ? _buildEmptyState(
+                          context,
+                          'No pending documents. New submissions will appear here.',
+                          icon: Icons.insert_drive_file_outlined,
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.all(16.0),
+                          itemCount: provider.pendingDocuments.length,
+                          itemBuilder: (context, index) {
+                            final doc = provider.pendingDocuments[index];
+                            return DocumentReviewCard(document: doc);
+                          },
+                        ),
+                ),
+
+                // Approved Tab
+                RefreshIndicator(
+                  onRefresh: () => provider.loadDashboard(),
+                  child: provider.approvedDocuments.isEmpty
+                      ? _buildEmptyState(
+                          context,
+                          'No approved documents in the last 30 days.',
+                          icon: Icons.check_circle_outline_rounded,
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.all(16.0),
+                          itemCount: provider.approvedDocuments.length,
+                          itemBuilder: (context, index) {
+                            final doc = provider.approvedDocuments[index];
+                            return DocumentReviewCard(document: doc);
+                          },
+                        ),
+                ),
+
+                // Rejected Tab
+                RefreshIndicator(
+                  onRefresh: () => provider.loadDashboard(),
+                  child: provider.rejectedDocuments.isEmpty
+                      ? _buildEmptyState(
+                          context,
+                          'No rejected documents in the last 30 days.',
+                          icon: Icons.highlight_off_rounded,
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.all(16.0),
+                          itemCount: provider.rejectedDocuments.length,
+                          itemBuilder: (context, index) {
+                            final doc = provider.rejectedDocuments[index];
+                            return DocumentReviewCard(document: doc);
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context, String message, {IconData icon = Icons.space_dashboard_outlined}) {
     final theme = Theme.of(context);
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -371,7 +253,7 @@ class _ReceptionHomeScreenState extends State<ReceptionHomeScreen> with SingleTi
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
-                  Icons.space_dashboard_outlined,
+                  icon,
                   size: 64,
                   color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
                 ),

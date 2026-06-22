@@ -6,9 +6,11 @@ import '../providers/department_provider.dart';
 import '../../../../core/models/patient_queue.dart';
 import '../../../../core/models/department_record.dart';
 import '../widgets/queue_entry_card.dart';
+import '../../../../core/utils/triage_notes_formatter.dart';
 
 class DepartmentHomeScreen extends StatefulWidget {
-  const DepartmentHomeScreen({super.key});
+  final DepartmentProvider? providerOverride;
+  const DepartmentHomeScreen({super.key, this.providerOverride});
 
   @override
   State<DepartmentHomeScreen> createState() => _DepartmentHomeScreenState();
@@ -49,7 +51,11 @@ class _DepartmentHomeScreenState extends State<DepartmentHomeScreen> with Single
               _buildDetailRow(theme, 'Department', entry.department.toJsonValue().toUpperCase()),
               _buildDetailRow(theme, 'Priority', entry.priorityLevel.toJsonValue().toUpperCase()),
               _buildDetailRow(theme, 'Status', entry.status.name.toUpperCase()),
-              _buildDetailRow(theme, 'Triage Notes', entry.triageNotes ?? 'None'),
+              Builder(builder: (context) {
+                final notes = extractTriageNotes(entry.triageNotes);
+                if (notes == null) return const SizedBox.shrink();
+                return _buildDetailRow(theme, 'Triage Notes', notes);
+              }),
               _buildDetailRow(theme, 'Arrived At', entry.createdAt.toLocal().toString().substring(11, 19)),
               const Divider(height: 24),
               if (patient != null) ...[
@@ -157,7 +163,7 @@ class _DepartmentHomeScreenState extends State<DepartmentHomeScreen> with Single
     final deptName = profile?.department?.toJsonValue() ?? 'laboratory';
 
     return ChangeNotifierProvider<DepartmentProvider>(
-      create: (_) => DepartmentProvider(deptName)..loadDashboard(),
+      create: (_) => widget.providerOverride ?? (DepartmentProvider(deptName)..loadDashboard()),
       child: Consumer<DepartmentProvider>(
         builder: (context, provider, _) {
           return Scaffold(
@@ -213,59 +219,7 @@ class _DepartmentHomeScreenState extends State<DepartmentHomeScreen> with Single
                                     return QueueEntryCard(
                                       entry: entry,
                                       onTap: () => _showQueueDetails(context, entry),
-                                      actions: entry.status == QueueStatus.waiting
-                                          ? [
-                                              ElevatedButton.icon(
-                                                onPressed: () async {
-                                                  final success = await provider.updateQueueStatus(
-                                                    entry.id,
-                                                    QueueStatus.inProgress,
-                                                  );
-                                                  if (context.mounted && !success) {
-                                                    ScaffoldMessenger.of(context).showSnackBar(
-                                                      SnackBar(
-                                                        content: Text(provider.errorMessage ??
-                                                            'Failed to transition queue status.'),
-                                                      ),
-                                                    );
-                                                  }
-                                                },
-                                                icon: const Icon(Icons.play_arrow_rounded, size: 16),
-                                                label: const Text('Start Service'),
-                                                style: ElevatedButton.styleFrom(
-                                                  backgroundColor: Theme.of(context).colorScheme.primary,
-                                                  foregroundColor: Colors.white,
-                                                  visualDensity: VisualDensity.compact,
-                                                ),
-                                              ),
-                                            ]
-                                          : entry.status == QueueStatus.inProgress
-                                              ? [
-                                                  ElevatedButton.icon(
-                                                    onPressed: () async {
-                                                      final success = await provider.updateQueueStatus(
-                                                        entry.id,
-                                                        QueueStatus.completed,
-                                                      );
-                                                      if (context.mounted && !success) {
-                                                        ScaffoldMessenger.of(context).showSnackBar(
-                                                          SnackBar(
-                                                            content: Text(provider.errorMessage ??
-                                                                'Failed to complete queue item.'),
-                                                          ),
-                                                        );
-                                                      }
-                                                    },
-                                                    icon: const Icon(Icons.done_all_rounded, size: 16),
-                                                    label: const Text('Complete'),
-                                                    style: ElevatedButton.styleFrom(
-                                                      backgroundColor: Colors.green.shade700,
-                                                      foregroundColor: Colors.white,
-                                                      visualDensity: VisualDensity.compact,
-                                                    ),
-                                                  ),
-                                                ]
-                                              : null,
+                                      showActionButtons: false,
                                     );
                                   },
                                 ),

@@ -103,20 +103,8 @@ class AuthProvider extends ChangeNotifier {
       return;
     }
 
-    // 2. Evaluate Privacy Consent (check profiles table, fallback to user metadata with one-time backfill)
-    final consentAtProfile = _profile?.acceptedPrivacyAt;
-    if (consentAtProfile != null) {
-      _hasConsented = true;
-    } else {
-      final consentAtMetadata = currentUser.userMetadata?['privacy_consent_at'];
-      if (consentAtMetadata != null) {
-        _hasConsented = true;
-        // Asynchronous, best-effort back-fill (try-catch wrapped internally)
-        _backfillConsent(currentUser.id, consentAtMetadata);
-      } else {
-        _hasConsented = false;
-      }
-    }
+    // 2. Evaluate Privacy Consent (read exclusively from database profiles.accepted_privacy_at)
+    _hasConsented = _profile?.acceptedPrivacyAt != null;
 
     // 3. Evaluate Onboarding Status (linked patients row)
     try {
@@ -125,30 +113,6 @@ class AuthProvider extends ChangeNotifier {
     } catch (_) {
       _patient = null;
       _isOnboarded = false;
-    }
-  }
-
-  /// Performs an asynchronous, best-effort one-time back-fill of consent from metadata to the database.
-  Future<void> _backfillConsent(String userId, String metadataTimestamp) async {
-    try {
-      final profile = _profile ?? await _profilesRepo.getProfile(userId);
-      final parsedTime = DateTime.tryParse(metadataTimestamp) ?? DateTime.now();
-      final updatedProfile = Profile(
-        id: profile.id,
-        fullName: profile.fullName,
-        role: profile.role,
-        department: profile.department,
-        isActive: profile.isActive,
-        acceptedPrivacyAt: parsedTime,
-        createdAt: profile.createdAt,
-        updatedAt: DateTime.now(),
-      );
-      final newProfile = await _profilesRepo.updateProfile(updatedProfile);
-      _profile = newProfile;
-      notifyListeners();
-    } catch (dbError) {
-      // ignore: avoid_print
-      print('Database profile consent backfill failed (skipped): $dbError');
     }
   }
 

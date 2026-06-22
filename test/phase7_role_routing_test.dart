@@ -256,7 +256,8 @@ void main() {
       final appRouter = AppRouter(authProvider);
 
       await tester.pumpWidget(createTestWidget(authProvider, appRouter));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
 
       expect(find.byType(ReceptionHomeScreen), findsOneWidget);
     });
@@ -279,10 +280,11 @@ void main() {
       final appRouter = AppRouter(authProvider);
 
       await tester.pumpWidget(createTestWidget(authProvider, appRouter));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
 
       expect(find.byType(DepartmentHomeScreen), findsOneWidget);
-      expect(find.text('Dept: Laboratory'), findsOneWidget);
+      expect(find.text('LABORATORY Portal'), findsOneWidget);
     });
 
     testWidgets('Medical Specialist role bypasses consent/onboarding and is routed to SpecialistHomeScreen', (tester) async {
@@ -302,7 +304,8 @@ void main() {
       final appRouter = AppRouter(authProvider);
 
       await tester.pumpWidget(createTestWidget(authProvider, appRouter));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
 
       expect(find.byType(SpecialistHomeScreen), findsOneWidget);
     });
@@ -383,11 +386,13 @@ void main() {
       final appRouter = AppRouter(authProvider);
 
       await tester.pumpWidget(createTestWidget(authProvider, appRouter));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
 
       // Attempt manual navigation to patient home /patient
       appRouter.router.go('/patient');
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
 
       // Enforced guard redirects staff back to /staff/reception
       expect(find.byType(ReceptionHomeScreen), findsOneWidget);
@@ -409,11 +414,13 @@ void main() {
       final appRouter = AppRouter(authProvider);
 
       await tester.pumpWidget(createTestWidget(authProvider, appRouter));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
 
       // Attempt manual navigation to department staff route
       appRouter.router.go('/staff/department/laboratory');
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
 
       // Redirected back to /staff/reception
       expect(find.byType(ReceptionHomeScreen), findsOneWidget);
@@ -436,16 +443,18 @@ void main() {
       final appRouter = AppRouter(authProvider);
 
       await tester.pumpWidget(createTestWidget(authProvider, appRouter));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
 
       // Attempt manual navigation to imaging department
       appRouter.router.go('/staff/department/imaging');
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
 
       // Redirected back to /staff/department/laboratory
       expect(find.byType(DepartmentHomeScreen), findsOneWidget);
-      expect(find.text('Dept: Laboratory'), findsOneWidget);
-      expect(find.text('Dept: Imaging'), findsNothing);
+      expect(find.text('LABORATORY Portal'), findsOneWidget);
+      expect(find.text('IMAGING Portal'), findsNothing);
     });
   });
 }

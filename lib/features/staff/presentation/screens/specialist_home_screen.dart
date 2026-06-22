@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../providers/specialist_provider.dart';
-import '../../../../core/models/patient.dart';
 import '../../../../core/models/department_record.dart';
 import '../../../../core/models/profile.dart';
 
@@ -39,7 +38,6 @@ class _SpecialistHomeScreenState extends State<SpecialistHomeScreen> {
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
-    final profile = authProvider.profile;
 
     return ChangeNotifierProvider<SpecialistProvider>(
       create: (_) => SpecialistProvider(),
