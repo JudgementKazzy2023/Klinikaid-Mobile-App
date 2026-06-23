@@ -5,6 +5,7 @@ import '../../../../core/cache/local_database.dart';
 import '../../../../core/errors/failures.dart';
 import '../../../../core/models/department_record.dart';
 import '../../../../core/repositories/department_records_repository.dart';
+import '../../domain/record_grouper.dart';
 
 class RecordsProvider extends ChangeNotifier {
   final LocalDatabase _localDb;
@@ -21,6 +22,7 @@ class RecordsProvider extends ChangeNotifier {
   bool get isOffline => _isOffline;
   String? get errorMessage => _errorMessage;
   List<DepartmentRecord> get records => _records;
+  List<GroupedRecord> get groupedRecords => groupRecords(_records);
 
   /// Fetches clinical records for [patientId]. Online reads are cached locally; offline falls back to cached records.
   Future<void> fetchRecords(String patientId) async {

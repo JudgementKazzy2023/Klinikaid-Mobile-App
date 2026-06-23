@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../../../features/auth/presentation/providers/auth_provider.dart';
 import '../../../../core/models/department_record.dart';
 import '../providers/records_provider.dart';
+import '../../domain/record_grouper.dart';
 
 class RecordsScreen extends StatefulWidget {
   const RecordsScreen({super.key});
@@ -50,7 +51,7 @@ class _RecordsScreenState extends State<RecordsScreen> {
             );
           }
 
-          if (provider.errorMessage != null && provider.records.isEmpty) {
+          if (provider.errorMessage != null && provider.groupedRecords.isEmpty) {
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(24.0),
@@ -75,7 +76,7 @@ class _RecordsScreenState extends State<RecordsScreen> {
             );
           }
 
-          if (provider.records.isEmpty) {
+          if (provider.groupedRecords.isEmpty) {
             return RefreshIndicator(
               onRefresh: () async => _loadRecords(),
               color: Theme.of(context).colorScheme.primary,
@@ -134,9 +135,9 @@ class _RecordsScreenState extends State<RecordsScreen> {
             child: ListView.builder(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),
-              itemCount: provider.records.length,
+              itemCount: provider.groupedRecords.length,
               itemBuilder: (context, index) {
-                final record = provider.records[index];
+                final record = provider.groupedRecords[index];
                 return _buildRecordCard(record);
               },
             ),
@@ -146,75 +147,147 @@ class _RecordsScreenState extends State<RecordsScreen> {
     );
   }
 
-  Widget _buildRecordCard(DepartmentRecord record) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => _showRecordDetails(record),
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
+  Widget _buildRecordCard(GroupedRecord groupedRecord) {
+    if (groupedRecord.isSingleParameter) {
+      final record = groupedRecord.records.first;
+      return Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => _showRecordDetails(groupedRecord),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        record.department.name.toUpperCase(),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
-                    child: Text(
-                      record.department.name.toUpperCase(),
+                    _buildStatusBadge(record.referenceRangeStatus),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  record.testType,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Date: ${record.createdAt.toLocal().toString().substring(0, 16)}',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                    fontSize: 11,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Text(
+                      'View Details',
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.primary,
-                        fontSize: 11,
+                        fontSize: 13,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                  ),
-                  _buildStatusBadge(record.referenceRangeStatus),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                record.testType,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
+                    const SizedBox(width: 4),
+                    Icon(Icons.arrow_forward_rounded, color: Theme.of(context).colorScheme.primary, size: 14),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Date: ${record.createdAt.toLocal().toString().substring(0, 16)}',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
-                  fontSize: 13,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Text(
-                    'View Details',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.primary,
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Icon(Icons.arrow_forward_rounded, color: Theme.of(context).colorScheme.primary, size: 14),
-                ],
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
-    );
+      );
+    } else {
+      return Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => _showRecordDetails(groupedRecord),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        groupedRecord.department.name.toUpperCase(),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    _buildStatusBadge(groupedRecord.aggregateStatus),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  groupedRecord.displayTitle,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Date: ${groupedRecord.records.first.createdAt.toLocal().toString().substring(0, 16)}',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                    fontSize: 11,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Text(
+                      'View Details',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(Icons.arrow_forward_rounded, color: Theme.of(context).colorScheme.primary, size: 14),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
   }
 
   Widget _buildStatusBadge(ReferenceRangeStatus status) {
@@ -253,7 +326,7 @@ class _RecordsScreenState extends State<RecordsScreen> {
     );
   }
 
-  void _showRecordDetails(DepartmentRecord record) {
+  void _showRecordDetails(GroupedRecord groupedRecord) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Theme.of(context).cardColor,
@@ -270,171 +343,315 @@ class _RecordsScreenState extends State<RecordsScreen> {
           maxChildSize: 0.85,
           initialChildSize: 0.6,
           builder: (context, scrollController) {
-            return SingleChildScrollView(
-              controller: scrollController,
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(2),
+            if (groupedRecord.isSingleParameter) {
+              final record = groupedRecord.records.first;
+              return SingleChildScrollView(
+                controller: scrollController,
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 24),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          record.testType,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface,
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
+                    const SizedBox(height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            record.testType,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      _buildStatusBadge(record.referenceRangeStatus),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Department: ${record.department.name.toUpperCase()}',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
-                      fontSize: 14,
+                        const SizedBox(width: 12),
+                        _buildStatusBadge(record.referenceRangeStatus),
+                      ],
                     ),
-                  ),
-                  Divider(color: Theme.of(context).colorScheme.outline, height: 32),
-                  
-                  // Constraint #5: Strictly read-only key-value list (no charts or diagnoses)
-                  Text(
-                    'Test Results',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurface,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  if (record.testResults.isEmpty)
+                    const SizedBox(height: 6),
                     Text(
-                      'No quantitative values recorded.',
+                      'Department: ${record.department.name.toUpperCase()}',
                       style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                         fontSize: 14,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    )
-                  else
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).scaffoldBackgroundColor,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Theme.of(context).colorScheme.outline, width: 1),
-                      ),
-                      child: Table(
-                        columnWidths: const {
-                          0: FlexColumnWidth(1.2),
-                          1: FlexColumnWidth(1.0),
-                        },
-                        border: TableBorder.symmetric(
-                          inside: BorderSide(color: Theme.of(context).colorScheme.outline, width: 1),
-                        ),
-                        children: record.testResults.entries.map((entry) {
-                          return TableRow(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                child: Text(
-                                  entry.key.replaceAll('_', ' ').toUpperCase(),
-                                  style: TextStyle(
-                                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                child: Text(
-                                  entry.value.toString(),
-                                  style: TextStyle(
-                                    color: Theme.of(context).colorScheme.onSurface,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          );
-                        }).toList(),
                       ),
                     ),
-                  
-                  const SizedBox(height: 24),
-                  if (record.notes != null && record.notes!.isNotEmpty) ...[
+                    Divider(color: Theme.of(context).colorScheme.outline, height: 32),
+                    
                     Text(
-                      'Notes',
+                      'Test Results',
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.onSurface,
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).scaffoldBackgroundColor,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        record.notes!,
+                    const SizedBox(height: 12),
+                    if (record.testResults.isEmpty)
+                      Text(
+                        'No quantitative values recorded.',
                         style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
                           fontSize: 14,
-                          height: 1.4,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      )
+                    else
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).scaffoldBackgroundColor,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Theme.of(context).colorScheme.outline, width: 1),
+                        ),
+                        child: Table(
+                          columnWidths: const {
+                            0: FlexColumnWidth(1.2),
+                            1: FlexColumnWidth(1.0),
+                          },
+                          border: TableBorder.symmetric(
+                            inside: BorderSide(color: Theme.of(context).colorScheme.outline, width: 1),
+                          ),
+                          children: record.testResults.entries.map((entry) {
+                            return TableRow(
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                  child: Text(
+                                    entry.key.replaceAll('_', ' ').toUpperCase(),
+                                    style: TextStyle(
+                                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                  child: Text(
+                                    entry.value.toString(),
+                                    style: TextStyle(
+                                      color: Theme.of(context).colorScheme.onSurface,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    
+                    const SizedBox(height: 24),
+                    if (record.notes != null && record.notes!.isNotEmpty) ...[
+                      Text(
+                        'Notes',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).scaffoldBackgroundColor,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          record.notes!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                            fontSize: 14,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                    ],
+
+                    if (record.testResults.containsKey('pdf_path')) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          icon: const Icon(Icons.picture_as_pdf_rounded),
+                          label: const Text('Open Result Attachment'),
+                          onPressed: () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Loading report attachment: ${record.testResults['pdf_path']}'),
+                                backgroundColor: Theme.of(context).colorScheme.primary,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            } else {
+              // Multi-parameter grouped view
+              final hasPdf = groupedRecord.records.any((r) => r.testResults.containsKey('pdf_path'));
+              final pdfPath = hasPdf
+                  ? groupedRecord.records
+                      .firstWhere((r) => r.testResults.containsKey('pdf_path'))
+                      .testResults['pdf_path']?.toString()
+                  : null;
+
+              return SingleChildScrollView(
+                controller: scrollController,
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(2),
                         ),
                       ),
                     ),
                     const SizedBox(height: 24),
-                  ],
-
-                  // File / Document Attachment (PDF/Image link)
-                  if (record.testResults.containsKey('pdf_path')) ...[
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                        icon: const Icon(Icons.picture_as_pdf_rounded),
-                        label: const Text('Open Result Attachment'),
-                        onPressed: () {
-                          // Standard detail: in a real environment it loads pdfx,
-                          // we trigger a snackbar for demo showing it would load the file.
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Loading report attachment: ${record.testResults['pdf_path']}'),
-                              backgroundColor: Theme.of(context).colorScheme.primary,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            groupedRecord.displayTitle,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
                             ),
-                          );
-                        },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        _buildStatusBadge(groupedRecord.aggregateStatus),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Department: ${groupedRecord.department.name.toUpperCase()}',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                        fontSize: 14,
                       ),
                     ),
+                    Divider(color: Theme.of(context).colorScheme.outline, height: 32),
+
+                    // Stacked parameters
+                    ...groupedRecord.records.expand((r) {
+                      final parameterName = r.testResults['test_name']?.toString() ?? r.testType;
+                      final parameterValue = r.testResults['test_value']?.toString() ?? '';
+                      final formattedHeader = parameterName.isNotEmpty
+                          ? parameterName[0].toUpperCase() + parameterName.substring(1)
+                          : '';
+
+                      return [
+                        Text(
+                          formattedHeader,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).scaffoldBackgroundColor,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            parameterValue,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                              fontSize: 14,
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                      ];
+                    }),
+
+                    // Aggregated Notes
+                    if (groupedRecord.aggregatedNotes.isNotEmpty) ...[
+                      Text(
+                        'Technician Notes',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).scaffoldBackgroundColor,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          groupedRecord.aggregatedNotes,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                            fontSize: 14,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                    ],
+
+                    if (hasPdf && pdfPath != null) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          icon: const Icon(Icons.picture_as_pdf_rounded),
+                          label: const Text('Open Result Attachment'),
+                          onPressed: () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Loading report attachment: $pdfPath'),
+                                backgroundColor: Theme.of(context).colorScheme.primary,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
                   ],
-                ],
-              ),
-            );
+                ),
+              );
+            }
           },
         );
       },
