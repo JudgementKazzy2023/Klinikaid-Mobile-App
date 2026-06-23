@@ -5,6 +5,7 @@ import '../../../../features/auth/presentation/providers/auth_provider.dart';
 import '../providers/dashboard_provider.dart';
 import '../../../../core/models/patient_queue.dart';
 import '../../../../core/utils/triage_notes_formatter.dart';
+import '../../../../core/utils/queue_status_formatter.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -268,14 +269,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       ],
                                     ),
                                     const SizedBox(height: 8),
-                                    Text(
-                                      'Estimated Wait: ${provider.activeQueueEntry!.estimatedWaitMinutes ?? 0} mins',
-                                      style: TextStyle(
-                                        color: Theme.of(context).colorScheme.primary,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
+                                    Builder(builder: (context) {
+                                      final format = formatQueueStatus(provider.activeQueueEntry!.status);
+                                      return Text(
+                                        format.patientBodyText,
+                                        style: TextStyle(
+                                          color: format.color,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      );
+                                    }),
                                     Builder(builder: (context) {
                                       final notes = extractTriageNotes(provider.activeQueueEntry!.triageNotes);
                                       if (notes == null) return const SizedBox.shrink();

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/models/patient_queue.dart';
 import '../../../../core/utils/triage_notes_formatter.dart';
+import '../../../../core/utils/queue_status_formatter.dart';
 
 class QueueEntryCard extends StatelessWidget {
   final PatientQueue entry;
@@ -27,37 +28,14 @@ class QueueEntryCard extends StatelessWidget {
     }
   }
 
-  Color _getStatusColor(QueueStatus status) {
-    switch (status) {
-      case QueueStatus.waiting:
-        return Colors.blue.shade700;
-      case QueueStatus.inProgress:
-        return Colors.orange.shade800;
-      case QueueStatus.completed:
-        return Colors.green.shade700;
-      case QueueStatus.cancelled:
-        return Colors.grey.shade600;
-    }
-  }
 
-  String _getStatusText(QueueStatus status) {
-    switch (status) {
-      case QueueStatus.waiting:
-        return 'Waiting';
-      case QueueStatus.inProgress:
-        return 'In Progress';
-      case QueueStatus.completed:
-        return 'Completed';
-      case QueueStatus.cancelled:
-        return 'Cancelled';
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
     final patient = entry.patient;
     final patientName = patient != null ? patient.fullName : 'New User';
     final theme = Theme.of(context);
+    final statusFormat = formatQueueStatus(entry.status);
 
     return Card(
       elevation: 2,
@@ -148,14 +126,14 @@ class QueueEntryCard extends StatelessWidget {
                     padding: EdgeInsets.zero,
                     labelPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                     visualDensity: VisualDensity.compact,
-                    backgroundColor: _getStatusColor(entry.status).withValues(alpha: 0.1),
+                    backgroundColor: statusFormat.color.withValues(alpha: 0.1),
                     side: BorderSide.none,
                     label: Text(
-                      _getStatusText(entry.status),
+                      statusFormat.staffBadgeLabel,
                       style: theme.textTheme.bodySmall?.copyWith(
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
-                        color: _getStatusColor(entry.status),
+                        color: statusFormat.color,
                       ),
                     ),
                   ),
@@ -181,16 +159,10 @@ class QueueEntryCard extends StatelessWidget {
                 },
               ),
 
-              // Estimated Wait Minutes & Timestamp
+              // Arrival Timestamp (Estimated Wait removed)
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  Text(
-                    'Est. Wait: ${entry.estimatedWaitMinutes ?? '--'} mins',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-                    ),
-                  ),
                   Text(
                     'Arrived: ${entry.createdAt.toLocal().toString().substring(11, 16)}',
                     style: theme.textTheme.bodySmall?.copyWith(

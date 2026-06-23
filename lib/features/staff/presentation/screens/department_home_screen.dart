@@ -7,6 +7,7 @@ import '../../../../core/models/patient_queue.dart';
 import '../../../../core/models/department_record.dart';
 import '../widgets/queue_entry_card.dart';
 import '../../../../core/utils/triage_notes_formatter.dart';
+import '../../../../core/utils/queue_status_formatter.dart';
 
 class DepartmentHomeScreen extends StatefulWidget {
   final DepartmentProvider? providerOverride;
@@ -37,6 +38,7 @@ class _DepartmentHomeScreenState extends State<DepartmentHomeScreen> with Single
       builder: (context) {
         final patient = entry.patient;
         final theme = Theme.of(context);
+        final format = formatQueueStatus(entry.status);
         return AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Text(
@@ -50,7 +52,7 @@ class _DepartmentHomeScreenState extends State<DepartmentHomeScreen> with Single
               _buildDetailRow(theme, 'Queue ID', '#${entry.id}'),
               _buildDetailRow(theme, 'Department', entry.department.toJsonValue().toUpperCase()),
               _buildDetailRow(theme, 'Priority', entry.priorityLevel.toJsonValue().toUpperCase()),
-              _buildDetailRow(theme, 'Status', entry.status.name.toUpperCase()),
+              _buildDetailRow(theme, 'Status', format.staffBadgeLabel),
               Builder(builder: (context) {
                 final notes = extractTriageNotes(entry.triageNotes);
                 if (notes == null) return const SizedBox.shrink();

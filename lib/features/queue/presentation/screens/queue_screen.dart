@@ -4,6 +4,7 @@ import '../../../../features/auth/presentation/providers/auth_provider.dart';
 import '../../../../core/models/patient_queue.dart';
 import '../providers/queue_provider.dart';
 import '../../../../core/utils/triage_notes_formatter.dart';
+import '../../../../core/utils/queue_status_formatter.dart';
 
 class QueueScreen extends StatefulWidget {
   const QueueScreen({super.key});
@@ -164,6 +165,7 @@ class _QueueScreenState extends State<QueueScreen> {
 
   Widget _buildActiveQueueCard(PatientQueue active) {
     final isInProgress = active.status == QueueStatus.inProgress;
+    final format = formatQueueStatus(active.status);
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -190,15 +192,15 @@ class _QueueScreenState extends State<QueueScreen> {
               Row(
                 children: [
                   Icon(
-                    isInProgress ? Icons.volume_up_rounded : Icons.hourglass_empty_rounded,
-                    color: isInProgress ? Theme.of(context).colorScheme.primary : Colors.amber,
+                    format.icon,
+                    color: format.color,
                     size: 20,
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    isInProgress ? 'NOW CALLING' : 'TRIAGE WAITING',
+                    format.patientCardTitle,
                     style: TextStyle(
-                      color: isInProgress ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                      color: format.color,
                       fontWeight: FontWeight.bold,
                       fontSize: 13,
                       letterSpacing: 0.5,
@@ -219,27 +221,13 @@ class _QueueScreenState extends State<QueueScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                '${active.estimatedWaitMinutes ?? 0}',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.primary,
-                  fontSize: 44,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                'min estimated wait',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
-                  fontSize: 14,
-                ),
-              ),
-            ],
+          Text(
+            format.patientBodyText,
+            style: TextStyle(
+              color: format.color,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
           ),
           Builder(builder: (context) {
             final notes = extractTriageNotes(active.triageNotes);
