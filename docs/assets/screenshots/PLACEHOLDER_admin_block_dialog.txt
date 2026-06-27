@@ -1,0 +1,1 @@
+Placeholder for admin_block_dialog.png. This screenshot should show the mobile app login screen displaying a modal dialog blocking entry for users with the 'admin' role. The warning dialog text should read: 'Admin accounts must sign in via the web portal.'

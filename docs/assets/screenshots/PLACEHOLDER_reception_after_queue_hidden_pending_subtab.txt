@@ -1,0 +1,1 @@
+Placeholder for reception_after_queue_hidden_pending_subtab.png. This screenshot should show the Receptionist document directory focusing on the sub-tabs: Pending, Approved, and Rejected. It demonstrates the multi-tab layout.

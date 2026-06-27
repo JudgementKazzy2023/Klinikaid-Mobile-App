@@ -1,0 +1,1 @@
+Placeholder for dept_after_no_action_buttons.png. This screenshot should show the Department Staff home screen with the waitlist. Confirm that there are no 'Start Service' or 'Complete' action buttons visible, representing the read-only mobile staff boundary.

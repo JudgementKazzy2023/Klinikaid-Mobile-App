@@ -1,0 +1,1 @@
+Placeholder for specialist_patient_search.png. This screenshot should show the Medical Specialist search dashboard, demonstrating how multi-word space-separated query strings (e.g. 'Jane Miller') are parsed and matched against clinical patient records.

@@ -1,0 +1,1 @@
+Placeholder for records_grouping_detail_modal.png. This screenshot should show the GroupedRecordDetailModal popup. It demonstrates multiple test parameters (e.g., findings, impressions) consolidated and nicely formatted into a single detail list.

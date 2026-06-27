@@ -1,0 +1,1 @@
+Placeholder for queue_dashboard_tile.png. This screenshot should show the Patient dashboard with a summary tile for the active queue status, providing quick statistics of the patient's queue ticket.

@@ -1,0 +1,1 @@
+Placeholder for specialist_patient_history.png. This screenshot should show the specialist's view of a selected patient's unified, cross-department history timeline. It displays consolidated cards of lab and imaging results.
