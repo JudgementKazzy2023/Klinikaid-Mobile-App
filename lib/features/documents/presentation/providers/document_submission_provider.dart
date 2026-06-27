@@ -104,6 +104,15 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     }
   }
 
+  /// Clears the active OCR extraction text, metadata, processing flags, and errors.
+  void clearOcrState() {
+    _isProcessingOcr = false;
+    _extractedOcrText = null;
+    _preScreenMetadata = null;
+    _errorMessage = null;
+    notifyListeners();
+  }
+
   /// Pre-screens extracted OCR text for key clinic checklist requirements.
   Map<String, dynamic> preScreenOcrText(String ocrText, String firstName, String lastName) {
     final text = ocrText.toLowerCase();

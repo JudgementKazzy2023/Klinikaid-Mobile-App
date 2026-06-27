@@ -74,6 +74,9 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
     setState(() {
       _selectedImagePath = null;
     });
+    if (mounted) {
+      Provider.of<DocumentSubmissionProvider>(context, listen: false).clearOcrState();
+    }
   }
 
   Future<void> _submit(Patient patient) async {
@@ -366,7 +369,7 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    onPressed: provider.isLoading ? null : () => _pickImage(ImageSource.camera, patient),
+                    onPressed: provider.isLoading ? null : _clearSelection,
                     child: const Text('Retake', style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ),
