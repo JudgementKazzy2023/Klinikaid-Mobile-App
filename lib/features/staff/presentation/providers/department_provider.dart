@@ -4,6 +4,7 @@ import '../../../../core/errors/failures.dart';
 import '../../../../core/models/patient_queue.dart';
 import '../../../../core/models/department_record.dart';
 import '../../../../core/supabase/supabase_client.dart';
+import '../../../records/domain/record_grouper.dart';
 import '../../data/repositories/staff_queue_repository.dart';
 
 class DepartmentProvider extends ChangeNotifier {
@@ -21,6 +22,7 @@ class DepartmentProvider extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   List<PatientQueue> get queueEntries => _queueEntries;
   List<DepartmentRecord> get recentRecords => _recentRecords;
+  List<GroupedRecord> get groupedRecords => groupRecords(_recentRecords);
 
   /// Instantiate with the staff member's department, enforcing security constraint.
   DepartmentProvider(this.department);

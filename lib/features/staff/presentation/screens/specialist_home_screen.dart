@@ -5,9 +5,12 @@ import '../../../auth/presentation/providers/auth_provider.dart';
 import '../providers/specialist_provider.dart';
 import '../../../../core/models/department_record.dart';
 import '../../../../core/models/profile.dart';
+import '../../../records/presentation/widgets/grouped_record_detail_modal.dart';
+
 
 class SpecialistHomeScreen extends StatefulWidget {
-  const SpecialistHomeScreen({super.key});
+  final SpecialistProvider? providerOverride;
+  const SpecialistHomeScreen({super.key, this.providerOverride});
 
   @override
   State<SpecialistHomeScreen> createState() => _SpecialistHomeScreenState();
@@ -40,7 +43,7 @@ class _SpecialistHomeScreenState extends State<SpecialistHomeScreen> {
     final authProvider = Provider.of<AuthProvider>(context);
 
     return ChangeNotifierProvider<SpecialistProvider>(
-      create: (_) => SpecialistProvider(),
+      create: (_) => widget.providerOverride ?? (SpecialistProvider()..loadAllPatients()),
       child: Consumer<SpecialistProvider>(
         builder: (context, provider, _) {
           final isPatientSelected = provider.selectedPatient != null;
@@ -132,55 +135,65 @@ class _SpecialistHomeScreenState extends State<SpecialistHomeScreen> {
           Expanded(
             child: provider.isLoading && provider.searchResults.isEmpty
                 ? const Center(child: CircularProgressIndicator())
-                : provider.searchResults.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.search_off_rounded,
-                              size: 64,
-                              color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              _searchController.text.isEmpty
-                                  ? 'Search for a patient to view their medical history.'
-                                  : 'No patients found matching your search.',
-                              textAlign: TextAlign.center,
-                              style: theme.textTheme.bodyLarge?.copyWith(
-                                color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                : RefreshIndicator(
+                    onRefresh: () => provider.loadAllPatients(),
+                    child: provider.searchResults.isEmpty
+                        ? ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: [
+                              SizedBox(height: MediaQuery.of(context).size.height * 0.2),
+                              Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.search_off_rounded,
+                                      size: 64,
+                                      color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      _searchController.text.isEmpty
+                                          ? 'Search for a patient to view their medical history.'
+                                          : 'No patients found matching your search.',
+                                      textAlign: TextAlign.center,
+                                      style: theme.textTheme.bodyLarge?.copyWith(
+                                        color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                      )
-                    : ListView.builder(
-                        itemCount: provider.searchResults.length,
-                        itemBuilder: (context, index) {
-                          final patient = provider.searchResults[index];
-                          return Card(
-                            elevation: 1,
-                            margin: const EdgeInsets.symmetric(vertical: 4.0),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10.0),
-                            ),
-                            child: ListTile(
-                              title: Text(
-                                patient.fullName,
-                                style: const TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                              subtitle: Text(
-                                'DOB: ${patient.dateOfBirth.toString().substring(0, 10)} | Gender: ${patient.gender.name.toUpperCase()}',
-                              ),
-                              trailing: const Icon(Icons.chevron_right_rounded),
-                              onTap: () {
-                                provider.selectPatient(patient);
-                              },
-                            ),
-                          );
-                        },
-                      ),
+                            ],
+                          )
+                        : ListView.builder(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            itemCount: provider.searchResults.length,
+                            itemBuilder: (context, index) {
+                              final patient = provider.searchResults[index];
+                              return Card(
+                                elevation: 1,
+                                margin: const EdgeInsets.symmetric(vertical: 4.0),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10.0),
+                                ),
+                                child: ListTile(
+                                  title: Text(
+                                    patient.fullName,
+                                    style: const TextStyle(fontWeight: FontWeight.bold),
+                                  ),
+                                  subtitle: Text(
+                                    'DOB: ${patient.dateOfBirth.toString().substring(0, 10)} | Gender: ${patient.gender.name.toUpperCase()}',
+                                  ),
+                                  trailing: const Icon(Icons.chevron_right_rounded),
+                                  onTap: () {
+                                    provider.selectPatient(patient);
+                                  },
+                                ),
+                              );
+                            },
+                          ),
+                  ),
           ),
         ],
       ),
@@ -216,20 +229,32 @@ class _SpecialistHomeScreenState extends State<SpecialistHomeScreen> {
                 ),
               ),
               const SizedBox(height: 6),
-              Row(
+              Wrap(
+                spacing: 16,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Icon(Icons.cake_outlined, size: 14, color: theme.colorScheme.onSurface.withValues(alpha: 0.6)),
-                  const SizedBox(width: 4),
-                  Text(
-                    'DOB: ${patient.dateOfBirth.toString().substring(0, 10)}',
-                    style: theme.textTheme.bodySmall,
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.cake_outlined, size: 14, color: theme.colorScheme.onSurface.withValues(alpha: 0.6)),
+                      const SizedBox(width: 4),
+                      Text(
+                        'DOB: ${patient.dateOfBirth.toString().substring(0, 10)}',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 16),
-                  Icon(Icons.person_outline_rounded, size: 14, color: theme.colorScheme.onSurface.withValues(alpha: 0.6)),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Gender: ${patient.gender.name.toUpperCase()}',
-                    style: theme.textTheme.bodySmall,
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.person_outline_rounded, size: 14, color: theme.colorScheme.onSurface.withValues(alpha: 0.6)),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Gender: ${patient.gender.name.toUpperCase()}',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -265,11 +290,13 @@ class _SpecialistHomeScreenState extends State<SpecialistHomeScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Diagnostic History Timeline',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.primary,
+              Expanded(
+                child: Text(
+                  'Diagnostic History Timeline',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.primary,
+                  ),
                 ),
               ),
               IconButton(
@@ -285,7 +312,7 @@ class _SpecialistHomeScreenState extends State<SpecialistHomeScreen> {
 
         // Timeline List
         Expanded(
-          child: provider.patientTimeline.isEmpty
+          child: provider.groupedPatientTimeline.isEmpty
               ? Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -307,12 +334,10 @@ class _SpecialistHomeScreenState extends State<SpecialistHomeScreen> {
                 )
               : ListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                  itemCount: provider.patientTimeline.length,
+                  itemCount: provider.groupedPatientTimeline.length,
                   itemBuilder: (context, index) {
-                    final record = provider.patientTimeline[index];
-                    final deptColor = _getDeptColor(record.department);
-                    final isNormal = record.referenceRangeStatus == ReferenceRangeStatus.normal;
-                    final statusColor = isNormal ? Colors.green.shade700 : Colors.red.shade700;
+                    final groupedRecord = provider.groupedPatientTimeline[index];
+                    final deptColor = _getDeptColor(groupedRecord.department);
 
                     return IntrinsicHeight(
                       child: Row(
@@ -353,100 +378,224 @@ class _SpecialistHomeScreenState extends State<SpecialistHomeScreen> {
                                     width: 1,
                                   ),
                                 ),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12.0),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      // Test type and Department tag
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              record.testType,
-                                              style: theme.textTheme.titleMedium?.copyWith(
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                            decoration: BoxDecoration(
-                                              color: deptColor.withValues(alpha: 0.1),
-                                              borderRadius: BorderRadius.circular(4),
-                                            ),
-                                            child: Text(
-                                              record.department.toJsonValue().toUpperCase(),
-                                              style: TextStyle(
-                                                fontSize: 8,
-                                                fontWeight: FontWeight.bold,
-                                                color: deptColor,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(10.0),
+                                  onTap: () {
+                                    GroupedRecordDetailModal.show(context, groupedRecord);
+                                  },
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(12.0),
+                                    child: Builder(
+                                      builder: (context) {
+                                        if (groupedRecord.isSingleParameter) {
+                                          final record = groupedRecord.records.first;
+                                          final isNormal = record.referenceRangeStatus == ReferenceRangeStatus.normal;
+                                          final statusColor = isNormal ? Colors.green.shade700 : Colors.red.shade700;
 
-                                      // Test Details
-                                      Text(
-                                        'Test Name: ${record.testResults['test_name']?.toString() ?? ''}',
-                                        style: theme.textTheme.bodyMedium,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text(
-                                            'Result: ${record.testResults['test_value']?.toString() ?? ''} ${record.testResults['unit']?.toString() ?? ''}',
-                                            style: theme.textTheme.bodyMedium?.copyWith(
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                            decoration: BoxDecoration(
-                                              color: statusColor.withValues(alpha: 0.1),
-                                              borderRadius: BorderRadius.circular(4),
-                                            ),
-                                            child: Text(
-                                              record.referenceRangeStatus.name.toUpperCase(),
-                                              style: TextStyle(
-                                                fontSize: 8,
-                                                fontWeight: FontWeight.bold,
-                                                color: statusColor,
+                                          return Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              // Test type and Department tag
+                                              Row(
+                                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                children: [
+                                                  Expanded(
+                                                    child: Text(
+                                                      record.testType,
+                                                      style: theme.textTheme.titleMedium?.copyWith(
+                                                        fontWeight: FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                    decoration: BoxDecoration(
+                                                      color: deptColor.withValues(alpha: 0.1),
+                                                      borderRadius: BorderRadius.circular(4),
+                                                    ),
+                                                    child: Text(
+                                                      record.department.toJsonValue().toUpperCase(),
+                                                      style: TextStyle(
+                                                        fontSize: 8,
+                                                        fontWeight: FontWeight.bold,
+                                                        color: deptColor,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
+                                              const SizedBox(height: 8),
 
-                                      // Notes
-                                      if (record.notes != null && record.notes!.trim().isNotEmpty) ...[
-                                        Text(
-                                          'Notes: ${record.notes}',
-                                          style: theme.textTheme.bodySmall?.copyWith(
-                                            fontStyle: FontStyle.italic,
-                                            color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
-                                          ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                      ],
+                                              // Test Details
+                                              Text(
+                                                'Test Name: ${record.testResults['test_name']?.toString() ?? ''}',
+                                                style: theme.textTheme.bodyMedium,
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Row(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Expanded(
+                                                    child: Text(
+                                                      'Result: ${record.testResults['test_value']?.toString() ?? ''} ${record.testResults['unit']?.toString() ?? ''}',
+                                                      softWrap: true,
+                                                      style: theme.textTheme.bodyMedium?.copyWith(
+                                                        fontWeight: FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                    decoration: BoxDecoration(
+                                                      color: statusColor.withValues(alpha: 0.1),
+                                                      borderRadius: BorderRadius.circular(4),
+                                                    ),
+                                                    child: Text(
+                                                      record.referenceRangeStatus.name.toUpperCase(),
+                                                      style: TextStyle(
+                                                        fontSize: 8,
+                                                        fontWeight: FontWeight.bold,
+                                                        color: statusColor,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 8),
 
-                                      // Recorded Date
-                                      Align(
-                                        alignment: Alignment.bottomRight,
-                                        child: Text(
-                                          record.createdAt.toLocal().toString().substring(0, 16),
-                                          style: theme.textTheme.bodySmall?.copyWith(
-                                            fontSize: 10,
-                                            color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
+                                              // Notes
+                                              if (record.notes != null && record.notes!.trim().isNotEmpty) ...[
+                                                Text(
+                                                  'Notes: ${record.notes}',
+                                                  style: theme.textTheme.bodySmall?.copyWith(
+                                                    fontStyle: FontStyle.italic,
+                                                    color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 8),
+                                              ],
+
+                                              // Recorded Date
+                                              Align(
+                                                alignment: Alignment.bottomRight,
+                                                child: Text(
+                                                  record.createdAt.toLocal().toString().substring(0, 16),
+                                                  style: theme.textTheme.bodySmall?.copyWith(
+                                                    fontSize: 10,
+                                                    color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          );
+                                        } else {
+                                          // Multi-parameter grouped card
+                                          final firstRec = groupedRecord.records.first;
+                                          final allShareTestType = groupedRecord.records.every((r) => r.testType == firstRec.testType);
+                                          final String cardTitle;
+                                          if (allShareTestType) {
+                                            cardTitle = firstRec.testType;
+                                          } else {
+                                            final dateStr = firstRec.createdAt.toLocal().toString().substring(0, 10);
+                                            cardTitle = '${groupedRecord.department.name.toUpperCase()} — $dateStr';
+                                          }
+
+                                          final aggregateStatus = groupedRecord.aggregateStatus;
+                                          final isNormal = aggregateStatus == ReferenceRangeStatus.normal;
+                                          final statusColor = isNormal ? Colors.green.shade700 : Colors.red.shade700;
+
+                                          return Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              // Consolidated Title and Department tag
+                                              Row(
+                                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                children: [
+                                                  Expanded(
+                                                    child: Text(
+                                                      cardTitle,
+                                                      style: theme.textTheme.titleMedium?.copyWith(
+                                                        fontWeight: FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                    decoration: BoxDecoration(
+                                                      color: deptColor.withValues(alpha: 0.1),
+                                                      borderRadius: BorderRadius.circular(4),
+                                                    ),
+                                                    child: Text(
+                                                      groupedRecord.department.name.toUpperCase(),
+                                                      style: TextStyle(
+                                                        fontSize: 8,
+                                                        fontWeight: FontWeight.bold,
+                                                        color: deptColor,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 8),
+
+                                              // Consolidated details summary
+                                              Text(
+                                                'Consolidated Diagnostic Report (${groupedRecord.records.length} parameters)',
+                                                style: theme.textTheme.bodyMedium?.copyWith(
+                                                  fontStyle: FontStyle.italic,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 8),
+
+                                              Row(
+                                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                children: [
+                                                  Expanded(
+                                                    child: Text(
+                                                      'Tap to view details',
+                                                      style: theme.textTheme.bodyMedium?.copyWith(
+                                                        color: theme.colorScheme.primary,
+                                                        fontWeight: FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                    decoration: BoxDecoration(
+                                                      color: statusColor.withValues(alpha: 0.1),
+                                                      borderRadius: BorderRadius.circular(4),
+                                                    ),
+                                                    child: Text(
+                                                      aggregateStatus.name.toUpperCase().replaceAll('_', ' '),
+                                                      style: TextStyle(
+                                                        fontSize: 8,
+                                                        fontWeight: FontWeight.bold,
+                                                        color: statusColor,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 8),
+
+                                              // Recorded Date
+                                              Align(
+                                                alignment: Alignment.bottomRight,
+                                                child: Text(
+                                                  firstRec.createdAt.toLocal().toString().substring(0, 16),
+                                                  style: theme.textTheme.bodySmall?.copyWith(
+                                                    fontSize: 10,
+                                                    color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          );
+                                        }
+                                      }
+                                    ),
                                   ),
                                 ),
                               ),

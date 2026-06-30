@@ -64,8 +64,14 @@ class MockDocumentSubmissionProvider extends DocumentSubmissionProvider {
   @override
   Future<String> processOnDeviceOcr(String imagePath, Patient patient) async {
     _mockPreScreenMetadata = {
-      'matched_fields': ['date', 'doctor', 'patient_name', 'request_keyword'],
-      'missing_fields': [],
+      'ocr_text': 'Mock OCR Text',
+      'quality_assessment': {
+        'score': 85,
+        'verdict': 'good',
+        'issues': [],
+      },
+      'identity_match': true,
+      'submitted_with_warnings': false,
     };
     notifyListeners();
     return "Mock OCR Text";

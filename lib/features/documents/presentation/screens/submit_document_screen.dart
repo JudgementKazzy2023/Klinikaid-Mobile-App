@@ -6,6 +6,7 @@ import '../../../../features/auth/presentation/providers/auth_provider.dart';
 import '../providers/document_submission_provider.dart';
 import '../../../../core/models/patient.dart';
 import '../../../../core/cache/local_database.dart';
+import '../../../ocr/domain/quality_assessment.dart';
 
 class SubmitDocumentScreen extends StatefulWidget {
   const SubmitDocumentScreen({super.key});
@@ -258,9 +259,13 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
 
   Widget _buildPreviewAndValidationCard(Patient patient, DocumentSubmissionProvider provider) {
     final metadata = provider.preScreenMetadata;
-    final List<dynamic> matched = metadata?['matched_fields'] ?? [];
-    final List<dynamic> missing = metadata?['missing_fields'] ?? [];
-    final hasWarnings = missing.isNotEmpty;
+    
+    final qualityAssessmentMap = metadata?['quality_assessment'] as Map<String, dynamic>?;
+    final QualityAssessment? assessment = qualityAssessmentMap != null 
+        ? QualityAssessment.fromJson(qualityAssessmentMap) 
+        : null;
+        
+    final bool identityMatch = metadata?['identity_match'] as bool? ?? true;
 
     return Container(
       width: double.infinity,
@@ -322,35 +327,156 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
             )
           else ...[
             Text(
-              'On-Device AI Quality Pre-Screen',
+              'Document Quality Assessment',
               style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
             
-            // Checklists
-            _buildChecklistItem('Date of Request Match', matched.contains('date')),
-            _buildChecklistItem('Physician Designation (Dr. / M.D.)', matched.contains('doctor')),
-            _buildChecklistItem('Patient Name Match (${patient.fullName})', matched.contains('patient_name')),
-            _buildChecklistItem('Diagnostic Keywords Found', matched.contains('request_keyword')),
+            // A. The traffic light card (prominent)
+            if (assessment != null)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: assessment.verdictColor.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: assessment.verdictColor.withValues(alpha: 0.3),
+                    width: 1.5,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 16,
+                      height: 16,
+                      decoration: BoxDecoration(
+                        color: assessment.verdictColor,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: assessment.verdictColor.withValues(alpha: 0.4),
+                            blurRadius: 6,
+                            spreadRadius: 1,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            assessment.verdictLabel,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Quality Score: ${assessment.score}/100',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             
-            if (hasWarnings) ...[
+            // B. Issue List (rendered if issues are present)
+            if (assessment != null && assessment.issues.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text(
+                'Identified Quality Issues',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.8),
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ...assessment.issues.map((issue) {
+                final IconData icon = switch (issue.severity) {
+                  QualityIssueSeverity.high => Icons.error_outline_rounded,
+                  QualityIssueSeverity.medium => Icons.warning_amber_rounded,
+                  QualityIssueSeverity.low => Icons.info_outline_rounded,
+                };
+                final Color color = switch (issue.severity) {
+                  QualityIssueSeverity.high => Colors.red.shade700,
+                  QualityIssueSeverity.medium => Colors.orange.shade800,
+                  QualityIssueSeverity.low => Colors.blue.shade700,
+                };
+
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(icon, color: color, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          issue.description,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                            fontSize: 12,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+            
+            // C. Identity-match warning (if applicable, separate card)
+            if (!identityMatch) ...[
               const SizedBox(height: 16),
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withValues(alpha: 0.1),
+                  color: Colors.orange.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
+                  border: Border.all(
+                    color: Colors.orange.withValues(alpha: 0.3),
+                    width: 1.2,
+                  ),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 18),
-                    const SizedBox(width: 8),
+                    const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 20),
+                    const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                        'Some required clinical details could not be detected. Ensure the document is legible, or re-capture if blurry.',
-                        style: TextStyle(color: Colors.orange.shade800, fontSize: 11, height: 1.4),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Name Mismatch Warning',
+                            style: TextStyle(
+                              color: Colors.orange.shade800,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Your name was not found on this document. If this document does belong to you, you may still submit it for receptionist review.',
+                            style: TextStyle(
+                              color: Colors.orange.shade900,
+                              fontSize: 11,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -375,22 +501,7 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
                 ),
                 const SizedBox(width: 16),
                 Expanded(
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.primary,
-                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                    onPressed: provider.isLoading ? null : () => _submit(patient),
-                    child: provider.isLoading
-                        ? SizedBox(
-                            height: 18,
-                            width: 18,
-                            child: CircularProgressIndicator(color: Theme.of(context).colorScheme.onPrimary, strokeWidth: 2),
-                          )
-                        : const Text('Submit Request', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ),
+                  child: _buildSubmitButton(assessment, patient, provider),
                 ),
               ],
             ),
@@ -400,28 +511,58 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
     );
   }
 
-  Widget _buildChecklistItem(String title, bool matches) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6.0),
-      child: Row(
-        children: [
-          Icon(
-            matches ? Icons.check_circle_outline_rounded : Icons.info_outline_rounded,
-            color: matches ? Theme.of(context).colorScheme.primary : Colors.orange,
-            size: 20,
+  Widget _buildSubmitButton(
+    QualityAssessment? assessment,
+    Patient patient,
+    DocumentSubmissionProvider provider,
+  ) {
+    final isPoor = assessment?.verdict == QualityVerdict.poor;
+    final isLoading = provider.isLoading;
+
+    if (isLoading) {
+      return ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Theme.of(context).colorScheme.primary,
+          foregroundColor: Theme.of(context).colorScheme.onPrimary,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+        onPressed: null,
+        child: SizedBox(
+          height: 18,
+          width: 18,
+          child: CircularProgressIndicator(
+            color: Theme.of(context).colorScheme.onPrimary,
+            strokeWidth: 2,
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              title,
-              style: TextStyle(
-                color: matches ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.8) : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
-                fontSize: 13,
-              ),
-            ),
-          ),
-        ],
+        ),
+      );
+    }
+
+    if (isPoor) {
+      // Outlined style for poor verdict (visually de-emphasized but fully enabled)
+      return OutlinedButton(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Theme.of(context).colorScheme.primary,
+          side: BorderSide(color: Theme.of(context).colorScheme.primary, width: 1.5),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+        onPressed: () => _submit(patient),
+        child: const Text('Submit Request', style: TextStyle(fontWeight: FontWeight.bold)),
+      );
+    }
+
+    // Standard filled style for good/marginal
+    return ElevatedButton(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Theme.of(context).colorScheme.onPrimary,
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
+      onPressed: () => _submit(patient),
+      child: const Text('Submit Request', style: TextStyle(fontWeight: FontWeight.bold)),
     );
   }
 

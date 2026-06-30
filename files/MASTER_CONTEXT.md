@@ -193,6 +193,7 @@ Rules while operating in this state:
 4. **Hard checkpoint reconfirmed:** before Phase 7's mobile/web integration test,
    the team must verify the new shared project's schema and the deployment status
    of the `chat` Edge Function. Phase 7 cannot meaningfully exit without these.
+5. **Architectural Decision Record (OCR Pre-screen Redesign):** During final hardening, the original hardcoded checks (date pattern, doctor token, name match, diagnostic keywords) were replaced by an AI-driven quality assessment (`assess-document-quality` Edge Function calling Gemini 2.5 Flash). The hardcoded checks were scope-mismatched, assuming only medical referrals and failing for other documents (e.g. IDs, certificates). The AI assessment covers general capture legibility, blur, completeness, and coherence. Sub-task 4.8 (patient name match) remains deterministic on the client-side for fraud prevention. Web team confirmed they disabled their own web-side AI OCR, leaving mobile in charge of intake and quality pre-screen, and receptionist web screen in charge of final review.
 
 ---
 
@@ -233,8 +234,7 @@ Any plan or code violating one of these **fails review automatically**.
 5. **No analytics for the Patient role.** The descriptive-analytics dashboard (paper's
    specialist feature) is not built into the mobile app at all. Specialists on mobile
    see read-only departmental views, not the full analytics dashboard.
-6. **On-device OCR.** Document text is extracted on the phone with ML Kit. Raw images
-   are minimized in transit.
+6. **On-device OCR.** Image-to-text extraction has zero network egress (ML Kit on-device). The extracted text is sent to a Supabase Edge Function (`assess-document-quality`) for AI-driven quality assessment using Gemini. The image itself never leaves the device. The most-sensitive content — the original image — remains on-device throughout the submission lifecycle.
 7. **Human-in-the-loop.** The app's OCR only pre-screens and flags. Staff set
    `documents.status`. The app never auto-approves/rejects.
 8. **Scope discipline.** If a feature is not in `klinikaid_mobile_guide.md` — or depends

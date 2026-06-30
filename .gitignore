@@ -19,8 +19,8 @@ key.properties
 android/app/upload-keystore.jks
 
 # Secrets — NEVER commit
-lib/core/config/env.dart            # Supabase URL + anon key
-supabase/.env                       # GEMINI_API_KEY
+lib/core/config/env.dart
+supabase/.env
 *.env
 .env.local
 .env.production

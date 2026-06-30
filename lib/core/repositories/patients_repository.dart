@@ -53,4 +53,21 @@ class PatientsRepository {
       throw FailureMapper.fromException(e);
     }
   }
+
+  /// Retrieves all patients, ordered by last_name.
+  Future<List<Patient>> getAllPatients() async {
+    try {
+      final response = await _client
+          .from('patients')
+          .select()
+          .order('last_name', ascending: true);
+
+      return (response as List)
+          .map((json) => Patient.fromJson(json as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      throw FailureMapper.fromException(e);
+    }
+  }
 }
+

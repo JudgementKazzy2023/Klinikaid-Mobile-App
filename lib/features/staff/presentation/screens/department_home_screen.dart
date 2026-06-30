@@ -5,6 +5,7 @@ import '../../../auth/presentation/providers/auth_provider.dart';
 import '../providers/department_provider.dart';
 import '../../../../core/models/patient_queue.dart';
 import '../../../../core/models/department_record.dart';
+import '../../../records/domain/record_grouper.dart';
 import '../widgets/queue_entry_card.dart';
 import '../../../../core/utils/triage_notes_formatter.dart';
 import '../../../../core/utils/queue_status_formatter.dart';
@@ -81,49 +82,280 @@ class _DepartmentHomeScreenState extends State<DepartmentHomeScreen> with Single
     );
   }
 
-  void _showRecordDetails(BuildContext context, DepartmentRecord record) {
-    showDialog(
+  Widget _buildStatusBadge(BuildContext context, ReferenceRangeStatus status) {
+    Color bgColor;
+    Color fgColor;
+    switch (status) {
+      case ReferenceRangeStatus.normal:
+        bgColor = Theme.of(context).colorScheme.primary;
+        fgColor = Theme.of(context).colorScheme.onPrimary;
+        break;
+      case ReferenceRangeStatus.criticalHigh:
+      case ReferenceRangeStatus.criticalLow:
+        bgColor = Theme.of(context).colorScheme.error;
+        fgColor = Colors.white;
+        break;
+      case ReferenceRangeStatus.inconclusive:
+        bgColor = Theme.of(context).colorScheme.secondary;
+        fgColor = Theme.of(context).colorScheme.onSurface;
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        status.name.toUpperCase().replaceAll('_', ' '),
+        style: TextStyle(
+          color: fgColor,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  void _showRecordDetails(BuildContext context, GroupedRecord groupedRecord) {
+    showModalBottomSheet(
       context: context,
+      backgroundColor: Theme.of(context).cardColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(24),
+          topRight: Radius.circular(24),
+        ),
+      ),
+      isScrollControlled: true,
       builder: (context) {
-        final patient = record.patient;
+        final firstRecord = groupedRecord.records.first;
+        final patient = firstRecord.patient;
         final theme = Theme.of(context);
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(
-            record.testType,
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildDetailRow(theme, 'Test Name', record.testResults['test_name']?.toString() ?? ''),
-                _buildDetailRow(theme, 'Test Value', '${record.testResults['test_value']?.toString() ?? ''} ${record.testResults['unit']?.toString() ?? ''}'),
-                _buildDetailRow(
-                  theme,
-                  'Reference Status',
-                  record.referenceRangeStatus.name.toUpperCase(),
-                ),
-                _buildDetailRow(theme, 'Recorded At', record.createdAt.toLocal().toString().substring(0, 16)),
-                _buildDetailRow(theme, 'Notes', record.notes ?? 'None'),
-                const Divider(height: 24),
-                if (patient != null) ...[
-                  Text('Patient Info', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  _buildDetailRow(theme, 'Name', patient.fullName),
-                  _buildDetailRow(theme, 'DOB', patient.dateOfBirth.toString().substring(0, 10)),
-                  _buildDetailRow(theme, 'Gender', patient.gender.name.toUpperCase()),
+
+        return DraggableScrollableSheet(
+          expand: false,
+          maxChildSize: 0.85,
+          initialChildSize: 0.6,
+          builder: (context, scrollController) {
+            final hasPdf = groupedRecord.records.any((r) => r.testResults.containsKey('pdf_path'));
+            final pdfPath = hasPdf
+                ? groupedRecord.records
+                    .firstWhere((r) => r.testResults.containsKey('pdf_path'))
+                    .testResults['pdf_path']?.toString()
+                : null;
+
+            return SingleChildScrollView(
+              controller: scrollController,
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.onSurface.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          groupedRecord.displayTitle,
+                          style: TextStyle(
+                            color: theme.colorScheme.onSurface,
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      _buildStatusBadge(context, groupedRecord.aggregateStatus),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Department: ${groupedRecord.department.name.toUpperCase()}',
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                      fontSize: 14,
+                    ),
+                  ),
+                  Divider(color: theme.colorScheme.outline, height: 32),
+
+                  if (groupedRecord.isSingleParameter) ...[
+                    Text(
+                      firstRecord.testResults['test_name']?.toString() ?? firstRecord.testType,
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurface,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: theme.scaffoldBackgroundColor,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${firstRecord.testResults['test_value']?.toString() ?? ''} ${firstRecord.testResults['unit']?.toString() ?? ''}',
+                        style: TextStyle(
+                          color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                          fontSize: 14,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
+                    if (firstRecord.notes != null && firstRecord.notes!.isNotEmpty) ...[
+                      Text(
+                        'Notes',
+                        style: TextStyle(
+                          color: theme.colorScheme.onSurface,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: theme.scaffoldBackgroundColor,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          firstRecord.notes!,
+                          style: TextStyle(
+                            color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                            fontSize: 14,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                    ],
+                  ] else ...[
+                    // Stacked parameters
+                    ...groupedRecord.records.expand((r) {
+                      final parameterName = r.testResults['test_name']?.toString() ?? r.testType;
+                      final parameterValue = r.testResults['test_value']?.toString() ?? '';
+                      final formattedHeader = parameterName.isNotEmpty
+                          ? parameterName[0].toUpperCase() + parameterName.substring(1)
+                          : '';
+
+                      return [
+                        Text(
+                          formattedHeader,
+                          style: TextStyle(
+                            color: theme.colorScheme.onSurface,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: theme.scaffoldBackgroundColor,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            parameterValue,
+                            style: TextStyle(
+                              color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                              fontSize: 14,
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                      ];
+                    }),
+
+                    if (groupedRecord.aggregatedNotes.isNotEmpty) ...[
+                      Text(
+                        'Technician Notes',
+                        style: TextStyle(
+                          color: theme.colorScheme.onSurface,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: theme.scaffoldBackgroundColor,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          groupedRecord.aggregatedNotes,
+                          style: TextStyle(
+                            color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                            fontSize: 14,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                    ],
+                  ],
+
+                  if (patient != null) ...[
+                    Divider(color: theme.colorScheme.outline, height: 32),
+                    Text(
+                      'Patient Info',
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurface,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildDetailRow(theme, 'Name', patient.fullName),
+                    _buildDetailRow(theme, 'DOB', patient.dateOfBirth.toString().substring(0, 10)),
+                    _buildDetailRow(theme, 'Gender', patient.gender.name.toUpperCase()),
+                    const SizedBox(height: 24),
+                  ],
+
+                  if (hasPdf && pdfPath != null) ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        icon: const Icon(Icons.picture_as_pdf_rounded),
+                        label: const Text('Open Result Attachment'),
+                        onPressed: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Loading report attachment: $pdfPath'),
+                              backgroundColor: theme.colorScheme.primary,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Close'),
-            ),
-          ],
+              ),
+            );
+          },
         );
       },
     );
@@ -230,17 +462,30 @@ class _DepartmentHomeScreenState extends State<DepartmentHomeScreen> with Single
                         // Completed Records Tab
                         RefreshIndicator(
                           onRefresh: () => provider.loadDashboard(),
-                          child: provider.recentRecords.isEmpty
+                          child: provider.groupedRecords.isEmpty
                               ? _buildEmptyState(context, 'No recent completed records found.')
                               : ListView.builder(
                                   padding: const EdgeInsets.all(16.0),
-                                  itemCount: provider.recentRecords.length,
+                                  itemCount: provider.groupedRecords.length,
                                   itemBuilder: (context, index) {
-                                    final record = provider.recentRecords[index];
-                                    final patientName = record.patient != null ? record.patient!.fullName : 'Patient';
-                                    final recordColor = record.referenceRangeStatus == ReferenceRangeStatus.normal
-                                        ? Colors.green.shade700
-                                        : Colors.red.shade700;
+                                    final groupedRecord = provider.groupedRecords[index];
+                                    final firstRecord = groupedRecord.records.first;
+                                    final patientName = firstRecord.patient != null ? firstRecord.patient!.fullName : 'Patient';
+
+                                    final status = groupedRecord.aggregateStatus;
+                                    Color recordColor;
+                                    switch (status) {
+                                      case ReferenceRangeStatus.normal:
+                                        recordColor = Colors.green.shade700;
+                                        break;
+                                      case ReferenceRangeStatus.criticalHigh:
+                                      case ReferenceRangeStatus.criticalLow:
+                                        recordColor = Colors.red.shade700;
+                                        break;
+                                      case ReferenceRangeStatus.inconclusive:
+                                        recordColor = Colors.orange.shade700;
+                                        break;
+                                    }
 
                                     return Card(
                                       elevation: 1.5,
@@ -250,14 +495,14 @@ class _DepartmentHomeScreenState extends State<DepartmentHomeScreen> with Single
                                       ),
                                       child: ListTile(
                                         contentPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                                        onTap: () => _showRecordDetails(context, record),
+                                        onTap: () => _showRecordDetails(context, groupedRecord),
                                         leading: CircleAvatar(
                                           backgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                                           child: Icon(Icons.assignment_outlined,
                                               color: Theme.of(context).colorScheme.primary),
                                         ),
                                         title: Text(
-                                          record.testType,
+                                          groupedRecord.displayTitle,
                                           style: const TextStyle(fontWeight: FontWeight.bold),
                                         ),
                                         subtitle: Column(
@@ -266,7 +511,7 @@ class _DepartmentHomeScreenState extends State<DepartmentHomeScreen> with Single
                                             const SizedBox(height: 4),
                                             Text('Patient: $patientName'),
                                             Text(
-                                              'Recorded: ${record.createdAt.toLocal().toString().substring(0, 16)}',
+                                              'Recorded: ${firstRecord.createdAt.toLocal().toString().substring(0, 16)}',
                                               style: TextStyle(
                                                 fontSize: 12,
                                                 color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
@@ -279,9 +524,12 @@ class _DepartmentHomeScreenState extends State<DepartmentHomeScreen> with Single
                                           crossAxisAlignment: CrossAxisAlignment.end,
                                           children: [
                                             Text(
-                                              '${record.testResults['test_value']?.toString() ?? ''} ${record.testResults['unit']?.toString() ?? ''}',
+                                              groupedRecord.isSingleParameter
+                                                  ? '${firstRecord.testResults['test_value']?.toString() ?? ''} ${firstRecord.testResults['unit']?.toString() ?? ''}'
+                                                  : 'Multi-parameter',
                                               style: TextStyle(
                                                 fontWeight: FontWeight.bold,
+                                                fontSize: groupedRecord.isSingleParameter ? 14 : 11,
                                                 color: Theme.of(context).colorScheme.onSurface,
                                               ),
                                             ),
@@ -293,7 +541,7 @@ class _DepartmentHomeScreenState extends State<DepartmentHomeScreen> with Single
                                                 borderRadius: BorderRadius.circular(4),
                                               ),
                                               child: Text(
-                                                record.referenceRangeStatus.name.toUpperCase(),
+                                                status.name.toUpperCase().replaceAll('_', ' '),
                                                 style: TextStyle(
                                                   fontSize: 8,
                                                   fontWeight: FontWeight.bold,

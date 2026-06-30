@@ -9,10 +9,13 @@ import '../../../../core/models/patient.dart';
 import '../../../../core/supabase/supabase_client.dart';
 import '../../../../core/utils/uuid_generator.dart';
 import '../../../../core/repositories/documents_repository.dart';
+import '../../../ocr/data/document_quality_service.dart';
+import '../../../ocr/domain/quality_assessment.dart';
 
 class DocumentSubmissionProvider extends ChangeNotifier {
   final LocalDatabase _localDb;
   final _docsRepo = DocumentsRepository();
+  final _qualityService = DocumentQualityService();
   
   bool _isLoading = false;
   String? _errorMessage;
@@ -87,7 +90,22 @@ class DocumentSubmissionProvider extends ChangeNotifier {
       final String ocrText = recognizedText.text;
       
       _extractedOcrText = ocrText;
-      _preScreenMetadata = preScreenOcrText(ocrText, patient.firstName, patient.lastName);
+      
+      // Perform AI Quality Assessment (Path A) via Edge Function
+      final QualityAssessment assessment = await _qualityService.assess(
+        ocrText: ocrText,
+        patientName: '${patient.firstName} ${patient.lastName}',
+      );
+      
+      final bool identityMatch = checkPatientName(ocrText, patient.firstName, patient.lastName);
+      final bool submittedWithWarnings = assessment.verdict != QualityVerdict.good || !identityMatch;
+      
+      _preScreenMetadata = {
+        'ocr_text': ocrText,
+        'quality_assessment': assessment.toJson(),
+        'identity_match': identityMatch,
+        'submitted_with_warnings': submittedWithWarnings,
+      };
       
       _isProcessingOcr = false;
       notifyListeners();
@@ -113,8 +131,21 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Checks if the patient's first and last name match tokens in the OCR text (sub-task 4.8).
+  /// Case-insensitive and whitespace-tolerant.
+  bool checkPatientName(String ocrText, String firstName, String lastName) {
+    final text = ocrText.toLowerCase();
+    final cleanFirstName = firstName.toLowerCase().trim();
+    final cleanLastName = lastName.toLowerCase().trim();
+    return text.contains(cleanFirstName) && text.contains(cleanLastName);
+  }
+
   /// Pre-screens extracted OCR text for key clinic checklist requirements.
+  /// Note: The original hardcoded date pattern, doctor token, and keyword checks
+  /// (sub-tasks 4.6, 4.7, 4.9) are commented out/removed for Path A. They are replaced
+  /// by the Edge-Function-based quality assessment.
   Map<String, dynamic> preScreenOcrText(String ocrText, String firstName, String lastName) {
+    /*
     final text = ocrText.toLowerCase();
     
     // 1. Date Check (matches formats like MM/DD/YYYY, DD-MM-YYYY, YYYY/MM/DD)
@@ -125,11 +156,6 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     final doctorRegex = RegExp(r'\b(dr\.|dr|m\.d\.|md)\b');
     final hasDoctor = doctorRegex.hasMatch(text);
     
-    // 3. Patient Name Check (verifies first and last name match tokens in OCR text)
-    final cleanFirstName = firstName.toLowerCase().trim();
-    final cleanLastName = lastName.toLowerCase().trim();
-    final hasPatientName = text.contains(cleanFirstName) && text.contains(cleanLastName);
-    
     // 4. Diagnostic Request Keywords Check
     final keywords = [
       'laboratory', 'request', 'referral', 'clinic', 'diagnostic', 
@@ -137,41 +163,16 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     ];
     final matchedKeywords = keywords.where((kw) => text.contains(kw)).toList();
     final hasKeywords = matchedKeywords.isNotEmpty;
+    */
     
-    final matchedFields = <String>[];
-    final missingFields = <String>[];
-    
-    if (hasDate) {
-      matchedFields.add('date');
-    } else {
-      missingFields.add('date');
-    }
-    
-    if (hasDoctor) {
-      matchedFields.add('doctor');
-    } else {
-      missingFields.add('doctor');
-    }
-    
-    if (hasPatientName) {
-      matchedFields.add('patient_name');
-    } else {
-      missingFields.add('patient_name');
-    }
-    
-    if (hasKeywords) {
-      matchedFields.add('request_keyword');
-    } else {
-      missingFields.add('request_keyword');
-    }
+    final bool identityMatch = checkPatientName(ocrText, firstName, lastName);
+    final fallback = DocumentQualityService.fallbackAssessment;
     
     return {
-      'matched_fields': matchedFields,
-      'missing_fields': missingFields,
-      'ocr_text_length': ocrText.length,
-      'keyword_set_version': '1.0',
-      'ocr_engine_version': 'ml_kit_1.0',
-      'matched_keywords': matchedKeywords,
+      'ocr_text': ocrText,
+      'quality_assessment': fallback.toJson(),
+      'identity_match': identityMatch,
+      'submitted_with_warnings': true,
     };
   }
 
