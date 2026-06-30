@@ -34,3 +34,11 @@ coverage/
 
 # APK release artifacts (optional)
 build/app/outputs/flutter-apk/
+
+# User requested ignores
+supabase/
+files.zip
+files/
+test/
+web_reference/
+docs/

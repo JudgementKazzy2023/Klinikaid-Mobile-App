@@ -1,1 +1,0 @@
-Placeholder for triage_after_clean_notes.png. This screenshot should show the Patient Queue page or Chatbot page, demonstrating that the triage notes render as a clean, human-readable text block rather than raw JSON.

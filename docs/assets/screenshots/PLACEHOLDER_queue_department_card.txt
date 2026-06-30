@@ -1,1 +1,0 @@
-Placeholder for queue_department_card.png. This screenshot should show a card in the Department Staff queue list. It displays the queue status mapping for staff (e.g. 'WAITING' or 'IN PROGRESS' badges).

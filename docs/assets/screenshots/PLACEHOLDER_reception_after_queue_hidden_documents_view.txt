@@ -1,1 +1,0 @@
-Placeholder for reception_after_queue_hidden_documents_view.png. This screenshot should show the Receptionist home screen, confirming that the 'Today's Queue' tab is hidden and the document directory is the primary view.

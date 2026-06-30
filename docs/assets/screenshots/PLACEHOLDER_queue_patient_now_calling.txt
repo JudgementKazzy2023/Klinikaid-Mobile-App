@@ -1,1 +1,0 @@
-Placeholder for queue_patient_now_calling.png. This screenshot should show the Patient's active queue ticket status card displaying the status label 'NOW CALLING' and a speaker icon, representing the now-serving queue stage.
