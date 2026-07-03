@@ -28,6 +28,7 @@ class AuthProvider extends ChangeNotifier {
   String? _errorMessage;
   VerificationState _verificationState = VerificationState();
   bool _wasLoggedOutForInactivity = false;
+  bool _isFirstAuthCheck = true;
 
   Profile? get profile => _profile;
   Patient? get patient => _patient;
@@ -130,24 +131,29 @@ class AuthProvider extends ChangeNotifier {
 
     // Session activity check on resume / startup / login:
     if (isAuthenticated) {
-      await _activityService.restoreLastActivity();
-      final role = _profile?.role;
-      final timeout = (role == UserRole.patient)
-          ? const Duration(minutes: 20)
-          : const Duration(minutes: 15);
-      if (!_activityService.isExempt && _activityService.idleTime > timeout) {
-        _wasLoggedOutForInactivity = true;
-        await _client.auth.signOut();
-        _user = null;
-        _session = null;
-        _profile = null;
-        _patient = null;
-        _hasConsented = false;
-        _isOnboarded = false;
-        _activityService.stopMonitoring();
-      } else {
-        _startInactivityMonitor();
+      if (_isFirstAuthCheck) {
+        _isFirstAuthCheck = false;
+        await _activityService.restoreLastActivity();
+        final role = _profile?.role;
+        final timeout = (role == UserRole.patient)
+            ? const Duration(minutes: 20)
+            : const Duration(minutes: 15);
+        if (!_activityService.isExempt && _activityService.idleTime > timeout) {
+          _wasLoggedOutForInactivity = true;
+          await _client.auth.signOut();
+          _user = null;
+          _session = null;
+          _profile = null;
+          _patient = null;
+          _hasConsented = false;
+          _isOnboarded = false;
+          _activityService.stopMonitoring();
+          return;
+        }
       }
+      _startInactivityMonitor();
+    } else {
+      _isFirstAuthCheck = false;
     }
   }
 
