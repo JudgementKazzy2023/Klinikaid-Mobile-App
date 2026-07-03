@@ -30,8 +30,8 @@ class SessionLifecycleObserver with WidgetsBindingObserver {
     
     final role = auth.profile?.role;
     final timeout = (role == UserRole.patient)
-        ? const Duration(seconds: 15)
-        : const Duration(seconds: 10);
+        ? const Duration(minutes: 20)
+        : const Duration(minutes: 10);
 
     if (activity.idleTime > timeout) {
       auth.handleInactivityLogout();

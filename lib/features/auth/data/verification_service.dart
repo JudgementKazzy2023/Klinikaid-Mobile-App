@@ -88,10 +88,15 @@ class SupabaseVerificationService implements VerificationService {
         final message = json['message'] as String? ?? 'Verification failed';
         final attemptsRemaining = json['attempts_remaining'] as int?;
         if (error == 'wrong_code') {
+          final attemptsMsg = attemptsRemaining != null
+              ? (attemptsRemaining == 1
+                  ? '1 attempt remaining.'
+                  : '$attemptsRemaining attempts remaining.')
+              : '';
           return VerificationResult(
             status: VerificationStatus.wrongCode,
             attemptsRemaining: attemptsRemaining,
-            errorMessage: message,
+            errorMessage: 'Incorrect code. $attemptsMsg'.trim(),
           );
         } else if (error == 'too_many_attempts') {
           return VerificationResult(
@@ -161,7 +166,7 @@ class MockVerificationService implements VerificationService {
       return VerificationResult(
         status: VerificationStatus.wrongCode,
         attemptsRemaining: 3,
-        errorMessage: 'The code is incorrect. 3 attempts remaining.',
+        errorMessage: 'Incorrect code. 3 attempts remaining.',
       );
     }
     if (code == '123456') {
@@ -170,7 +175,7 @@ class MockVerificationService implements VerificationService {
     return VerificationResult(
       status: VerificationStatus.wrongCode,
       attemptsRemaining: 4,
-      errorMessage: 'The code is incorrect.',
+      errorMessage: 'Incorrect code. 4 attempts remaining.',
     );
   }
 

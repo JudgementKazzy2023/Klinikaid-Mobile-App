@@ -35,7 +35,7 @@ class SessionActivityService {
     required VoidCallback onTimeout,
   }) {
     _checkTimer?.cancel();
-    _checkTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _checkTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (!_exempt && idleTime > timeout) {
         onTimeout();
       }
