@@ -56,6 +56,21 @@ class SupabaseVerificationService implements VerificationService {
           errorMessage: message,
         );
       }
+    } on FunctionException catch (fe) {
+      final details = fe.details;
+      final Map<String, dynamic> json = details is Map<String, dynamic> ? details : {};
+      final error = json['error'] as String?;
+      final message = json['message'] as String? ?? fe.reasonPhrase ?? 'Failed to send code';
+      if (error == 'rate_limit_exceeded') {
+        return VerificationResult(
+          status: VerificationStatus.rateLimited,
+          errorMessage: message,
+        );
+      }
+      return VerificationResult(
+        status: VerificationStatus.networkError,
+        errorMessage: message,
+      );
     } on SocketException {
       return VerificationResult(
         status: VerificationStatus.networkError,
@@ -114,6 +129,38 @@ class SupabaseVerificationService implements VerificationService {
           errorMessage: message,
         );
       }
+    } on FunctionException catch (fe) {
+      final details = fe.details;
+      final Map<String, dynamic> json = details is Map<String, dynamic> ? details : {};
+      final error = json['error'] as String?;
+      final attemptsRemaining = json['attempts_remaining'] as int?;
+      
+      if (error == 'wrong_code') {
+        final attemptsMsg = attemptsRemaining != null
+            ? (attemptsRemaining == 1
+                ? '1 attempt remaining.'
+                : '$attemptsRemaining attempts remaining.')
+            : '';
+        return VerificationResult(
+          status: VerificationStatus.wrongCode,
+          attemptsRemaining: attemptsRemaining,
+          errorMessage: 'Incorrect code. $attemptsMsg'.trim(),
+        );
+      } else if (error == 'too_many_attempts') {
+        return VerificationResult(
+          status: VerificationStatus.tooManyAttempts,
+          errorMessage: 'Too many incorrect attempts. Please try again later or request a new code.',
+        );
+      } else if (error == 'code_expired') {
+        return VerificationResult(
+          status: VerificationStatus.codeExpired,
+          errorMessage: 'The verification code has expired. Please request a new code.',
+        );
+      }
+      return VerificationResult(
+        status: VerificationStatus.networkError,
+        errorMessage: json['message'] as String? ?? fe.reasonPhrase ?? fe.toString(),
+      );
     } on SocketException {
       return VerificationResult(
         status: VerificationStatus.networkError,
