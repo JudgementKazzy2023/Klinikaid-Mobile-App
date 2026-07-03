@@ -137,7 +137,7 @@ class AuthProvider extends ChangeNotifier {
         final role = _profile?.role;
         final timeout = (role == UserRole.patient)
             ? const Duration(minutes: 20)
-            : const Duration(minutes: 15);
+            : const Duration(minutes: 10);
         if (!_activityService.isExempt && _activityService.idleTime > timeout) {
           _wasLoggedOutForInactivity = true;
           await _client.auth.signOut();
@@ -163,7 +163,7 @@ class AuthProvider extends ChangeNotifier {
 
     final timeout = (role == UserRole.patient)
         ? const Duration(minutes: 20)
-        : const Duration(minutes: 15);
+        : const Duration(minutes: 10);
 
     _activityService.recordActivity();
     _activityService.startMonitoring(
