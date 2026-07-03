@@ -6,6 +6,7 @@ import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/auth/presentation/screens/register_screen.dart';
 import '../../features/auth/presentation/screens/consent_screen.dart';
 import '../../features/auth/presentation/screens/onboarding_screen.dart';
+import '../../features/auth/presentation/screens/verification_code_screen.dart';
 import '../../features/dashboard/presentation/screens/dashboard_screen.dart';
 import '../../features/dashboard/presentation/screens/profile_screen.dart';
 import '../../features/documents/presentation/screens/submit_document_screen.dart';
@@ -66,6 +67,19 @@ class AppRouter {
 
       // 4. Role-based routing
       if (role == UserRole.patient) {
+        // Enforce Email OTP Verification Gate
+        if (authProvider.profile?.emailVerifiedAt == null) {
+          if (state.matchedLocation == '/verify') {
+            return null; // Stay on verify screen
+          }
+          return '/verify';
+        }
+
+        // If verified patient attempts to visit verify screen, redirect them away
+        if (state.matchedLocation == '/verify') {
+          return '/patient';
+        }
+
         // Enforce Privacy Consent Gate (RA 10173)
         if (!hasConsented) {
           if (isConsenting) {
@@ -83,7 +97,7 @@ class AppRouter {
         }
 
         // Authenticated, Consented & Onboarded Patient redirection
-        if (isLoggingIn || isRegistering || isConsenting || isOnboarding || state.matchedLocation == '/') {
+        if (isLoggingIn || isRegistering || isConsenting || isOnboarding || state.matchedLocation == '/' || state.matchedLocation == '/verify') {
           return '/patient';
         }
 
@@ -154,6 +168,10 @@ class AppRouter {
       GoRoute(
         path: '/onboarding',
         builder: (context, state) => const OnboardingScreen(),
+      ),
+      GoRoute(
+        path: '/verify',
+        builder: (context, state) => const VerificationCodeScreen(),
       ),
       GoRoute(
         path: '/staff/reception',

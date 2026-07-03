@@ -37,7 +37,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (success && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Registration successful! Please check your email if confirmation is required.'),
+            content: const Text('Registration successful! Please check your email for the verification code.'),
             backgroundColor: Theme.of(context).colorScheme.primary,
           ),
         );

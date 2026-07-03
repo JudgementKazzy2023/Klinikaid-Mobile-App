@@ -5,6 +5,7 @@ import '../../../../core/models/patient_queue.dart';
 import '../providers/queue_provider.dart';
 import '../../../../core/utils/triage_notes_formatter.dart';
 import '../../../../core/utils/queue_status_formatter.dart';
+import '../../../../features/auth/data/session_activity_service.dart';
 
 class QueueScreen extends StatefulWidget {
   const QueueScreen({super.key});
@@ -14,12 +15,29 @@ class QueueScreen extends StatefulWidget {
 }
 
 class _QueueScreenState extends State<QueueScreen> {
+  SessionActivityService? _sessionActivityService;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadQueueData();
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_sessionActivityService == null) {
+      _sessionActivityService = context.read<SessionActivityService>();
+      _sessionActivityService?.setExempt(true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _sessionActivityService?.setExempt(false);
+    super.dispose();
   }
 
   void _loadQueueData() {

@@ -73,6 +73,7 @@ class Profile {
   final Department? department;
   final bool isActive;
   final DateTime? acceptedPrivacyAt;
+  final DateTime? emailVerifiedAt;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -83,6 +84,7 @@ class Profile {
     this.department,
     this.isActive = true,
     this.acceptedPrivacyAt,
+    this.emailVerifiedAt,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -97,6 +99,9 @@ class Profile {
       acceptedPrivacyAt: json['accepted_privacy_at'] != null
           ? DateTime.parse(json['accepted_privacy_at'] as String)
           : null,
+      emailVerifiedAt: json['email_verified_at'] != null
+          ? DateTime.parse(json['email_verified_at'] as String)
+          : null,
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
     );
@@ -110,6 +115,7 @@ class Profile {
       'department': department?.toJsonValue(),
       'is_active': isActive,
       'accepted_privacy_at': acceptedPrivacyAt?.toIso8601String(),
+      'email_verified_at': emailVerifiedAt?.toIso8601String(),
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
     };

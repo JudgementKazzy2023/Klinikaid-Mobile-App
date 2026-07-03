@@ -6,12 +6,17 @@ import '../../../../core/repositories/profiles_repository.dart';
 import '../../../../core/models/patient.dart';
 import '../../../../core/models/profile.dart';
 import '../../../../core/errors/failures.dart';
+import '../../domain/verification_state.dart';
+import '../../data/verification_service.dart';
+import '../../data/session_activity_service.dart';
 
 /// Provider that manages authentication state, RA 10173 consent, and patient onboarding flow.
 class AuthProvider extends ChangeNotifier {
   final _client = Supabase.instance.client;
   final _patientsRepo = PatientsRepository();
   final _profilesRepo = ProfilesRepository();
+  final VerificationService _verificationService;
+  final SessionActivityService _activityService;
 
   User? _user;
   Session? _session;
@@ -21,13 +26,22 @@ class AuthProvider extends ChangeNotifier {
   bool _isOnboarded = false;
   bool _isLoading = true;
   String? _errorMessage;
+  VerificationState _verificationState = VerificationState();
+  bool _wasLoggedOutForInactivity = false;
 
   Profile? get profile => _profile;
   Patient? get patient => _patient;
+  VerificationState get verificationState => _verificationState;
+  bool get wasLoggedOutForInactivity => _wasLoggedOutForInactivity;
 
   StreamSubscription<AuthState>? _authStateSubscription;
 
-  AuthProvider() {
+  AuthProvider({
+    VerificationService? verificationService,
+    SessionActivityService? activityService,
+  })  : _verificationService = verificationService ?? SupabaseVerificationService(),
+        _activityService = activityService ?? SessionActivityService(),
+        super() {
     _init();
   }
 
@@ -100,20 +114,66 @@ class AuthProvider extends ChangeNotifier {
       _hasConsented = true;
       _isOnboarded = true;
       _patient = null;
-      return;
+    } else {
+      // 2. Evaluate Privacy Consent (read exclusively from database profiles.accepted_privacy_at)
+      _hasConsented = _profile?.acceptedPrivacyAt != null;
+
+      // 3. Evaluate Onboarding Status (linked patients row)
+      try {
+        _patient = await _patientsRepo.getPatientByProfileId(currentUser.id);
+        _isOnboarded = _patient != null;
+      } catch (_) {
+        _patient = null;
+        _isOnboarded = false;
+      }
     }
 
-    // 2. Evaluate Privacy Consent (read exclusively from database profiles.accepted_privacy_at)
-    _hasConsented = _profile?.acceptedPrivacyAt != null;
-
-    // 3. Evaluate Onboarding Status (linked patients row)
-    try {
-      _patient = await _patientsRepo.getPatientByProfileId(currentUser.id);
-      _isOnboarded = _patient != null;
-    } catch (_) {
-      _patient = null;
-      _isOnboarded = false;
+    // Session activity check on resume / startup / login:
+    if (isAuthenticated) {
+      await _activityService.restoreLastActivity();
+      final role = _profile?.role;
+      final timeout = (role == UserRole.patient)
+          ? const Duration(minutes: 20)
+          : const Duration(minutes: 15);
+      if (!_activityService.isExempt && _activityService.idleTime > timeout) {
+        _wasLoggedOutForInactivity = true;
+        await _client.auth.signOut();
+        _user = null;
+        _session = null;
+        _profile = null;
+        _patient = null;
+        _hasConsented = false;
+        _isOnboarded = false;
+        _activityService.stopMonitoring();
+      } else {
+        _startInactivityMonitor();
+      }
     }
+  }
+
+  void _startInactivityMonitor() {
+    final role = _profile?.role;
+    if (role == null) return;
+
+    final timeout = (role == UserRole.patient)
+        ? const Duration(minutes: 20)
+        : const Duration(minutes: 15);
+
+    _activityService.recordActivity();
+    _activityService.startMonitoring(
+      timeout: timeout,
+      onTimeout: handleInactivityLogout,
+    );
+  }
+
+  Future<void> handleInactivityLogout() async {
+    _wasLoggedOutForInactivity = true;
+    await signOut();
+  }
+
+  void clearInactivityFlag() {
+    _wasLoggedOutForInactivity = false;
+    notifyListeners();
   }
 
 
@@ -163,6 +223,22 @@ class AuthProvider extends ChangeNotifier {
       _session = response.session;
       _user = response.user;
       await _updateLocalStates();
+      
+      // Automatically send verification code upon successful signup
+      if (_user != null) {
+        final sent = await sendVerificationCode(email);
+        if (!sent) {
+          // If sending fails, sign out to prevent half-created session
+          await _client.auth.signOut();
+          _user = null;
+          _session = null;
+          _profile = null;
+          _isLoading = false;
+          notifyListeners();
+          return false;
+        }
+      }
+
       _isLoading = false;
       notifyListeners();
       return true;
@@ -192,6 +268,7 @@ class AuthProvider extends ChangeNotifier {
           department: profile.department,
           isActive: profile.isActive,
           acceptedPrivacyAt: DateTime.now(),
+          emailVerifiedAt: profile.emailVerifiedAt,
           createdAt: profile.createdAt,
           updatedAt: DateTime.now(),
         );
@@ -322,6 +399,7 @@ class AuthProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
     try {
+      _activityService.stopMonitoring();
       await _client.auth.signOut();
     } finally {
       _user = null;
@@ -333,6 +411,83 @@ class AuthProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  /// Triggers Edge Function to send email verification code.
+  Future<bool> sendVerificationCode(String email) async {
+    _verificationState = _verificationState.copyWith(status: VerificationStatus.verifying);
+    notifyListeners();
+
+    final result = await _verificationService.sendCode(email: email);
+    if (result.status == VerificationStatus.codeSent) {
+      _verificationState = VerificationState(
+        status: VerificationStatus.codeSent,
+        cooldownUntil: DateTime.now().add(const Duration(seconds: 60)),
+      );
+      _errorMessage = null;
+      notifyListeners();
+      return true;
+    } else {
+      _verificationState = VerificationState(
+        status: result.status,
+        errorMessage: result.errorMessage,
+      );
+      _errorMessage = result.errorMessage;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Triggers Edge Function to verify code and updates local profile state upon success.
+  Future<bool> verifyCode(String code) async {
+    final email = _user?.email;
+    if (email == null) {
+      _errorMessage = 'No active session email found.';
+      notifyListeners();
+      return false;
+    }
+
+    _verificationState = _verificationState.copyWith(status: VerificationStatus.verifying);
+    notifyListeners();
+
+    final result = await _verificationService.verifyCode(email: email, code: code);
+    if (result.status == VerificationStatus.verified) {
+      _verificationState = VerificationState(status: VerificationStatus.verified);
+      _errorMessage = null;
+      await _updateLocalStates();
+      notifyListeners();
+      return true;
+    } else {
+      _verificationState = VerificationState(
+        status: result.status,
+        attemptsRemaining: result.attemptsRemaining,
+        errorMessage: result.errorMessage,
+      );
+      _errorMessage = result.errorMessage;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Cancels registration, deletes pending unverified user, signs out, and resets state.
+  Future<bool> restartVerification() async {
+    _isLoading = true;
+    notifyListeners();
+
+    final deleted = await _verificationService.deletePendingUser();
+    if (!deleted) {
+      _errorMessage = 'Failed to cancel registration. Please try again.';
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+
+    await signOut();
+    _verificationState = VerificationState(status: VerificationStatus.idle);
+    _errorMessage = null;
+    _isLoading = false;
+    notifyListeners();
+    return true;
   }
 
   @override
