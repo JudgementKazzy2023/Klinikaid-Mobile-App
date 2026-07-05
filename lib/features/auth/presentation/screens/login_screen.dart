@@ -179,7 +179,26 @@ class _LoginScreenState extends State<LoginScreen> {
                               return null;
                             },
                           ),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 8),
+
+                          // Forgot Password
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: () {
+                                authProvider.clearError();
+                                context.push('/forgot-password');
+                              },
+                              style: TextButton.styleFrom(
+                                foregroundColor: Theme.of(context).colorScheme.primary,
+                                padding: EdgeInsets.zero,
+                                minimumSize: const Size(0, 0),
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: const Text('Forgot Password?'),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
 
                           // Error message if any
                           if (authProvider.errorMessage != null) ...[

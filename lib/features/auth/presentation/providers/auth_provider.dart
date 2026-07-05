@@ -9,6 +9,7 @@ import '../../../../core/errors/failures.dart';
 import '../../domain/verification_state.dart';
 import '../../data/verification_service.dart';
 import '../../data/session_activity_service.dart';
+import '../../domain/password_reset_result.dart';
 
 /// Provider that manages authentication state, RA 10173 consent, and patient onboarding flow.
 class AuthProvider extends ChangeNotifier {
@@ -187,6 +188,30 @@ class AuthProvider extends ChangeNotifier {
   void clearError() {
     _errorMessage = null;
     notifyListeners();
+  }
+
+  /// Triggers server-side secure password reset Edge Function request-password-reset.
+  Future<PasswordResetResult> sendPasswordReset(String email) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      await _client.functions.invoke(
+        'request-password-reset',
+        body: {'email': email},
+      );
+      
+      _isLoading = false;
+      notifyListeners();
+      return PasswordResetResult.success;
+    } catch (e) {
+      // Even on exception/error, return success to maintain uniform outcome
+      // and prevent account enumeration via timing or client-side error states
+      _isLoading = false;
+      notifyListeners();
+      return PasswordResetResult.success;
+    }
   }
 
   /// Signs in a user using email and password.

@@ -7,6 +7,7 @@ import '../../features/auth/presentation/screens/register_screen.dart';
 import '../../features/auth/presentation/screens/consent_screen.dart';
 import '../../features/auth/presentation/screens/onboarding_screen.dart';
 import '../../features/auth/presentation/screens/verification_code_screen.dart';
+import '../../features/auth/presentation/screens/forgot_password_screen.dart';
 import '../../features/dashboard/presentation/screens/dashboard_screen.dart';
 import '../../features/dashboard/presentation/screens/profile_screen.dart';
 import '../../features/documents/presentation/screens/submit_document_screen.dart';
@@ -54,8 +55,8 @@ class AppRouter {
 
       // 2. Unauthenticated User gating
       if (!isAuthenticated) {
-        if (isLoggingIn || isRegistering) {
-          return null; // Allow login or register screen
+        if (isLoggingIn || isRegistering || state.matchedLocation == '/forgot-password') {
+          return null; // Allow login, register, or forgot password screen
         }
         return '/login';
       }
@@ -160,6 +161,10 @@ class AppRouter {
       GoRoute(
         path: '/register',
         builder: (context, state) => const RegisterScreen(),
+      ),
+      GoRoute(
+        path: '/forgot-password',
+        builder: (context, state) => const ForgotPasswordScreen(),
       ),
       GoRoute(
         path: '/consent',
