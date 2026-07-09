@@ -5,7 +5,6 @@ import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/auth/presentation/screens/register_screen.dart';
 import '../../features/auth/presentation/screens/consent_screen.dart';
-import '../../features/auth/presentation/screens/onboarding_screen.dart';
 import '../../features/auth/presentation/screens/verification_code_screen.dart';
 import '../../features/auth/presentation/screens/forgot_password_screen.dart';
 import '../../features/dashboard/presentation/screens/dashboard_screen.dart';
@@ -26,6 +25,7 @@ import '../models/profile.dart';
 import '../../features/staff/presentation/screens/reception_home_screen.dart';
 import '../../features/staff/presentation/screens/department_home_screen.dart';
 import '../../features/staff/presentation/screens/specialist_home_screen.dart';
+import '../../features/auth/presentation/screens/totp_verify_screen.dart';
 
 /// AppRouter defines the structural gating/redirection rules for the application.
 class AppRouter {
@@ -46,7 +46,6 @@ class AppRouter {
       final isLoggingIn = state.matchedLocation == '/login';
       final isRegistering = state.matchedLocation == '/register';
       final isConsenting = state.matchedLocation == '/consent';
-      final isOnboarding = state.matchedLocation == '/onboarding';
 
       // 1. If auth is loading, do not perform redirects yet (let it show loading states)
       if (isLoading) {
@@ -59,6 +58,29 @@ class AppRouter {
           return null; // Allow login, register, or forgot password screen
         }
         return '/login';
+      }
+
+      // 2b. MFA Step-up gating
+      if (authProvider.isAal1Pending) {
+        if (state.matchedLocation == '/mfa-verify') {
+          return null;
+        }
+        return '/mfa-verify';
+      }
+
+      // Prevent non-pending users from accessing /mfa-verify
+      if (state.matchedLocation == '/mfa-verify') {
+        if (role == UserRole.patient) {
+          return '/patient';
+        } else if (role == UserRole.receptionist) {
+          return '/staff/reception';
+        } else if (role == UserRole.departmentStaff) {
+          final dept = authProvider.profile?.department?.toJsonValue() ?? 'laboratory';
+          return '/staff/department/$dept';
+        } else if (role == UserRole.medicalSpecialist) {
+          return '/staff/specialist';
+        }
+        return '/';
       }
 
       // 3. Admin Account blocking
@@ -89,16 +111,8 @@ class AppRouter {
           return '/consent';
         }
 
-        // Onboarding Gate (Patient record check)
-        if (!isOnboarded) {
-          if (isOnboarding) {
-            return null; // Stay on onboarding screen
-          }
-          return '/onboarding';
-        }
-
-        // Authenticated, Consented & Onboarded Patient redirection
-        if (isLoggingIn || isRegistering || isConsenting || isOnboarding || state.matchedLocation == '/' || state.matchedLocation == '/verify') {
+        // Authenticated & Consented Patient redirection
+        if (isLoggingIn || isRegistering || isConsenting || state.matchedLocation == '/' || state.matchedLocation == '/verify') {
           return '/patient';
         }
 
@@ -116,7 +130,7 @@ class AppRouter {
           role == UserRole.medicalSpecialist) {
         
         final isStaffPath = state.matchedLocation.startsWith('/staff/');
-        final isCommonPath = isLoggingIn || isRegistering || isConsenting || isOnboarding;
+        final isCommonPath = isLoggingIn || isRegistering || isConsenting;
 
         // Staff trying to access / or patient routes are routed to their home
         if (!isStaffPath && !isCommonPath) {
@@ -159,6 +173,10 @@ class AppRouter {
         builder: (context, state) => const LoginScreen(),
       ),
       GoRoute(
+        path: '/mfa-verify',
+        builder: (context, state) => const TotpVerifyScreen(),
+      ),
+      GoRoute(
         path: '/register',
         builder: (context, state) => const RegisterScreen(),
       ),
@@ -170,10 +188,7 @@ class AppRouter {
         path: '/consent',
         builder: (context, state) => const ConsentScreen(),
       ),
-      GoRoute(
-        path: '/onboarding',
-        builder: (context, state) => const OnboardingScreen(),
-      ),
+
       GoRoute(
         path: '/verify',
         builder: (context, state) => const VerificationCodeScreen(),

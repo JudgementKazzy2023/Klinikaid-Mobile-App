@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import '../../../../features/auth/presentation/providers/auth_provider.dart';
 import '../../../../core/models/patient.dart';
 import '../providers/dashboard_provider.dart';
+import 'package:klinikaid_mobile/features/auth/domain/registration_validators.dart';
+import 'package:klinikaid_mobile/features/auth/presentation/widgets/email_change_modal.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -22,6 +24,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   DateTime? _selectedDateOfBirth;
   Gender _selectedGender = Gender.other;
   bool _isInit = false;
+  bool _isEditing = false;
 
   @override
   void didChangeDependencies() {
@@ -49,33 +52,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.dispose();
   }
 
-  Future<void> _selectDateOfBirth() async {
-    final initialDate = _selectedDateOfBirth ?? DateTime(2000, 1, 1);
-    final pickedDate = await showDatePicker(
-      context: context,
-      initialDate: initialDate,
-      firstDate: DateTime(1900),
-      lastDate: DateTime.now(),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: ColorScheme.light(
-              primary: Theme.of(context).colorScheme.primary,
-              onPrimary: Theme.of(context).colorScheme.onPrimary,
-              surface: Theme.of(context).cardColor,
-              onSurface: Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
-
-    if (pickedDate != null) {
-      setState(() {
-        _selectedDateOfBirth = pickedDate;
-      });
-    }
+  void _cancelEdit() {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final patient = authProvider.patient;
+    setState(() {
+      _contactController.text = patient?.contactNumber ?? '';
+      _addressController.text = patient?.address ?? '';
+      _isEditing = false;
+      _formKey.currentState?.reset();
+    });
   }
 
   Future<void> _saveProfile(bool isOffline) async {
@@ -89,15 +74,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
 
-    if (!_formKey.currentState!.validate() || _selectedDateOfBirth == null) {
-      if (_selectedDateOfBirth == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Please select your Date of Birth.'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
-      }
+    if (!_formKey.currentState!.validate()) {
       return;
     }
 
@@ -113,6 +90,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (mounted) {
       if (success) {
+        setState(() {
+          _isEditing = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Profile updated successfully!'),
@@ -238,45 +218,56 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 16),
 
+                  // Email Address
+                  _buildLabel('Email Address'),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          key: ValueKey(user?.email),
+                          initialValue: user?.email ?? '',
+                          enabled: false,
+                          style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5)),
+                          decoration: _buildInputDecoration(Icons.email_outlined),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      ElevatedButton(
+                        onPressed: () {
+                          showDialog(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (_) => const EmailChangeModal(),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Theme.of(context).colorScheme.primary,
+                          foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                        ),
+                        child: const Text('Change'),
+                      ),
+                    ],
+                  ),
+
                   // First Name
                   _buildLabel('First Name'),
                   TextFormField(
                     controller: _firstNameController,
-                    keyboardType: TextInputType.name,
-                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+                    enabled: false,
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5)),
                     decoration: _buildInputDecoration(Icons.person_outline),
-                    validator: (val) => val == null || val.trim().isEmpty ? 'First name is required' : null,
                   ),
-                  const SizedBox(height: 16),
+                  _buildAdminWarning(),
 
                   // Last Name
                   _buildLabel('Last Name'),
                   TextFormField(
                     controller: _lastNameController,
-                    keyboardType: TextInputType.name,
-                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+                    enabled: false,
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5)),
                     decoration: _buildInputDecoration(Icons.person_outline),
-                    validator: (val) => val == null || val.trim().isEmpty ? 'Last name is required' : null,
                   ),
-                  const SizedBox(height: 16),
-
-                  // Contact Number
-                  _buildLabel('Contact Number'),
-                  TextFormField(
-                    controller: _contactController,
-                    keyboardType: TextInputType.phone,
-                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-                    decoration: _buildInputDecoration(Icons.phone_outlined),
-                    validator: (val) {
-                      if (val == null || val.trim().isEmpty) return 'Contact number is required';
-                      // basic pattern matching
-                      if (!RegExp(r'^[0-9+() -]{7,15}$').hasMatch(val.trim())) {
-                        return 'Please enter a valid phone number';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 16),
+                  _buildAdminWarning(),
 
                   // Date of Birth & Gender row
                   Row(
@@ -288,34 +279,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             _buildLabel('Date of Birth'),
-                            InkWell(
-                              onTap: _selectDateOfBirth,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context).scaffoldBackgroundColor.withValues(alpha: 0.5),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Theme.of(context).colorScheme.outline, width: 1),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.calendar_today_outlined, color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7), size: 18),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        _selectedDateOfBirth != null
-                                            ? '${_selectedDateOfBirth!.year}-${_selectedDateOfBirth!.month.toString().padLeft(2, '0')}-${_selectedDateOfBirth!.day.toString().padLeft(2, '0')}'
-                                            : 'Select Date',
-                                        style: TextStyle(
-                                          color: _selectedDateOfBirth != null ? Theme.of(context).colorScheme.onSurface : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.38),
-                                          fontSize: 14,
-                                        ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).scaffoldBackgroundColor.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.5), width: 1),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.calendar_today_outlined, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.38), size: 18),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      _selectedDateOfBirth != null
+                                          ? '${_selectedDateOfBirth!.year}-${_selectedDateOfBirth!.month.toString().padLeft(2, '0')}-${_selectedDateOfBirth!.day.toString().padLeft(2, '0')}'
+                                          : 'Not Set',
+                                      style: TextStyle(
+                                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                                        fontSize: 14,
                                       ),
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ),
+                            _buildAdminWarning(),
                           ],
                         ),
                       ),
@@ -328,26 +317,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           children: [
                             _buildLabel('Gender'),
                             DropdownButtonFormField<Gender>(
-                              initialValue: _selectedGender,
+                              value: _selectedGender,
                               dropdownColor: Theme.of(context).cardColor,
-                              style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14),
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5), fontSize: 14),
                               decoration: _buildInputDecoration(null),
                               items: Gender.values.map((Gender g) {
                                 return DropdownMenuItem<Gender>(
                                   value: g,
                                   child: Text(
-                                    g.name[0].toUpperCase() + g.name.substring(1),
+                                    g == Gender.other ? 'Prefer not to say' : g.name[0].toUpperCase() + g.name.substring(1),
                                   ),
                                 );
                               }).toList(),
-                              onChanged: (Gender? val) {
-                                if (val != null) {
-                                  setState(() {
-                                    _selectedGender = val;
-                                  });
-                                }
-                              },
+                              onChanged: null, // Disabled dropdown
                             ),
+                            _buildAdminWarning(),
                           ],
                         ),
                       ),
@@ -355,19 +339,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 16),
 
+                  // Contact Number
+                  _buildLabel('Contact Number'),
+                  TextFormField(
+                    controller: _contactController,
+                    enabled: _isEditing,
+                    keyboardType: TextInputType.phone,
+                    style: TextStyle(
+                      color: _isEditing 
+                          ? Theme.of(context).colorScheme.onSurface 
+                          : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                    ),
+                    decoration: _buildInputDecoration(Icons.phone_outlined),
+                    validator: (val) {
+                      if (val == null || !RegistrationValidators.validateContactNumber(val)) {
+                        return 'Invalid Philippine format (e.g. 09xx or +639xx)';
+                      }
+                      return null;
+                    },
+                  ),
+                  if (_isEditing) ...[
+                    const SizedBox(height: 4),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4.0),
+                      child: Text(
+                        'Format: 09xxxxxxxxx or +639xxxxxxxxx',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+
                   // Address
                   _buildLabel('Address'),
                   TextFormField(
                     controller: _addressController,
+                    enabled: _isEditing,
                     keyboardType: TextInputType.streetAddress,
                     maxLines: 2,
-                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+                    style: TextStyle(
+                      color: _isEditing 
+                          ? Theme.of(context).colorScheme.onSurface 
+                          : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                    ),
                     decoration: _buildInputDecoration(Icons.location_on_outlined),
-                    validator: (val) => val == null || val.trim().isEmpty ? 'Address is required' : null,
+                    validator: (val) {
+                      if (val == null || !RegistrationValidators.validateAddress(val)) {
+                        return 'Please enter your address';
+                      }
+                      return null;
+                    },
                   ),
                   const SizedBox(height: 24),
 
-                  // Save Changes button
+                  // Offline indicator
                   if (isOffline)
                     Container(
                       width: double.infinity,
@@ -392,32 +420,84 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ),
                   
-                  SizedBox(
-                    width: double.infinity,
-                    height: 52,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        disabledBackgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
-                        foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                        disabledForegroundColor: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.38),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                  // Action buttons (Edit Profile / Save Changes & Cancel)
+                  if (!_isEditing)
+                    SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Theme.of(context).colorScheme.primary,
+                          disabledBackgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+                          foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                          disabledForegroundColor: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.38),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: isOffline || authProvider.isLoading ? null : () => setState(() => _isEditing = true),
+                        child: const Text(
+                          'Edit Profile',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                         ),
                       ),
-                      onPressed: isOffline || authProvider.isLoading ? null : () => _saveProfile(isOffline),
-                      child: authProvider.isLoading
-                          ? SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(color: Theme.of(context).colorScheme.onPrimary, strokeWidth: 2),
-                            )
-                          : const Text(
-                              'Save Changes',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    )
+                  else ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: SizedBox(
+                            height: 52,
+                            child: OutlinedButton(
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(color: Theme.of(context).colorScheme.outline),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              onPressed: authProvider.isLoading ? null : _cancelEdit,
+                              child: Text(
+                                'Cancel',
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.onSurface,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: SizedBox(
+                            height: 52,
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Theme.of(context).colorScheme.primary,
+                                disabledBackgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+                                foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                                disabledForegroundColor: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.38),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              onPressed: authProvider.isLoading ? null : () => _saveProfile(isOffline),
+                              child: authProvider.isLoading
+                                  ? SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(color: Theme.of(context).colorScheme.onPrimary, strokeWidth: 2),
+                                    )
+                                  : const Text(
+                                      'Save Changes',
+                                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                    ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
+                  ],
 
                   const SizedBox(height: 24),
                   Divider(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.5)),
@@ -476,6 +556,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Widget _buildAdminWarning() {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4.0, top: 4.0, bottom: 12.0),
+      child: Text(
+        'Contact clinic administrator to change',
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
+          fontSize: 11,
+        ),
+      ),
+    );
+  }
+
   InputDecoration _buildInputDecoration(IconData? prefixIcon) {
     return InputDecoration(
       prefixIcon: prefixIcon != null ? Icon(prefixIcon, color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7), size: 20) : null,
@@ -490,6 +583,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide: BorderSide(color: Theme.of(context).colorScheme.outline, width: 1),
+      ),
+      disabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.5), width: 1),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),

@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../providers/auth_provider.dart';
+import '../../domain/registration_validators.dart';
+import '../../../../core/models/patient.dart';
+import '../widgets/privacy_policy_modal.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -12,28 +15,106 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _firstNameController = TextEditingController();
+  final _lastNameController = TextEditingController();
+  final _contactController = TextEditingController();
+  final _addressController = TextEditingController();
+
+  DateTime? _dateOfBirth;
+  Gender _gender = Gender.male;
+  bool _consentChecked = false;
+  bool _hasReadPolicy = false;
+  String? _dobError;
 
   @override
   void dispose() {
-    _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _firstNameController.dispose();
+    _lastNameController.dispose();
+    _contactController.dispose();
+    _addressController.dispose();
     super.dispose();
   }
 
+  void _validateDob() {
+    _dobError = RegistrationValidators.validateDob(_dateOfBirth);
+  }
+
+  void _selectDate() async {
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now().subtract(const Duration(days: 365 * 18)), // Default to 18 years old
+      firstDate: DateTime(1900),
+      lastDate: DateTime.now(),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: Theme.of(context).colorScheme.primary,
+              onPrimary: Theme.of(context).colorScheme.onPrimary,
+              surface: Theme.of(context).cardColor,
+              onSurface: Theme.of(context).colorScheme.onSurface,
+            ),
+            dialogTheme: DialogThemeData(
+              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (pickedDate != null) {
+      setState(() {
+        _dateOfBirth = pickedDate;
+        _validateDob();
+      });
+    }
+  }
+
+  String _getPasswordStrength() {
+    final password = _passwordController.text;
+    if (password.isEmpty) return '';
+    if (password.length < 8) return 'Weak (min 8 characters)';
+    
+    final hasDigit = RegExp(r'[0-9]').hasMatch(password);
+    final hasSpecial = RegExp(r'[^a-zA-Z0-9]').hasMatch(password);
+    
+    if (hasDigit && hasSpecial) return 'Strong';
+    if (hasDigit || hasSpecial) return 'Medium';
+    return 'Weak (needs digit and special character)';
+  }
+
+  Color _getPasswordStrengthColor() {
+    final strength = _getPasswordStrength();
+    if (strength.startsWith('Weak')) return Colors.red;
+    if (strength == 'Medium') return Colors.orange;
+    if (strength == 'Strong') return Colors.green;
+    return Colors.transparent;
+  }
+
   void _submit() async {
-    if (_formKey.currentState!.validate()) {
+    setState(() {
+      _validateDob();
+    });
+
+    if (_formKey.currentState!.validate() && _dobError == null) {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final success = await authProvider.signUp(
-        _emailController.text.trim(),
-        _passwordController.text,
-        _nameController.text.trim(),
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+        firstName: _firstNameController.text.trim(),
+        lastName: _lastNameController.text.trim(),
+        dateOfBirth: _dateOfBirth!,
+        gender: _gender,
+        contactNumber: _contactController.text.trim(),
+        address: _addressController.text.trim(),
       );
+
       if (success && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -41,7 +122,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
             backgroundColor: Theme.of(context).colorScheme.primary,
           ),
         );
-        // Redirection is handled automatically by GoRouter via AuthProvider state changes
       }
     }
   }
@@ -62,7 +142,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Logo Hero transition
                 Center(
                   child: Hero(
                     tag: 'app_logo',
@@ -102,7 +181,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 36),
 
-                // Registration Form Card
                 Card(
                   margin: EdgeInsets.zero,
                   child: Padding(
@@ -112,26 +190,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          // Full Name
-                          TextFormField(
-                            controller: _nameController,
-                            style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-                            decoration: InputDecoration(
-                              hintText: 'Full Name',
-                              prefixIcon: Icon(Icons.person_outline, color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7)),
-                            ),
-                            validator: (value) {
-                              if (value == null || value.trim().isEmpty) {
-                                return 'Please enter your full name';
-                              }
-                              if (value.trim().length < 3) {
-                                return 'Full name must be at least 3 characters';
-                              }
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: 16),
-
                           // Email Address
                           TextFormField(
                             controller: _emailController,
@@ -144,7 +202,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               if (value == null || value.trim().isEmpty) {
                                 return 'Please enter your email';
                               }
-                              if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value.trim())) {
+                              if (!RegistrationValidators.validateEmail(value)) {
                                 return 'Please enter a valid email address';
                               }
                               return null;
@@ -156,6 +214,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           TextFormField(
                             controller: _passwordController,
                             obscureText: true,
+                            onChanged: (_) => setState(() {}),
                             style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
                             decoration: InputDecoration(
                               hintText: 'Password',
@@ -165,12 +224,41 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               if (value == null || value.isEmpty) {
                                 return 'Please enter a password';
                               }
-                              if (value.length < 6) {
-                                return 'Password must be at least 6 characters';
+                              if (!RegistrationValidators.validatePassword(value)) {
+                                return 'Password must be at least 8 characters and contain at least 1 digit and 1 special character';
                               }
                               return null;
                             },
                           ),
+                          if (_passwordController.text.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(4),
+                                    child: LinearProgressIndicator(
+                                      value: _getPasswordStrength() == 'Strong'
+                                          ? 1.0
+                                          : (_getPasswordStrength() == 'Medium' ? 0.6 : 0.3),
+                                      backgroundColor: Theme.of(context).colorScheme.outline.withValues(alpha: 0.2),
+                                      valueColor: AlwaysStoppedAnimation<Color>(_getPasswordStrengthColor()),
+                                      minHeight: 6,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  _getPasswordStrength(),
+                                  style: TextStyle(
+                                    color: _getPasswordStrengthColor(),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                           const SizedBox(height: 16),
 
                           // Confirm Password
@@ -192,7 +280,232 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               return null;
                             },
                           ),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 16),
+
+                          // First Name
+                          TextFormField(
+                            controller: _firstNameController,
+                            style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+                            decoration: InputDecoration(
+                              hintText: 'First Name',
+                              prefixIcon: Icon(Icons.person_outline, color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7)),
+                            ),
+                            validator: (value) {
+                              if (value == null || !RegistrationValidators.validateFirstName(value)) {
+                                return 'First name must be at least 3 characters';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Last Name
+                          TextFormField(
+                            controller: _lastNameController,
+                            style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+                            decoration: InputDecoration(
+                              hintText: 'Last Name',
+                              prefixIcon: Icon(Icons.person_outline, color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7)),
+                            ),
+                            validator: (value) {
+                              if (value == null || !RegistrationValidators.validateLastName(value)) {
+                                return 'Last name is required';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Date of Birth selection widget
+                          InkWell(
+                            onTap: _selectDate,
+                            borderRadius: BorderRadius.circular(8.0),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 18.0, horizontal: 12.0),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).scaffoldBackgroundColor.withValues(alpha: 0.5),
+                                borderRadius: BorderRadius.circular(8.0),
+                                border: Border.all(
+                                  color: _dobError != null
+                                      ? Theme.of(context).colorScheme.error
+                                      : Theme.of(context).colorScheme.outline,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.calendar_today_outlined,
+                                    color: _dobError != null
+                                        ? Theme.of(context).colorScheme.error
+                                        : Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    _dateOfBirth == null
+                                        ? 'Date of Birth'
+                                        : '${_dateOfBirth!.year}-${_dateOfBirth!.month.toString().padLeft(2, '0')}-${_dateOfBirth!.day.toString().padLeft(2, '0')}',
+                                    style: TextStyle(
+                                      color: _dateOfBirth == null
+                                          ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.38)
+                                          : Theme.of(context).colorScheme.onSurface,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          if (_dobError != null) ...[
+                            const SizedBox(height: 6),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 12.0),
+                              child: Text(
+                                _dobError!,
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 16),
+
+                          // Gender Dropdown
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).scaffoldBackgroundColor.withValues(alpha: 0.5),
+                              borderRadius: BorderRadius.circular(8.0),
+                              border: Border.all(color: Theme.of(context).colorScheme.outline),
+                            ),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<Gender>(
+                                value: _gender,
+                                dropdownColor: Theme.of(context).cardColor,
+                                icon: Icon(Icons.arrow_drop_down, color: Theme.of(context).colorScheme.primary),
+                                style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 16),
+                                onChanged: (Gender? val) {
+                                  if (val != null) {
+                                    setState(() => _gender = val);
+                                  }
+                                },
+                                items: const [
+                                  DropdownMenuItem(value: Gender.male, child: Text('Male')),
+                                  DropdownMenuItem(value: Gender.female, child: Text('Female')),
+                                  DropdownMenuItem(value: Gender.other, child: Text('Prefer not to say')),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Contact Number
+                          TextFormField(
+                            controller: _contactController,
+                            keyboardType: TextInputType.phone,
+                            style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+                            decoration: InputDecoration(
+                              hintText: 'Contact Number',
+                              prefixIcon: Icon(Icons.phone_outlined, color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7)),
+                            ),
+                            validator: (value) {
+                              if (value == null || !RegistrationValidators.validateContactNumber(value)) {
+                                return 'Invalid Philippine format (e.g. 09xx or +639xx)';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 4),
+                          Padding(
+                            padding: const EdgeInsets.only(left: 12.0),
+                            child: Text(
+                              'Format: 09xxxxxxxxx or +639xxxxxxxxx',
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Address
+                          TextFormField(
+                            controller: _addressController,
+                            maxLines: 2,
+                            style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+                            decoration: InputDecoration(
+                              hintText: 'Complete Address',
+                              prefixIcon: Padding(
+                                padding: const EdgeInsets.only(bottom: 24.0),
+                                child: Icon(Icons.home_outlined, color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7)),
+                              ),
+                            ),
+                            validator: (value) {
+                              if (value == null || !RegistrationValidators.validateAddress(value)) {
+                                return 'Please enter your complete address';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Consent Checkbox
+                          Row(
+                            children: [
+                              Checkbox(
+                                value: _consentChecked,
+                                onChanged: _hasReadPolicy
+                                    ? (val) => setState(() => _consentChecked = val ?? false)
+                                    : null,
+                              ),
+                              Expanded(
+                                child: Wrap(
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    Text(
+                                      'I accept the ',
+                                      style: TextStyle(
+                                        color: Theme.of(context).colorScheme.onSurface,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    GestureDetector(
+                                      onTap: () async {
+                                        await showDialog(
+                                          context: context,
+                                          builder: (_) => const PrivacyPolicyModal(),
+                                        );
+                                        setState(() => _hasReadPolicy = true);
+                                      },
+                                      child: Text(
+                                        'RA 10173 data privacy policy',
+                                        style: TextStyle(
+                                          color: Theme.of(context).colorScheme.primary,
+                                          decoration: TextDecoration.underline,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (!_hasReadPolicy) ...[
+                            const SizedBox(height: 4),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 48.0),
+                              child: Text(
+                                'Please tap the policy link above to review before accepting',
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 16),
 
                           // Error message if any
                           if (authProvider.errorMessage != null) ...[
@@ -223,7 +536,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           SizedBox(
                             height: 54,
                             child: ElevatedButton(
-                              onPressed: authProvider.isLoading ? null : _submit,
+                              onPressed: (_consentChecked && !authProvider.isLoading) ? _submit : null,
                               child: authProvider.isLoading
                                   ? SizedBox(
                                       height: 24,

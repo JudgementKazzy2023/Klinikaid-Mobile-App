@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../providers/auth_provider.dart';
+import '../../domain/login_outcome.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -44,11 +45,13 @@ class _LoginScreenState extends State<LoginScreen> {
   void _submit() async {
     if (_formKey.currentState!.validate()) {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final success = await authProvider.signIn(
+      final outcome = await authProvider.signIn(
         _emailController.text.trim(),
         _passwordController.text,
       );
-      if (!success && mounted) {
+      if (!mounted) return;
+
+      if (outcome == LoginOutcome.invalidCredentials) {
         if (authProvider.errorMessage == 'Admin accounts must sign in via the web portal.') {
           showDialog(
             context: context,
@@ -68,6 +71,8 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           );
         }
+      } else if (outcome == LoginOutcome.mfaRequired) {
+        context.go('/mfa-verify');
       }
     }
   }

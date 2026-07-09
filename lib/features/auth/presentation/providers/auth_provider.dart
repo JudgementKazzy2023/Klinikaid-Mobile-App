@@ -10,6 +10,8 @@ import '../../domain/verification_state.dart';
 import '../../data/verification_service.dart';
 import '../../data/session_activity_service.dart';
 import '../../domain/password_reset_result.dart';
+import '../../data/mfa_service.dart';
+import '../../domain/login_outcome.dart';
 
 /// Provider that manages authentication state, RA 10173 consent, and patient onboarding flow.
 class AuthProvider extends ChangeNotifier {
@@ -18,6 +20,7 @@ class AuthProvider extends ChangeNotifier {
   final _profilesRepo = ProfilesRepository();
   final VerificationService _verificationService;
   final SessionActivityService _activityService;
+  final MfaService _mfaService;
 
   User? _user;
   Session? _session;
@@ -30,19 +33,24 @@ class AuthProvider extends ChangeNotifier {
   VerificationState _verificationState = VerificationState();
   bool _wasLoggedOutForInactivity = false;
   bool _isFirstAuthCheck = true;
+  String? _pendingMfaFactorId;
 
   Profile? get profile => _profile;
   Patient? get patient => _patient;
   VerificationState get verificationState => _verificationState;
   bool get wasLoggedOutForInactivity => _wasLoggedOutForInactivity;
+  String? get pendingMfaFactorId => _pendingMfaFactorId;
+  bool get isAal1Pending => _pendingMfaFactorId != null;
 
   StreamSubscription<AuthState>? _authStateSubscription;
 
   AuthProvider({
     VerificationService? verificationService,
     SessionActivityService? activityService,
+    MfaService? mfaService,
   })  : _verificationService = verificationService ?? SupabaseVerificationService(),
         _activityService = activityService ?? SessionActivityService(),
+        _mfaService = mfaService ?? MfaService(Supabase.instance.client),
         super() {
     _init();
   }
@@ -83,11 +91,11 @@ class AuthProvider extends ChangeNotifier {
   Future<void> _updateLocalStates() async {
     final currentUser = _user;
     if (currentUser == null) {
-      _hasConsented = false;
-      _isOnboarded = false;
-      _profile = null;
-      return;
-    }
+       _hasConsented = false;
+       _isOnboarded = false;
+       _profile = null;
+       return;
+     }
 
     // 1. Fetch profile from database
     try {
@@ -215,7 +223,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   /// Signs in a user using email and password.
-  Future<bool> signIn(String email, String password) async {
+  Future<LoginOutcome> signIn(String email, String password) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -225,24 +233,74 @@ class AuthProvider extends ChangeNotifier {
       _session = response.session;
       _user = response.user;
       await _updateLocalStates();
+
+      // Check if step-up required
+      if (_mfaService.requiresStepUp()) {
+        final factors = await _mfaService.listVerifiedFactors();
+        if (factors.isNotEmpty) {
+          _pendingMfaFactorId = factors.first.id;
+          _isLoading = false;
+          notifyListeners();
+          return LoginOutcome.mfaRequired;
+        }
+      }
+
       _isLoading = false;
       notifyListeners();
-      return true;
+      return LoginOutcome.success;
     } catch (e) {
       _errorMessage = e is AuthException ? e.message : e.toString();
       _isLoading = false;
       notifyListeners();
-      return false;
+      return LoginOutcome.invalidCredentials;
     }
   }
 
-  /// Registers a new user with metadata mapping to trigger profiles creation.
-  Future<bool> signUp(String email, String password, String fullName) async {
+  /// Verify TOTP code → upgrades session to AAL2
+  Future<MfaVerifyResult> verifyMfa(String code) async {
+    if (_pendingMfaFactorId == null) return MfaVerifyResult.error;
+
+    _isLoading = true;
+    notifyListeners();
+
+    final result = await _mfaService.verifyTotp(
+      factorId: _pendingMfaFactorId!,
+      code: code,
+    );
+
+    if (result == MfaVerifyResult.success) {
+      _pendingMfaFactorId = null;
+      await _updateLocalStates();
+    }
+
+    _isLoading = false;
+    notifyListeners();
+    return result;
+  }
+
+  /// Cancels registration/MFA flow, signs out, and resets state.
+  Future<void> cancelMfaFlow() async {
+    _pendingMfaFactorId = null;
+    await signOut();
+  }
+
+  /// Registers a new user with patient demographic metadata and inserts patient details.
+  Future<bool> signUp({
+    required String email,
+    required String password,
+    required String firstName,
+    required String lastName,
+    required DateTime dateOfBirth,
+    required Gender gender,
+    required String contactNumber,
+    required String address,
+  }) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
+      final fullName = '$firstName $lastName'.trim();
       final response = await _client.auth.signUp(
         email: email,
         password: password,
@@ -253,17 +311,53 @@ class AuthProvider extends ChangeNotifier {
       );
       _session = response.session;
       _user = response.user;
-      await _updateLocalStates();
-      
-      // Automatically send verification code upon successful signup
+
       if (_user != null) {
+        // Create the Patient record in the public table
+        final patient = Patient(
+          id: _user!.id,
+          profileId: _user!.id,
+          firstName: firstName,
+          lastName: lastName,
+          dateOfBirth: dateOfBirth,
+          gender: gender,
+          contactNumber: contactNumber,
+          email: email,
+          address: address,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        );
+        await _patientsRepo.createPatient(patient);
+        _patient = patient;
+        _isOnboarded = true;
+
+        // Record the privacy policy consent immediately
+        final profile = await _profilesRepo.getProfile(_user!.id);
+        final updatedProfile = Profile(
+          id: profile.id,
+          fullName: fullName,
+          role: profile.role,
+          department: profile.department,
+          isActive: profile.isActive,
+          acceptedPrivacyAt: DateTime.now(),
+          emailVerifiedAt: profile.emailVerifiedAt,
+          createdAt: profile.createdAt,
+          updatedAt: DateTime.now(),
+        );
+        _profile = await _profilesRepo.updateProfile(updatedProfile);
+        _hasConsented = true;
+
+        // Automatically send verification code upon successful signup
         final sent = await sendVerificationCode(email);
         if (!sent) {
-          // If sending fails, sign out to prevent half-created session
-          await _client.auth.signOut();
+          // If sending fails, clean up local session
+          await _client.auth.signOut().catchError((_) {});
           _user = null;
           _session = null;
           _profile = null;
+          _patient = null;
+          _hasConsented = false;
+          _isOnboarded = false;
           _isLoading = false;
           notifyListeners();
           return false;
@@ -275,6 +369,14 @@ class AuthProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       _errorMessage = e is AuthException ? e.message : e.toString();
+      // Safe cleanup of local states on failure (orphan strategy: accept orphan but clean session)
+      await _client.auth.signOut().catchError((_) {});
+      _user = null;
+      _session = null;
+      _profile = null;
+      _patient = null;
+      _hasConsented = false;
+      _isOnboarded = false;
       _isLoading = false;
       notifyListeners();
       return false;
@@ -495,6 +597,57 @@ class AuthProvider extends ChangeNotifier {
         errorMessage: result.errorMessage,
       );
       _errorMessage = result.errorMessage;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Requests the server to verify the new email's OTP and perform the email change.
+  Future<bool> changeEmailAddress({
+    required String newEmail,
+    required String code,
+  }) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final response = await _client.functions.invoke(
+        'update-user-email',
+        method: HttpMethod.post,
+        body: {
+          'newEmail': newEmail,
+          'code': code,
+        },
+      );
+
+      final data = response.data;
+      final Map<String, dynamic> json = data is Map<String, dynamic> ? data : {};
+
+      if (response.status == 200) {
+        // Force refresh session to get updated user token with new email
+        await _client.auth.refreshSession().catchError((_) {});
+        await _updateLocalStates();
+        _isLoading = false;
+        notifyListeners();
+        return true;
+      } else {
+        final message = json['message'] as String? ?? 'Failed to update email address';
+        _errorMessage = message;
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+    } on FunctionException catch (fe) {
+      final details = fe.details;
+      final Map<String, dynamic> json = details is Map<String, dynamic> ? details : {};
+      _errorMessage = json['message'] as String? ?? fe.reasonPhrase ?? 'Failed to update email address';
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    } catch (e) {
+      _errorMessage = e.toString();
+      _isLoading = false;
       notifyListeners();
       return false;
     }
