@@ -28,6 +28,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _consentChecked = false;
   bool _hasReadPolicy = false;
   String? _dobError;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
 
   @override
   void dispose() {
@@ -213,13 +215,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           // Password
                           TextFormField(
                             controller: _passwordController,
-                            obscureText: true,
+                            obscureText: _obscurePassword,
                             onChanged: (_) => setState(() {}),
                             style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
                             decoration: InputDecoration(
                               hintText: 'Password',
                               errorMaxLines: 3,
                               prefixIcon: Icon(Icons.lock_outline, color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7)),
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                                  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+                                ),
+                                onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                              ),
                             ),
                             validator: (value) {
                               if (value == null || value.isEmpty) {
@@ -265,11 +274,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           // Confirm Password
                           TextFormField(
                             controller: _confirmPasswordController,
-                            obscureText: true,
+                            obscureText: _obscureConfirmPassword,
                             style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
                             decoration: InputDecoration(
                               hintText: 'Confirm Password',
                               prefixIcon: Icon(Icons.lock_outline, color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7)),
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscureConfirmPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                                  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+                                ),
+                                onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
+                              ),
                             ),
                             validator: (value) {
                               if (value == null || value.isEmpty) {
