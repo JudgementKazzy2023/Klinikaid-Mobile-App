@@ -218,6 +218,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
                             decoration: InputDecoration(
                               hintText: 'Password',
+                              errorMaxLines: 3,
                               prefixIcon: Icon(Icons.lock_outline, color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7)),
                             ),
                             validator: (value) {
