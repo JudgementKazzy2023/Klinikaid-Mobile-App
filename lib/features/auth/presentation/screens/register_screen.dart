@@ -226,7 +226,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 return 'Please enter a password';
                               }
                               if (!RegistrationValidators.validatePassword(value)) {
-                                return 'Password must be at least 8 characters and contain at least 1 digit and 1 special character';
+                                return 'Password must be at least 8 characters and contain at least 1 digit (e.g. 1, 2, 3) and 1 special character (e.g. \$, @, !)';
                               }
                               return null;
                             },

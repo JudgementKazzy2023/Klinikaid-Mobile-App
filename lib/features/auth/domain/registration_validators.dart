@@ -59,7 +59,7 @@ class RegistrationValidators {
       - (now.month < dob.month || 
          (now.month == dob.month && now.day < dob.day) ? 1 : 0);
     if (age < 13) {
-      return 'You must be at least 13 years old to register';
+      return 'You must be 13 years old or older to register';
     }
     
     return null; // valid
