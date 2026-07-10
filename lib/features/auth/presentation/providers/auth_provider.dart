@@ -703,7 +703,9 @@ class AuthProvider extends ChangeNotifier {
       // Step 2: Update to the new password.
       await _client.auth.updateUser(UserAttributes(password: newPassword));
       return PasswordChangeResult.success;
-    } catch (_) {
+    } catch (e, stack) {
+      debugPrint('ChangePassword error: $e');
+      debugPrint('Stacktrace: $stack');
       return PasswordChangeResult.error;
     }
   }
