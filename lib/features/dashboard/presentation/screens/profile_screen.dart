@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../../../features/auth/presentation/providers/auth_provider.dart';
 import '../../../../core/models/patient.dart';
 import '../../../../core/models/profile.dart';
+import '../../../../core/utils/role_formatter.dart';
 import '../providers/dashboard_provider.dart';
 import 'package:klinikaid_mobile/features/auth/domain/registration_validators.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/widgets/email_change_modal.dart';
@@ -196,7 +197,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
-                              'ROLE: ${authProvider.profile?.role.displayName.toUpperCase() ?? 'UNKNOWN'}',
+                              'ROLE: ${authProvider.profile != null ? roleDisplayLabel(authProvider.profile!.role, authProvider.profile!.department).toUpperCase() : 'UNKNOWN'}',
                               style: TextStyle(
                                 color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
                                 fontSize: 10,
