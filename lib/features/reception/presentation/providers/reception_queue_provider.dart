@@ -12,6 +12,9 @@ class ReceptionQueueProvider extends ChangeNotifier {
   String? _errorMessage;
   SubmissionDetail? _selectedDetail;
 
+  bool _isRouting = false;
+  String? _routingError;
+
   ReceptionQueueProvider({required ReceptionRepository repository})
       : _repository = repository;
 
@@ -19,6 +22,11 @@ class ReceptionQueueProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   SubmissionDetail? get selectedDetail => _selectedDetail;
+  bool get isRouting => _isRouting;
+  String? get routingError => _routingError;
+
+  List<Submission> get pendingSubmissions =>
+      _submissions.where((s) => s.status == SubmissionStatus.submitted).toList();
 
   List<Submission> get submittedSubmissions =>
       _submissions.where((s) => s.status == SubmissionStatus.submitted).toList();
@@ -69,5 +77,47 @@ class ReceptionQueueProvider extends ChangeNotifier {
   /// Fetches a signed storage URL for a document.
   Future<String> getOriginalDocumentUrl(String id) async {
     return await _repository.getOriginalDocumentUrl(id);
+  }
+
+  /// Approves a document and routes the patient to a department.
+  /// On success, refreshes the queue so Pending −1, Approved +1 without
+  /// requiring a manual pull-to-refresh.
+  /// Returns true on success, false on failure (error available via [routingError]).
+  Future<bool> approveAndRoute({
+    required String documentId,
+    required String patientId,
+    required String department,
+    required String priority,
+    String? bloodPressure,
+    num? weightKg,
+    num? temperatureC,
+    String? triageNotes,
+  }) async {
+    _isRouting = true;
+    _routingError = null;
+    notifyListeners();
+
+    try {
+      await _repository.approveAndRoute(
+        documentId: documentId,
+        patientId: patientId,
+        department: department,
+        priority: priority,
+        bloodPressure: bloodPressure,
+        weightKg: weightKg,
+        temperatureC: temperatureC,
+        triageNotes: triageNotes,
+      );
+      _isRouting = false;
+      notifyListeners();
+      // Refresh queue so Pending −1, Approved +1 automatically.
+      await loadSubmissions();
+      return true;
+    } catch (e) {
+      _isRouting = false;
+      _routingError = e.toString();
+      notifyListeners();
+      return false;
+    }
   }
 }
