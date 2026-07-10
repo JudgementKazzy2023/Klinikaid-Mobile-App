@@ -31,3 +31,52 @@ String? extractTriageNotes(String? rawTriageNotes) {
     return rawTriageNotes;
   }
 }
+
+/// Extract queue number from triage notes JSON, returning "—" on missing/null/error.
+String extractQueueNumber(String? rawTriageNotes) {
+  if (rawTriageNotes == null || rawTriageNotes.trim().isEmpty) {
+    return '—';
+  }
+  try {
+    final parsed = jsonDecode(rawTriageNotes);
+    if (parsed is Map<String, dynamic>) {
+      final qNum = parsed['queue_number'];
+      if (qNum != null && qNum.toString().trim().isNotEmpty) {
+        return qNum.toString().trim();
+      }
+    }
+  } catch (_) {}
+  return '—';
+}
+
+/// Extract vitals summary from triage notes JSON, returning "—" on missing/null/error.
+String extractVitalsSummary(String? rawTriageNotes) {
+  if (rawTriageNotes == null || rawTriageNotes.trim().isEmpty) {
+    return '—';
+  }
+  try {
+    final parsed = jsonDecode(rawTriageNotes);
+    if (parsed is Map<String, dynamic>) {
+      final vitals = parsed['vitals'];
+      if (vitals is Map<String, dynamic>) {
+        final List<String> parts = [];
+        final bp = vitals['blood_pressure'];
+        if (bp != null && bp.toString().trim().isNotEmpty) {
+          parts.add('BP: ${bp.toString().trim()}');
+        }
+        final wt = vitals['weight_kg'];
+        if (wt != null) {
+          parts.add('Wt: ${wt}kg');
+        }
+        final temp = vitals['temperature_c'];
+        if (temp != null) {
+          parts.add('Temp: ${temp}°C');
+        }
+        if (parts.isEmpty) return '—';
+        return parts.join(' | ');
+      }
+    }
+  } catch (_) {}
+  return '—';
+}
+

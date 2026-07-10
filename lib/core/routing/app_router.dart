@@ -23,13 +23,15 @@ import '../../features/documents/presentation/providers/document_submission_prov
 import '../cache/local_database.dart';
 import '../models/profile.dart';
 import '../../features/staff/presentation/screens/reception_home_screen.dart';
-import '../../features/staff/presentation/screens/department_home_screen.dart';
 import '../../features/staff/presentation/screens/specialist_home_screen.dart';
 import '../../features/auth/presentation/screens/totp_verify_screen.dart';
 import '../../features/reception/presentation/reception_shell.dart';
 import '../../features/reception/presentation/screens/reception_queue_screen.dart';
 import '../../features/reception/presentation/screens/document_validation_screen.dart';
 import '../../features/reception/presentation/screens/reception_dashboard_screen.dart';
+import '../../features/department/presentation/department_shell.dart';
+import '../../features/department/presentation/screens/department_queue_screen.dart';
+import '../../features/department/presentation/screens/department_records_screen.dart';
 
 /// AppRouter defines the structural gating/redirection rules for the application.
 class AppRouter {
@@ -43,7 +45,6 @@ class AppRouter {
     redirect: (context, state) {
       final isAuthenticated = authProvider.isAuthenticated;
       final hasConsented = authProvider.hasConsented;
-      final isOnboarded = authProvider.isOnboarded;
       final isLoading = authProvider.isLoading;
       final role = authProvider.profile?.role;
 
@@ -66,6 +67,13 @@ class AppRouter {
 
       // 2b. MFA Step-up gating
       if (authProvider.isAal1Pending) {
+        if (role == UserRole.departmentStaff) {
+          final dept = authProvider.profile?.department;
+          if (dept == null) {
+            authProvider.signOut();
+            return '/login';
+          }
+        }
         if (state.matchedLocation == '/mfa-verify') {
           return null;
         }
@@ -79,8 +87,7 @@ class AppRouter {
         } else if (role == UserRole.receptionist) {
           return '/reception/queue';
         } else if (role == UserRole.departmentStaff) {
-          final dept = authProvider.profile?.department?.toJsonValue() ?? 'laboratory';
-          return '/staff/department/$dept';
+          return '/department/queue';
         } else if (role == UserRole.medicalSpecialist) {
           return '/staff/specialist';
         }
@@ -121,7 +128,9 @@ class AppRouter {
         }
 
         // Patient trying to access staff routes is redirected to /patient
-        if (state.matchedLocation.startsWith('/staff/') || state.matchedLocation.startsWith('/reception/')) {
+        if (state.matchedLocation.startsWith('/staff/') || 
+            state.matchedLocation.startsWith('/reception/') ||
+            state.matchedLocation.startsWith('/department/')) {
           return '/patient';
         }
 
@@ -133,7 +142,9 @@ class AppRouter {
           role == UserRole.departmentStaff ||
           role == UserRole.medicalSpecialist) {
         
-        final isStaffPath = state.matchedLocation.startsWith('/staff/') || state.matchedLocation.startsWith('/reception/');
+        final isStaffPath = state.matchedLocation.startsWith('/staff/') || 
+                            state.matchedLocation.startsWith('/reception/') ||
+                            state.matchedLocation.startsWith('/department/');
         final isCommonPath = isLoggingIn || isRegistering || isConsenting;
 
         // Staff trying to access / or patient routes are routed to their home
@@ -141,8 +152,7 @@ class AppRouter {
           if (role == UserRole.receptionist) {
             return '/reception/queue';
           } else if (role == UserRole.departmentStaff) {
-            final dept = authProvider.profile?.department?.toJsonValue() ?? 'laboratory';
-            return '/staff/department/$dept';
+            return '/department/queue';
           } else if (role == UserRole.medicalSpecialist) {
             return '/staff/specialist';
           }
@@ -155,9 +165,13 @@ class AppRouter {
           }
         }
         if (role == UserRole.departmentStaff) {
-          final dept = authProvider.profile?.department?.toJsonValue() ?? 'laboratory';
-          if (state.matchedLocation != '/staff/department/$dept') {
-            return '/staff/department/$dept';
+          final dept = authProvider.profile?.department;
+          if (dept == null) {
+            authProvider.signOut();
+            return '/login';
+          }
+          if (!state.matchedLocation.startsWith('/department/')) {
+            return '/department/queue';
           }
         }
         if (role == UserRole.medicalSpecialist && state.matchedLocation != '/staff/specialist') {
@@ -203,11 +217,24 @@ class AppRouter {
         path: '/staff/reception',
         builder: (context, state) => const ReceptionHomeScreen(),
       ),
-      GoRoute(
-        path: '/staff/department/:dept',
-        builder: (context, state) {
-          return const DepartmentHomeScreen();
+      ShellRoute(
+        builder: (context, state, child) {
+          return DepartmentShell(child: child);
         },
+        routes: [
+          GoRoute(
+            path: '/department/queue',
+            builder: (context, state) => const DepartmentQueueScreen(),
+          ),
+          GoRoute(
+            path: '/department/records',
+            builder: (context, state) => const DepartmentRecordsScreen(),
+          ),
+          GoRoute(
+            path: '/department/profile',
+            builder: (context, state) => const ProfileScreen(),
+          ),
+        ],
       ),
       GoRoute(
         path: '/staff/specialist',
