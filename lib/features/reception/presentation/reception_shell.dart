@@ -12,21 +12,40 @@ class ReceptionShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    ReceptionRepository repo;
+    try {
+      repo = Provider.of<ReceptionRepository>(context, listen: false);
+    } catch (_) {
+      repo = ReceptionRepository();
+    }
+
+    ReceptionQueueProvider? parentQueue;
+    try {
+      parentQueue = Provider.of<ReceptionQueueProvider>(context, listen: false);
+    } catch (_) {}
+
+    ReceptionDashboardProvider? parentDashboard;
+    try {
+      parentDashboard = Provider.of<ReceptionDashboardProvider>(context, listen: false);
+    } catch (_) {}
+
     return MultiProvider(
       providers: [
-        Provider<ReceptionRepository>(
-          create: (_) => ReceptionRepository(),
+        Provider<ReceptionRepository>.value(
+          value: repo,
         ),
-        ChangeNotifierProvider<ReceptionQueueProvider>(
-          create: (context) => ReceptionQueueProvider(
-            repository: Provider.of<ReceptionRepository>(context, listen: false),
-          )..loadSubmissions(),
-        ),
-        ChangeNotifierProvider<ReceptionDashboardProvider>(
-          create: (context) => ReceptionDashboardProvider(
-            repository: Provider.of<ReceptionRepository>(context, listen: false),
-          )..loadDashboard(),
-        ),
+        if (parentQueue != null)
+          ChangeNotifierProvider<ReceptionQueueProvider>.value(value: parentQueue)
+        else
+          ChangeNotifierProvider<ReceptionQueueProvider>(
+            create: (context) => ReceptionQueueProvider(repository: repo)..loadSubmissions(),
+          ),
+        if (parentDashboard != null)
+          ChangeNotifierProvider<ReceptionDashboardProvider>.value(value: parentDashboard)
+        else
+          ChangeNotifierProvider<ReceptionDashboardProvider>(
+            create: (context) => ReceptionDashboardProvider(repository: repo)..loadDashboard(),
+          ),
       ],
       child: Scaffold(
         body: child,
