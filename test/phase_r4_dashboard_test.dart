@@ -179,7 +179,7 @@ void main() {
       expect(find.text('8'), findsOneWidget);
 
       expect(find.text('ACTIVE\nQUEUE'), findsOneWidget);
-      expect(find.text('PENDING\nSUBMIS.'), findsOneWidget);
+      expect(find.text('PENDING\nSUBMISSIONS'), findsOneWidget);
       expect(find.text('TOTAL\nROUTED TODAY'), findsOneWidget);
     });
 

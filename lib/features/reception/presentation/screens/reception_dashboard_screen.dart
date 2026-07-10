@@ -134,7 +134,7 @@ class ReceptionDashboardScreen extends StatelessWidget {
                                 ),
                                 _buildStatCard(
                                   context: context,
-                                  title: 'PENDING\nSUBMIS.',
+                                  title: 'PENDING\nSUBMISSIONS',
                                   value: provider.pendingSubmissionsCount.toString(),
                                   width: cardWidth,
                                   icon: Icons.pending_actions_rounded,
