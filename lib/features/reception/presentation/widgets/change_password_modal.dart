@@ -90,17 +90,17 @@ class _ChangePasswordModalState extends State<ChangePasswordModal> {
         );
       case PasswordChangeResult.wrongCurrentPassword:
         setState(() {
-          _errorMessage = 'Current password is incorrect';
+          _errorMessage = authProvider.errorMessage ?? 'Current password is incorrect';
           _isLoading = false;
         });
       case PasswordChangeResult.notAuthenticated:
         setState(() {
-          _errorMessage = 'No active session. Please sign in again.';
+          _errorMessage = authProvider.errorMessage ?? 'No active session. Please sign in again.';
           _isLoading = false;
         });
       case PasswordChangeResult.error:
         setState(() {
-          _errorMessage = 'An error occurred. Please try again.';
+          _errorMessage = authProvider.errorMessage ?? 'An error occurred. Please try again.';
           _isLoading = false;
         });
     }

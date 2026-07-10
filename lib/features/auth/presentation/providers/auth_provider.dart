@@ -686,9 +686,15 @@ class AuthProvider extends ChangeNotifier {
     required String currentPassword,
     required String newPassword,
   }) async {
+    _errorMessage = null;
+    notifyListeners();
     try {
       final email = _client.auth.currentUser?.email;
-      if (email == null) return PasswordChangeResult.notAuthenticated;
+      if (email == null) {
+        _errorMessage = 'No active user session found.';
+        notifyListeners();
+        return PasswordChangeResult.notAuthenticated;
+      }
 
       // Step 1: Reauthenticate — proves the caller knows the current password.
       try {
@@ -696,7 +702,9 @@ class AuthProvider extends ChangeNotifier {
           email: email,
           password: currentPassword,
         );
-      } on AuthException {
+      } on AuthException catch (e) {
+        _errorMessage = e.message;
+        notifyListeners();
         return PasswordChangeResult.wrongCurrentPassword;
       }
 
@@ -706,6 +714,8 @@ class AuthProvider extends ChangeNotifier {
     } catch (e, stack) {
       debugPrint('ChangePassword error: $e');
       debugPrint('Stacktrace: $stack');
+      _errorMessage = e is AuthException ? e.message : e.toString();
+      notifyListeners();
       return PasswordChangeResult.error;
     }
   }
