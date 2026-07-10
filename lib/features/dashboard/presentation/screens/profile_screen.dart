@@ -6,6 +6,7 @@ import '../../../../core/models/profile.dart';
 import '../providers/dashboard_provider.dart';
 import 'package:klinikaid_mobile/features/auth/domain/registration_validators.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/widgets/email_change_modal.dart';
+import 'package:klinikaid_mobile/features/reception/presentation/widgets/change_password_modal.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -209,7 +210,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ],
                 ),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 16),
+              // Change Password button (all staff roles)
+              InkWell(
+                key: const Key('btn_change_password'),
+                onTap: () {
+                  showDialog(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (_) => const ChangePasswordModal(),
+                  );
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.lock_outline_rounded,
+                          color: Theme.of(context).colorScheme.primary),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Change Password',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const Spacer(),
+                      Icon(Icons.arrow_forward_ios_rounded,
+                          color: Theme.of(context).colorScheme.primary, size: 14),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
               // Logout Card
               InkWell(
                 onTap: authProvider.isLoading ? null : () => authProvider.signOut(),

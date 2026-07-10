@@ -10,6 +10,7 @@ import '../../domain/verification_state.dart';
 import '../../data/verification_service.dart';
 import '../../data/session_activity_service.dart';
 import '../../domain/password_reset_result.dart';
+import '../../domain/password_change_result.dart';
 import '../../data/mfa_service.dart';
 import '../../domain/login_outcome.dart';
 
@@ -672,6 +673,39 @@ class AuthProvider extends ChangeNotifier {
     _isLoading = false;
     notifyListeners();
     return true;
+  }
+
+  /// Changes the authenticated user's password after reauthentication.
+  ///
+  /// Reauthentication: calls [signInWithPassword] with [currentPassword] to
+  /// verify the current credential before allowing the update. If reauth
+  /// fails, the update is never attempted and [wrongCurrentPassword] is
+  /// returned. This applies to all staff roles (receptionist, department
+  /// staff, specialist) — no role gate is applied.
+  Future<PasswordChangeResult> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    try {
+      final email = _client.auth.currentUser?.email;
+      if (email == null) return PasswordChangeResult.notAuthenticated;
+
+      // Step 1: Reauthenticate — proves the caller knows the current password.
+      try {
+        await _client.auth.signInWithPassword(
+          email: email,
+          password: currentPassword,
+        );
+      } on AuthException {
+        return PasswordChangeResult.wrongCurrentPassword;
+      }
+
+      // Step 2: Update to the new password.
+      await _client.auth.updateUser(UserAttributes(password: newPassword));
+      return PasswordChangeResult.success;
+    } catch (_) {
+      return PasswordChangeResult.error;
+    }
   }
 
   @override
