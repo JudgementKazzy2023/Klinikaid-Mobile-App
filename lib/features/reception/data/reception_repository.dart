@@ -249,4 +249,24 @@ class ReceptionRepository {
       throw FailureMapper.fromException(e);
     }
   }
+
+  /// Reject a clinical document submission with a reason.
+  /// Sets documents.status='rejected' and documents.rejection_reason=reason.
+  /// Does NOT modify the patient_queue table.
+  Future<void> rejectDocument({
+    required String documentId,
+    required String reason,
+  }) async {
+    try {
+      await _client
+          .from('documents')
+          .update({
+            'status': 'rejected',
+            'rejection_reason': reason,
+          })
+          .eq('id', documentId);
+    } catch (e) {
+      throw FailureMapper.fromException(e);
+    }
+  }
 }

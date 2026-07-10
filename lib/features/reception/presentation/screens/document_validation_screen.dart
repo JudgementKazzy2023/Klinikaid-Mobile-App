@@ -7,6 +7,7 @@ import '../../domain/submission_detail.dart';
 import '../../domain/submission_status.dart';
 import '../providers/reception_queue_provider.dart';
 import '../widgets/triage_routing_sheet.dart';
+import '../widgets/reject_document_sheet.dart';
 
 class DocumentValidationScreen extends StatefulWidget {
   final String submissionId;
@@ -27,6 +28,7 @@ class _DocumentValidationScreenState extends State<DocumentValidationScreen> {
   SubmissionDetail? _detail;
   String? _errorMessage;
   bool _isRouting = false;
+  bool _isRejecting = false;
 
   @override
   void initState() {
@@ -173,6 +175,79 @@ class _DocumentValidationScreenState extends State<DocumentValidationScreen> {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(routingError ?? 'Routing failed'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _openRejectSheet(SubmissionDetail detail) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return RejectDocumentSheet(
+              patientName: detail.submission.patientName,
+              isLoading: _isRejecting,
+              onConfirm: (reason) async {
+                setSheetState(() => _isRejecting = true);
+                setState(() => _isRejecting = true);
+
+                bool success = false;
+                String? rejectError;
+
+                // Try via provider first (real app), fall back to direct repo (tests).
+                try {
+                  final provider = Provider.of<ReceptionQueueProvider>(
+                      context,
+                      listen: false);
+                  success = await provider.rejectDocument(
+                    documentId: detail.submission.id,
+                    reason: reason,
+                  );
+                  if (!success) rejectError = provider.rejectError;
+                } catch (_) {
+                  // Provider not in scope (test isolation) — direct repo call.
+                  try {
+                    await _repository.rejectDocument(
+                      documentId: detail.submission.id,
+                      reason: reason,
+                    );
+                    success = true;
+                  } catch (e) {
+                    rejectError = e.toString();
+                  }
+                }
+
+                setSheetState(() => _isRejecting = false);
+                setState(() => _isRejecting = false);
+
+                if (!mounted) return;
+
+                if (success) {
+                  Navigator.pop(ctx); // close sheet
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Document rejected successfully'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                  context.go('/reception/queue');
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(rejectError ?? 'Rejection failed'),
                       backgroundColor: Colors.red,
                     ),
                   );
@@ -524,12 +599,16 @@ class _DocumentValidationScreenState extends State<DocumentValidationScreen> {
                           children: [
                             Row(
                               children: [
-                                // Reject — disabled until R3
+                                // Reject
                                 Expanded(
                                   child: Tooltip(
-                                    message: 'Available in R3',
+                                    message: !isPending
+                                        ? 'Document already processed'
+                                        : '',
                                     child: OutlinedButton(
-                                      onPressed: null,
+                                      onPressed: isPending
+                                          ? () => _openRejectSheet(detail)
+                                          : null,
                                       style: OutlinedButton.styleFrom(
                                         minimumSize: const Size(0, 48),
                                         shape: RoundedRectangleBorder(

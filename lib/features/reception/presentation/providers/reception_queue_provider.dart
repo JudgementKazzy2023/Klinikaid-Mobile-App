@@ -120,4 +120,39 @@ class ReceptionQueueProvider extends ChangeNotifier {
       return false;
     }
   }
+
+  bool _isRejecting = false;
+  String? _rejectError;
+
+  bool get isRejecting => _isRejecting;
+  String? get rejectError => _rejectError;
+
+  /// Rejects a document and records the reason.
+  /// On success, refreshes the queue lists automatically.
+  /// Returns true on success, false on failure (error available via [rejectError]).
+  Future<bool> rejectDocument({
+    required String documentId,
+    required String reason,
+  }) async {
+    _isRejecting = true;
+    _rejectError = null;
+    notifyListeners();
+
+    try {
+      await _repository.rejectDocument(
+        documentId: documentId,
+        reason: reason,
+      );
+      _isRejecting = false;
+      notifyListeners();
+      // Refresh queue lists so Pending -1, Rejected +1 automatically.
+      await loadSubmissions();
+      return true;
+    } catch (e) {
+      _isRejecting = false;
+      _rejectError = e.toString();
+      notifyListeners();
+      return false;
+    }
+  }
 }

@@ -183,10 +183,10 @@ void main() {
       expect(find.text('PDF'), findsOneWidget);
       expect(find.text('Jane Doe'), findsWidgets); // uploader and name
 
-      // 17. Reject + Approve buttons DISABLED this phase
       final rejectBtn = tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Reject Document'));
       final approveBtn = tester.widget<ElevatedButton>(find.widgetWithText(ElevatedButton, 'Approve & Route Patient'));
-      expect(rejectBtn.onPressed, isNull);
+      // In R3, Reject button is enabled for pending documents even if patientId is null
+      expect(rejectBtn.onPressed, isNotNull);
       expect(approveBtn.onPressed, isNull);
 
       // Tooltip/label "Cannot route — patient not linked" is visible because patientId is null
