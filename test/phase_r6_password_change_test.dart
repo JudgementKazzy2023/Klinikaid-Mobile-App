@@ -40,6 +40,8 @@ class PasswordChangeMockAuthProvider extends AuthProvider {
   String? lastCurrentPassword;
   String? lastNewPassword;
 
+  List<supabase.Factor> mockFactors = [];
+
   PasswordChangeMockAuthProvider() : super();
 
   void setMockUser(supabase.User? u) => _mockUser = u;
@@ -55,8 +57,13 @@ class PasswordChangeMockAuthProvider extends AuthProvider {
   bool get isLoading => _mockIsLoading;
 
   @override
+  Future<List<supabase.Factor>> listMfaFactors() async {
+    return mockFactors;
+  }
+
+  @override
   Future<PasswordChangeResult> changePassword({
-    required String currentPassword,
+    String? currentPassword,
     required String newPassword,
   }) async {
     changePasswordCalled = true;
@@ -490,6 +497,134 @@ void main() {
       await tester.tap(find.byKey(const Key('btn_update_password')));
       await tester.pumpAndSettle();
 
+      expect(find.textContaining('An error occurred'), findsOneWidget);
+    });
+
+    // ── Test 14: MFA account → modal shows 2 fields + note, no current-password field ──
+
+    testWidgets('Test 14: MFA account → shows 2 fields + note, no current password field',
+        (tester) async {
+      final auth = PasswordChangeMockAuthProvider();
+      auth.mockFactors = [
+        supabase.Factor(
+          id: 'factor-1',
+          status: supabase.FactorStatus.verified,
+          factorType: supabase.FactorType.totp,
+          friendlyName: 'TOTP',
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        ),
+      ];
+
+      await tester.pumpWidget(createModalWidget(auth));
+      await tester.pumpAndSettle();
+
+      // MFA note should be visible
+      expect(find.textContaining('verified through your authenticator app'), findsOneWidget);
+
+      // Current password field must NOT exist
+      expect(find.byKey(const Key('field_current_password')), findsNothing);
+
+      // New and Confirm password fields must exist
+      expect(find.byKey(const Key('field_new_password')), findsOneWidget);
+      expect(find.byKey(const Key('field_confirm_password')), findsOneWidget);
+    });
+
+    // ── Test 15: MFA account → successful changePassword bypasses signInWithPassword ──
+
+    testWidgets('Test 15: MFA account → success calls updateUser directly (no reauth)',
+        (tester) async {
+      final auth = PasswordChangeMockAuthProvider();
+      auth.mockFactors = [
+        supabase.Factor(
+          id: 'factor-1',
+          status: supabase.FactorStatus.verified,
+          factorType: supabase.FactorType.totp,
+          friendlyName: 'TOTP',
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        ),
+      ];
+      auth.changePasswordResult = PasswordChangeResult.success;
+
+      await tester.pumpWidget(MultiProvider(
+        providers: [
+          Provider<LocalDatabase>.value(value: localDatabase),
+          ChangeNotifierProvider<DashboardProvider>.value(
+              value: dashboardProvider),
+          ChangeNotifierProvider<AuthProvider>.value(value: auth),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (ctx) => TextButton(
+                onPressed: () {
+                  showDialog(
+                    context: ctx,
+                    barrierDismissible: false,
+                    builder: (_) => const ChangePasswordModal(),
+                  );
+                },
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ));
+      await tester.pump();
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      // Enter valid passwords
+      await tester.enterText(
+          find.byKey(const Key('field_new_password')), 'NewP@ss12!');
+      await tester.enterText(
+          find.byKey(const Key('field_confirm_password')), 'NewP@ss12!');
+      await tester.pump();
+
+      final btn = find.byKey(const Key('btn_update_password'));
+      expect(tester.widget<ElevatedButton>(btn).onPressed, isNotNull);
+
+      await tester.tap(btn);
+      await tester.pumpAndSettle();
+
+      expect(auth.changePasswordCalled, isTrue);
+      expect(auth.lastCurrentPassword, isNull); // bypassed!
+      expect(auth.lastNewPassword, 'NewP@ss12!');
+      expect(find.text('Password updated'), findsOneWidget);
+    });
+
+    // ── Test 16: MFA account → error return is handled gracefully ─────────────────
+
+    testWidgets('Test 16: MFA account → handles updateUser errors gracefully',
+        (tester) async {
+      final auth = PasswordChangeMockAuthProvider();
+      auth.mockFactors = [
+        supabase.Factor(
+          id: 'factor-1',
+          status: supabase.FactorStatus.verified,
+          factorType: supabase.FactorType.totp,
+          friendlyName: 'TOTP',
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        ),
+      ];
+      auth.changePasswordResult = PasswordChangeResult.error;
+
+      await tester.pumpWidget(createModalWidget(auth));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+          find.byKey(const Key('field_new_password')), 'NewP@ss12!');
+      await tester.enterText(
+          find.byKey(const Key('field_confirm_password')), 'NewP@ss12!');
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('btn_update_password')));
+      await tester.pumpAndSettle();
+
+      expect(auth.changePasswordCalled, isTrue);
+      expect(auth.lastCurrentPassword, isNull);
       expect(find.textContaining('An error occurred'), findsOneWidget);
     });
   });

@@ -683,7 +683,7 @@ class AuthProvider extends ChangeNotifier {
   /// returned. This applies to all staff roles (receptionist, department
   /// staff, specialist) — no role gate is applied.
   Future<PasswordChangeResult> changePassword({
-    required String currentPassword,
+    String? currentPassword,
     required String newPassword,
   }) async {
     _errorMessage = null;
@@ -696,20 +696,32 @@ class AuthProvider extends ChangeNotifier {
         return PasswordChangeResult.notAuthenticated;
       }
 
-      // Step 1: Reauthenticate — proves the caller knows the current password.
-      try {
-        await _client.auth.signInWithPassword(
-          email: email,
-          password: currentPassword,
-        );
-      } on AuthException catch (e) {
-        _errorMessage = e.message;
-        notifyListeners();
-        return PasswordChangeResult.wrongCurrentPassword;
-      }
+      final factors = await _client.auth.mfa.listFactors();
+      final hasMfa = factors.totp.any((f) => f.status == FactorStatus.verified);
 
-      // Step 2: Update to the new password.
-      await _client.auth.updateUser(UserAttributes(password: newPassword));
+      if (hasMfa) {
+        // Already AAL2 from TOTP at login. Do NOT signInWithPassword —
+        // it downgrades to AAL1 and Supabase rejects the update.
+        await _client.auth.updateUser(UserAttributes(password: newPassword));
+      } else {
+        // No MFA → verify current password via reauth, then update
+        if (currentPassword == null || currentPassword.isEmpty) {
+          _errorMessage = 'Current password is required.';
+          notifyListeners();
+          return PasswordChangeResult.wrongCurrentPassword;
+        }
+        try {
+          await _client.auth.signInWithPassword(
+            email: email,
+            password: currentPassword,
+          );
+        } on AuthException catch (e) {
+          _errorMessage = e.message;
+          notifyListeners();
+          return PasswordChangeResult.wrongCurrentPassword;
+        }
+        await _client.auth.updateUser(UserAttributes(password: newPassword));
+      }
       return PasswordChangeResult.success;
     } catch (e, stack) {
       debugPrint('ChangePassword error: $e');
@@ -718,6 +730,12 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return PasswordChangeResult.error;
     }
+  }
+
+  /// Retrieves all TOTP MFA factors registered to the current authenticated user.
+  Future<List<Factor>> listMfaFactors() async {
+    final factors = await _client.auth.mfa.listFactors();
+    return factors.totp;
   }
 
   @override
