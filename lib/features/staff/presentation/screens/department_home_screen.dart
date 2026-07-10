@@ -5,6 +5,7 @@ import '../../../auth/presentation/providers/auth_provider.dart';
 import '../providers/department_provider.dart';
 import '../../../../core/models/patient_queue.dart';
 import '../../../../core/models/department_record.dart';
+import '../../../../core/utils/reference_status_formatter.dart';
 import '../../../records/domain/record_grouper.dart';
 import '../widgets/queue_entry_card.dart';
 import '../../../../core/utils/triage_notes_formatter.dart';
@@ -90,8 +91,7 @@ class _DepartmentHomeScreenState extends State<DepartmentHomeScreen> with Single
         bgColor = Theme.of(context).colorScheme.primary;
         fgColor = Theme.of(context).colorScheme.onPrimary;
         break;
-      case ReferenceRangeStatus.criticalHigh:
-      case ReferenceRangeStatus.criticalLow:
+      case ReferenceRangeStatus.flagged:
         bgColor = Theme.of(context).colorScheme.error;
         fgColor = Colors.white;
         break;
@@ -108,7 +108,7 @@ class _DepartmentHomeScreenState extends State<DepartmentHomeScreen> with Single
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
-        status.name.toUpperCase().replaceAll('_', ' '),
+        referenceStatusDisplayLabel(status).toUpperCase(),
         style: TextStyle(
           color: fgColor,
           fontSize: 10,
@@ -478,8 +478,7 @@ class _DepartmentHomeScreenState extends State<DepartmentHomeScreen> with Single
                                       case ReferenceRangeStatus.normal:
                                         recordColor = Colors.green.shade700;
                                         break;
-                                      case ReferenceRangeStatus.criticalHigh:
-                                      case ReferenceRangeStatus.criticalLow:
+                                      case ReferenceRangeStatus.flagged:
                                         recordColor = Colors.red.shade700;
                                         break;
                                       case ReferenceRangeStatus.inconclusive:

@@ -31,11 +31,8 @@ class GroupedRecord {
 
 
   static ReferenceRangeStatus _aggregateStatus(List<DepartmentRecord> records) {
-    if (records.any((r) => r.referenceRangeStatus == ReferenceRangeStatus.criticalHigh)) {
-      return ReferenceRangeStatus.criticalHigh;
-    }
-    if (records.any((r) => r.referenceRangeStatus == ReferenceRangeStatus.criticalLow)) {
-      return ReferenceRangeStatus.criticalLow;
+    if (records.any((r) => r.referenceRangeStatus == ReferenceRangeStatus.flagged)) {
+      return ReferenceRangeStatus.flagged;
     }
     if (records.any((r) => r.referenceRangeStatus == ReferenceRangeStatus.inconclusive)) {
       return ReferenceRangeStatus.inconclusive;

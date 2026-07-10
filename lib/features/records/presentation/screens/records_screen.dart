@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../../features/auth/presentation/providers/auth_provider.dart';
 import '../../../../core/models/department_record.dart';
+import '../../../../core/utils/reference_status_formatter.dart';
 import '../providers/records_provider.dart';
 import '../../domain/record_grouper.dart';
 import '../widgets/grouped_record_detail_modal.dart';
@@ -299,8 +300,7 @@ class _RecordsScreenState extends State<RecordsScreen> {
         bgColor = Theme.of(context).colorScheme.primary;
         fgColor = Theme.of(context).colorScheme.onPrimary;
         break;
-      case ReferenceRangeStatus.criticalHigh:
-      case ReferenceRangeStatus.criticalLow:
+      case ReferenceRangeStatus.flagged:
         bgColor = Theme.of(context).colorScheme.error;
         fgColor = Colors.white;
         break;
@@ -317,7 +317,7 @@ class _RecordsScreenState extends State<RecordsScreen> {
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
-        status.name.toUpperCase().replaceAll('_', ' '),
+        referenceStatusDisplayLabel(status).toUpperCase(),
         style: TextStyle(
           color: fgColor,
           fontSize: 10,

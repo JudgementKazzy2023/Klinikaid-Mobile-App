@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../core/models/department_record.dart';
+import '../../../../core/utils/reference_status_formatter.dart';
 import '../../domain/record_grouper.dart';
 
 class GroupedRecordDetailModal extends StatelessWidget {
@@ -48,8 +49,7 @@ class GroupedRecordDetailModal extends StatelessWidget {
         bgColor = Theme.of(context).colorScheme.primary;
         fgColor = Theme.of(context).colorScheme.onPrimary;
         break;
-      case ReferenceRangeStatus.criticalHigh:
-      case ReferenceRangeStatus.criticalLow:
+      case ReferenceRangeStatus.flagged:
         bgColor = Theme.of(context).colorScheme.error;
         fgColor = Colors.white;
         break;
@@ -66,7 +66,7 @@ class GroupedRecordDetailModal extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
-        status.name.toUpperCase().replaceAll('_', ' '),
+        referenceStatusDisplayLabel(status).toUpperCase(),
         style: TextStyle(
           color: fgColor,
           fontSize: 10,

@@ -3,18 +3,16 @@ import 'profile.dart';
 
 enum ReferenceRangeStatus {
   normal,
-  @JsonKey(name: 'critical_high')
-  criticalHigh,
-  @JsonKey(name: 'critical_low')
-  criticalLow,
+  flagged,
   inconclusive;
 
   static ReferenceRangeStatus fromString(String value) {
     switch (value.toLowerCase()) {
+      // Legacy DB values — both map to flagged going forward
       case 'critical_high':
-        return ReferenceRangeStatus.criticalHigh;
       case 'critical_low':
-        return ReferenceRangeStatus.criticalLow;
+      case 'flagged':
+        return ReferenceRangeStatus.flagged;
       case 'inconclusive':
         return ReferenceRangeStatus.inconclusive;
       case 'normal':
@@ -27,15 +25,14 @@ enum ReferenceRangeStatus {
     switch (this) {
       case ReferenceRangeStatus.normal:
         return 'normal';
-      case ReferenceRangeStatus.criticalHigh:
-        return 'critical_high';
-      case ReferenceRangeStatus.criticalLow:
-        return 'critical_low';
+      case ReferenceRangeStatus.flagged:
+        return 'flagged';
       case ReferenceRangeStatus.inconclusive:
         return 'inconclusive';
     }
   }
 }
+
 
 class DepartmentRecord {
   final String id;
@@ -80,7 +77,7 @@ class DepartmentRecord {
       },
       referenceRangeStatus: ReferenceRangeStatus.fromString(
         json['reference_range_status'] as String? ?? 
-        ((json['is_flagged'] as bool? ?? false) ? 'critical_high' : 'normal')
+        ((json['is_flagged'] as bool? ?? false) ? 'flagged' : 'normal')
       ),
       notes: json['notes'] as String?,
       createdAt: DateTime.parse(json['created_at'] as String),
