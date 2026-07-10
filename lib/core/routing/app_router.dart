@@ -29,7 +29,7 @@ import '../../features/auth/presentation/screens/totp_verify_screen.dart';
 import '../../features/reception/presentation/reception_shell.dart';
 import '../../features/reception/presentation/screens/reception_queue_screen.dart';
 import '../../features/reception/presentation/screens/document_validation_screen.dart';
-import '../../features/reception/presentation/screens/reception_dashboard_placeholder.dart';
+import '../../features/reception/presentation/screens/reception_dashboard_screen.dart';
 
 /// AppRouter defines the structural gating/redirection rules for the application.
 class AppRouter {
@@ -227,7 +227,7 @@ class AppRouter {
         routes: [
           GoRoute(
             path: '/reception/dashboard',
-            builder: (context, state) => const ReceptionDashboardPlaceholder(),
+            builder: (context, state) => const ReceptionDashboardScreen(),
           ),
           GoRoute(
             path: '/reception/queue',

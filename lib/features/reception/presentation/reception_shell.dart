@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../data/reception_repository.dart';
 import 'providers/reception_queue_provider.dart';
+import 'providers/reception_dashboard_provider.dart';
 
 class ReceptionShell extends StatelessWidget {
   final Widget child;
@@ -20,6 +21,11 @@ class ReceptionShell extends StatelessWidget {
           create: (context) => ReceptionQueueProvider(
             repository: Provider.of<ReceptionRepository>(context, listen: false),
           )..loadSubmissions(),
+        ),
+        ChangeNotifierProvider<ReceptionDashboardProvider>(
+          create: (context) => ReceptionDashboardProvider(
+            repository: Provider.of<ReceptionRepository>(context, listen: false),
+          )..loadDashboard(),
         ),
       ],
       child: Scaffold(

@@ -4,6 +4,8 @@ import '../../../../core/errors/failures.dart';
 import '../domain/submission.dart';
 import '../domain/submission_detail.dart';
 import '../domain/submission_status.dart';
+import '../domain/recent_triage_entry.dart';
+import '../../../../core/models/patient_queue.dart';
 
 /// 3-letter department codes — must match patient_queue.department CHECK values
 /// and replicate web's deptCode map exactly (web source confirmed).
@@ -265,6 +267,94 @@ class ReceptionRepository {
             'rejection_reason': reason,
           })
           .eq('id', documentId);
+    } catch (e) {
+      throw FailureMapper.fromException(e);
+    }
+  }
+
+  /// Counts active queue entries (waiting or in_progress).
+  Future<int> countActiveQueue() async {
+    try {
+      final res = await _client
+          .from('patient_queue')
+          .select('id')
+          .inFilter('status', ['waiting', 'in_progress'])
+          .count(CountOption.exact);
+      return res.count;
+    } catch (e) {
+      throw FailureMapper.fromException(e);
+    }
+  }
+
+  /// Counts pending document submissions.
+  Future<int> countPendingSubmissions() async {
+    try {
+      final res = await _client
+          .from('documents')
+          .select('id')
+          .eq('status', 'pending')
+          .count(CountOption.exact);
+      return res.count;
+    } catch (e) {
+      throw FailureMapper.fromException(e);
+    }
+  }
+
+  /// Counts total queue entries routed since PHT start-of-today.
+  Future<int> countRoutedToday() async {
+    try {
+      final startOfToday = phtStartOfTodayUtc();
+      final res = await _client
+          .from('patient_queue')
+          .select('id')
+          .gte('created_at', startOfToday.toIso8601String())
+          .count(CountOption.exact);
+      return res.count;
+    } catch (e) {
+      throw FailureMapper.fromException(e);
+    }
+  }
+
+  /// Retrieves the last N triage entries ordered by created_at DESC.
+  Future<List<RecentTriageEntry>> getRecentTriage({int limit = 5}) async {
+    try {
+      final List<dynamic> rows = await _client
+          .from('patient_queue')
+          .select('id, patient_id, department, status, created_at, patients(first_name, last_name)')
+          .order('created_at', ascending: false)
+          .limit(limit);
+
+      return rows.map((row) {
+        final patientsData = row['patients'];
+        String patientName = 'Unknown Patient';
+        if (patientsData != null) {
+          if (patientsData is Map) {
+            final firstName = patientsData['first_name'] as String? ?? '';
+            final lastName = patientsData['last_name'] as String? ?? '';
+            final joined = '$firstName $lastName'.trim();
+            if (joined.isNotEmpty) {
+              patientName = joined;
+            }
+          } else if (patientsData is List && patientsData.isNotEmpty) {
+            final firstMap = patientsData.first;
+            if (firstMap is Map) {
+              final firstName = firstMap['first_name'] as String? ?? '';
+              final lastName = firstMap['last_name'] as String? ?? '';
+              final joined = '$firstName $lastName'.trim();
+              if (joined.isNotEmpty) {
+                patientName = joined;
+              }
+            }
+          }
+        }
+
+        return RecentTriageEntry(
+          patientName: patientName,
+          department: row['department'] as String? ?? 'laboratory',
+          status: QueueStatus.fromString(row['status'] as String? ?? 'waiting'),
+          createdAt: DateTime.parse(row['created_at'] as String),
+        );
+      }).toList();
     } catch (e) {
       throw FailureMapper.fromException(e);
     }
