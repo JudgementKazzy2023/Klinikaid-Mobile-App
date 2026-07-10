@@ -5,6 +5,7 @@ import '../providers/auth_provider.dart';
 import '../../domain/registration_validators.dart';
 import '../../../../core/models/patient.dart';
 import '../widgets/privacy_policy_modal.dart';
+import '../widgets/terms_and_conditions_modal.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -25,8 +26,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   DateTime? _dateOfBirth;
   Gender _gender = Gender.male;
-  bool _consentChecked = false;
-  bool _hasReadPolicy = false;
+  bool _hasReadTerms = false;
+  bool _hasReadPrivacy = false;
+  bool _termsAccepted = false;
+  bool _privacyAccepted = false;
+
+  bool get _bothConsented => _termsAccepted && _privacyAccepted;
   String? _dobError;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
@@ -466,55 +471,123 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                           const SizedBox(height: 16),
 
-                          // Consent Checkbox
+                          // Row 1 — Terms and Conditions
                           Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Checkbox(
-                                value: _consentChecked,
-                                onChanged: _hasReadPolicy
-                                    ? (val) => setState(() => _consentChecked = val ?? false)
+                                key: const Key('terms_checkbox'),
+                                value: _termsAccepted,
+                                onChanged: _hasReadTerms
+                                    ? (val) => setState(() => _termsAccepted = val ?? false)
                                     : null,
                               ),
                               Expanded(
-                                child: Wrap(
-                                  crossAxisAlignment: WrapCrossAlignment.center,
-                                  children: [
-                                    Text(
-                                      'I accept the ',
-                                      style: TextStyle(
-                                        color: Theme.of(context).colorScheme.onSurface,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                    GestureDetector(
-                                      onTap: () async {
-                                        await showDialog(
-                                          context: context,
-                                          builder: (_) => const PrivacyPolicyModal(),
-                                        );
-                                        setState(() => _hasReadPolicy = true);
-                                      },
-                                      child: Text(
-                                        'RA 10173 data privacy policy',
+                                child: Padding(
+                                  padding: const EdgeInsets.only(top: 12.0),
+                                  child: Wrap(
+                                    crossAxisAlignment: WrapCrossAlignment.center,
+                                    children: [
+                                      Text(
+                                        'I accept the ',
                                         style: TextStyle(
-                                          color: Theme.of(context).colorScheme.primary,
-                                          decoration: TextDecoration.underline,
+                                          color: Theme.of(context).colorScheme.onSurface,
                                           fontSize: 14,
-                                          fontWeight: FontWeight.bold,
                                         ),
                                       ),
-                                    ),
-                                  ],
+                                      GestureDetector(
+                                        onTap: () async {
+                                          await showDialog(
+                                            context: context,
+                                            builder: (_) => const TermsAndConditionsModal(),
+                                          );
+                                          setState(() => _hasReadTerms = true);
+                                        },
+                                        child: Text(
+                                          'Terms and Conditions',
+                                          style: TextStyle(
+                                            color: Theme.of(context).colorScheme.primary,
+                                            decoration: TextDecoration.underline,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ],
                           ),
-                          if (!_hasReadPolicy) ...[
+                          if (!_hasReadTerms) ...[
                             const SizedBox(height: 4),
                             Padding(
                               padding: const EdgeInsets.only(left: 48.0),
                               child: Text(
-                                'Please tap the policy link above to review before accepting',
+                                'Please review the Terms and Conditions before accepting',
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 12),
+
+                          // Row 2 — Privacy Policy
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Checkbox(
+                                key: const Key('privacy_checkbox'),
+                                value: _privacyAccepted,
+                                onChanged: _hasReadPrivacy
+                                    ? (val) => setState(() => _privacyAccepted = val ?? false)
+                                    : null,
+                              ),
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.only(top: 12.0),
+                                  child: Wrap(
+                                    crossAxisAlignment: WrapCrossAlignment.center,
+                                    children: [
+                                      Text(
+                                        'I accept the ',
+                                        style: TextStyle(
+                                          color: Theme.of(context).colorScheme.onSurface,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                      GestureDetector(
+                                        onTap: () async {
+                                          await showDialog(
+                                            context: context,
+                                            builder: (_) => const PrivacyPolicyModal(),
+                                          );
+                                          setState(() => _hasReadPrivacy = true);
+                                        },
+                                        child: Text(
+                                          'RA 10173 Privacy Policy',
+                                          style: TextStyle(
+                                            color: Theme.of(context).colorScheme.primary,
+                                            decoration: TextDecoration.underline,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (!_hasReadPrivacy) ...[
+                            const SizedBox(height: 4),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 48.0),
+                              child: Text(
+                                'Please review the Privacy Policy before accepting',
                                 style: TextStyle(
                                   color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                                   fontSize: 12,
@@ -553,7 +626,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           SizedBox(
                             height: 54,
                             child: ElevatedButton(
-                              onPressed: (_consentChecked && !authProvider.isLoading) ? _submit : null,
+                              onPressed: (_bothConsented && !authProvider.isLoading) ? _submit : null,
                               child: authProvider.isLoading
                                   ? SizedBox(
                                       height: 24,
