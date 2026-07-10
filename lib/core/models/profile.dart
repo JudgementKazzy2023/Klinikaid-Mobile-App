@@ -37,6 +37,22 @@ enum UserRole {
         return 'patient';
     }
   }
+
+  /// Human-readable display name for UI badges and labels.
+  String get displayName {
+    switch (this) {
+      case UserRole.admin:
+        return 'Admin';
+      case UserRole.receptionist:
+        return 'Receptionist';
+      case UserRole.departmentStaff:
+        return 'Department Staff';
+      case UserRole.medicalSpecialist:
+        return 'Medical Specialist';
+      case UserRole.patient:
+        return 'Patient';
+    }
+  }
 }
 
 enum Department {

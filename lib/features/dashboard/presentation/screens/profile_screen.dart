@@ -196,7 +196,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
-                              'ROLE: ${authProvider.profile?.role.toString().split('.').last.toUpperCase()}',
+                              'ROLE: ${authProvider.profile?.role.displayName.toUpperCase() ?? 'UNKNOWN'}',
                               style: TextStyle(
                                 color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
                                 fontSize: 10,
@@ -487,7 +487,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           children: [
                             _buildLabel('Gender'),
                             DropdownButtonFormField<Gender>(
-                              value: _selectedGender,
+                              initialValue: _selectedGender,
                               dropdownColor: Theme.of(context).cardColor,
                               style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5), fontSize: 14),
                               decoration: _buildInputDecoration(null),
