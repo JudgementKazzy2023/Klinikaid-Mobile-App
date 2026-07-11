@@ -22,6 +22,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   String? _errorMessage;
   
   // OCR processing states
+  bool _isProcessing = false;
   bool _isProcessingOcr = false;
   String? _extractedOcrText;
   Map<String, dynamic>? _preScreenMetadata;
@@ -38,6 +39,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
+  bool get isProcessing => _isProcessing;
   bool get isProcessingOcr => _isProcessingOcr;
   String? get extractedOcrText => _extractedOcrText;
   Map<String, dynamic>? get preScreenMetadata => _preScreenMetadata;
@@ -83,6 +85,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
 
   /// Processes text recognition on-device with ML Kit.
   Future<String> processOnDeviceOcr(String imagePath, Patient patient) async {
+    _isProcessing = true;
     _isProcessingOcr = true;
     _errorMessage = null;
     _extractedOcrText = null;
@@ -123,6 +126,8 @@ class DocumentSubmissionProvider extends ChangeNotifier {
       notifyListeners();
       rethrow;
     } finally {
+      _isProcessing = false;
+      notifyListeners();
       if (textRecognizer != null) {
         await textRecognizer.close();
       }
@@ -131,6 +136,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
 
   /// Clears the active OCR extraction text, metadata, processing flags, and errors.
   void clearOcrState() {
+    _isProcessing = false;
     _isProcessingOcr = false;
     _extractedOcrText = null;
     _preScreenMetadata = null;

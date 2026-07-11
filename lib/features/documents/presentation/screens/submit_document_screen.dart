@@ -140,7 +140,9 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (!provider.hasCachedSubmission)
+                if (provider.isProcessing)
+                  _buildProcessingSpinner()
+                else if (!provider.hasCachedSubmission)
                   _buildUploadCard(patient)
                 else
                   _buildPreviewAndValidationCard(patient, provider),
@@ -165,6 +167,37 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildProcessingSpinner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(32),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Theme.of(context).colorScheme.outline, width: 1),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox(height: 24),
+          CircularProgressIndicator(color: Theme.of(context).colorScheme.primary),
+          const SizedBox(height: 24),
+          Text(
+            'Analyzing document quality — this may take up to 10 seconds. Please wait.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.8),
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 24),
+        ],
       ),
     );
   }
@@ -488,18 +521,23 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _buildSubmitButton(assessment, patient, provider),
-                const SizedBox(height: 12),
-                TextButton(
-                  onPressed: provider.isLoading ? null : _clearSelection,
-                  child: Text(
-                    'Retake',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.primary,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
+                if (assessment == null ||
+                    assessment.score < QualityThresholds.minOcrPassScore ||
+                    !identityMatch) ...[
+                  const SizedBox(height: 12),
+                  TextButton(
+                    key: const Key('retake_button'),
+                    onPressed: provider.isLoading ? null : _clearSelection,
+                    child: Text(
+                      'Retake',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
                     ),
                   ),
-                ),
+                ],
               ],
             ),
           ],
