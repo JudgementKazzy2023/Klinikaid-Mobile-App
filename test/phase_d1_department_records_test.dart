@@ -308,5 +308,74 @@ void main() {
 
       expect(find.text('No historical department records found.'), findsOneWidget);
     });
+
+    testWidgets('4. Long Impression text does not cause overflow errors on records card', (tester) async {
+      final authProvider = MockAuthProvider();
+      authProvider.setMockIsAuthenticated(true);
+      authProvider.setMockProfile(Profile(
+        id: 'staff-uuid',
+        fullName: 'Alice Lab Staff',
+        role: UserRole.departmentStaff,
+        department: Department.laboratory,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      ));
+
+      final appRouter = AppRouter(authProvider);
+      final now = DateTime.now();
+      
+      final longImpression = 'A very long clinical impression value that exceeds the width of standard mobile layouts '
+          'by containing a large volume of descriptive text. ' * 5; // ~500 chars
+
+      final mockRecords = [
+        DepartmentRecord(
+          id: 'rec-long',
+          patientId: 'patient-long',
+          recorderId: 'recorder-long',
+          testType: 'Imaging Report',
+          department: Department.imaging,
+          testResults: {
+            'test_name': 'Impression',
+            'test_value': longImpression,
+            'unit': '',
+          },
+          referenceRangeStatus: ReferenceRangeStatus.normal,
+          createdAt: now,
+          updatedAt: now,
+          patient: Patient(
+            id: 'patient-long',
+            firstName: 'Victor',
+            lastName: 'Wembanyama',
+            dateOfBirth: DateTime(2004, 1, 4),
+            gender: Gender.male,
+            contactNumber: '09123456789',
+            address: 'San Antonio',
+            createdAt: now,
+            updatedAt: now,
+          ),
+          recorder: Profile(
+            id: 'recorder-long',
+            fullName: 'Dr. Jane Smith',
+            role: UserRole.departmentStaff,
+            department: Department.imaging,
+            createdAt: now,
+            updatedAt: now,
+          ),
+        ),
+      ];
+
+      final deptProvider = MockDepartmentProvider('imaging', mockRecords);
+
+      await tester.pumpWidget(createTestWidget(authProvider, appRouter, deptProvider));
+      appRouter.router.go('/department/records');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Victor Wembanyama'), findsOneWidget);
+      expect(find.textContaining('A very long clinical impression'), findsOneWidget);
+      
+      await tester.tap(find.text('Victor Wembanyama'));
+      await tester.pumpAndSettle();
+      expect(find.byType(GroupedRecordDetailModal), findsOneWidget);
+    });
   });
 }

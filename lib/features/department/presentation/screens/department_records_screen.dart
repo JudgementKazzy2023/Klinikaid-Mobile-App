@@ -311,7 +311,6 @@ class _DepartmentRecordsScreenState extends State<DepartmentRecordsScreen> {
     final valueWeight = isFlagged ? FontWeight.bold : FontWeight.normal;
 
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
           name,
@@ -319,11 +318,18 @@ class _DepartmentRecordsScreenState extends State<DepartmentRecordsScreen> {
             color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
           ),
         ),
-        Text(
-          value,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: valueColor,
-            fontWeight: valueWeight,
+        const SizedBox(width: 16),
+        Expanded(
+          child: Text(
+            value,
+            textAlign: TextAlign.end,
+            softWrap: true,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: valueColor,
+              fontWeight: valueWeight,
+            ),
           ),
         ),
       ],
