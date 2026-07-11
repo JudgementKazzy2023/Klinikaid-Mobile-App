@@ -296,8 +296,18 @@ class GroupedRecordDetailModal extends StatelessWidget {
             ),
             Divider(color: theme.colorScheme.outline, height: 32),
 
-            // Stacked parameters
-            ...groupedRecord.records.expand((r) {
+            // Stacked parameters (ensure 'findings' comes before 'impression' if present)
+            ...(() {
+              final list = List<DepartmentRecord>.from(groupedRecord.records);
+              list.sort((a, b) {
+                final aName = (a.testResults['test_name']?.toString() ?? '').toLowerCase();
+                final bName = (b.testResults['test_name']?.toString() ?? '').toLowerCase();
+                if (aName == 'findings' && bName == 'impression') return -1;
+                if (aName == 'impression' && bName == 'findings') return 1;
+                return 0;
+              });
+              return list;
+            })().expand((r) {
               final parameterName = r.testResults['test_name']?.toString() ?? r.testType;
               final parameterValue = r.testResults['test_value']?.toString() ?? '';
               final formattedHeader = parameterName.isNotEmpty

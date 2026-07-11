@@ -321,11 +321,11 @@ void main() {
       expect(find.text('BP: 120/80 | Wt: 72.5kg | Temp: 36.7°C'), findsOneWidget);
       expect(find.text('Triage Note: Routine lab test request'), findsOneWidget);
       
-      // Verify Enter Results button is disabled
-      final buttonFinder = find.widgetWithText(TextButton, 'Enter Results (Coming soon)');
+      // Verify Enter Results button is enabled (Phase D2)
+      final buttonFinder = find.widgetWithText(ElevatedButton, 'Enter Results');
       expect(buttonFinder, findsOneWidget);
-      final textButton = tester.widget<TextButton>(buttonFinder);
-      expect(textButton.onPressed, isNull);
+      final elevatedButton = tester.widget<ElevatedButton>(buttonFinder);
+      expect(elevatedButton.onPressed, isNotNull);
     });
 
     testWidgets('6. Empty queue shows correct placeholder text', (tester) async {
