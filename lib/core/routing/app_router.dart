@@ -32,6 +32,8 @@ import '../../features/reception/presentation/screens/reception_dashboard_screen
 import '../../features/department/presentation/department_shell.dart';
 import '../../features/department/presentation/screens/department_queue_screen.dart';
 import '../../features/department/presentation/screens/department_records_screen.dart';
+import '../../features/department/presentation/screens/result_entry_screen.dart';
+import '../../features/department/data/department_repository.dart';
 
 /// AppRouter defines the structural gating/redirection rules for the application.
 class AppRouter {
@@ -235,6 +237,17 @@ class AppRouter {
             builder: (context, state) => const ProfileScreen(),
           ),
         ],
+      ),
+      GoRoute(
+        path: '/department/result-entry/:patientId',
+        builder: (context, state) {
+          final patientId = state.pathParameters['patientId']!;
+          DepartmentRepository? repo;
+          try {
+            repo = Provider.of<DepartmentRepository>(context, listen: false);
+          } catch (_) {}
+          return ResultEntryScreen(patientId: patientId, repo: repo);
+        },
       ),
       GoRoute(
         path: '/staff/specialist',

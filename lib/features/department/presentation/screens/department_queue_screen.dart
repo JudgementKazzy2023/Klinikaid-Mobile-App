@@ -399,20 +399,24 @@ class _DepartmentQueueScreenState extends State<DepartmentQueueScreen> {
             ),
             const SizedBox(height: 8),
 
-            // Row 2: Disabled Action Button
+            // Row 2: Action Button
             Align(
               alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: null,
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  backgroundColor: theme.colorScheme.onSurface.withValues(alpha: 0.05),
+              child: ElevatedButton.icon(
+                key: ValueKey('enter_results_btn_${entry.patientId}'),
+                onPressed: () {
+                  context.push('/department/result-entry/${entry.patientId}');
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: deptColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
                 icon: const Icon(Icons.edit_note_rounded, size: 18),
-                label: const Text('Enter Results (Coming soon)'),
+                label: const Text('Enter Results'),
               ),
             ),
           ],

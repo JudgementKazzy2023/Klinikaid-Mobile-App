@@ -121,15 +121,7 @@ class QualityAssessment {
     }
   }
 
-  Color get verdictColor => switch (verdict) {
-        QualityVerdict.good => Colors.green,
-        QualityVerdict.marginal => Colors.amber,
-        QualityVerdict.poor => Colors.red,
-      };
+  Color get verdictColor => score >= 85 ? Colors.green : Colors.orange;
 
-  String get verdictLabel => switch (verdict) {
-        QualityVerdict.good => 'Looks good',
-        QualityVerdict.marginal => 'Some issues found',
-        QualityVerdict.poor => 'Quality may be too low',
-      };
+  String get verdictLabel => score >= 85 ? 'Looks good' : 'Low quality';
 }

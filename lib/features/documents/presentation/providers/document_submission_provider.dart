@@ -11,6 +11,7 @@ import '../../../../core/utils/uuid_generator.dart';
 import '../../../../core/repositories/documents_repository.dart';
 import '../../../ocr/data/document_quality_service.dart';
 import '../../../ocr/domain/quality_assessment.dart';
+import '../../../ocr/domain/quality_thresholds.dart';
 
 class DocumentSubmissionProvider extends ChangeNotifier {
   final LocalDatabase _localDb;
@@ -24,6 +25,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   bool _isProcessingOcr = false;
   String? _extractedOcrText;
   Map<String, dynamic>? _preScreenMetadata;
+  String? _selectedImagePath;
   
   // Offline sync states
   List<OfflineDocument> _queuedSubmissions = [];
@@ -39,6 +41,10 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   bool get isProcessingOcr => _isProcessingOcr;
   String? get extractedOcrText => _extractedOcrText;
   Map<String, dynamic>? get preScreenMetadata => _preScreenMetadata;
+  String? get selectedImagePath => _selectedImagePath;
+  
+  /// Returns true if there is a processed document ready for review.
+  bool get hasCachedSubmission => _selectedImagePath != null && _preScreenMetadata != null;
   
   List<OfflineDocument> get queuedSubmissions => _queuedSubmissions;
   List<OfflineDocument> get orphanedSubmissions => _orphanedSubmissions;
@@ -81,6 +87,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     _errorMessage = null;
     _extractedOcrText = null;
     _preScreenMetadata = null;
+    _selectedImagePath = imagePath;
     notifyListeners();
     
     TextRecognizer? textRecognizer;
@@ -98,7 +105,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
       );
       
       final bool identityMatch = checkPatientName(ocrText, patient.firstName, patient.lastName);
-      final bool submittedWithWarnings = assessment.verdict != QualityVerdict.good || !identityMatch;
+      final bool submittedWithWarnings = assessment.score < QualityThresholds.minOcrPassScore || !identityMatch;
       
       _preScreenMetadata = {
         'ocr_text': ocrText,
@@ -128,6 +135,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     _extractedOcrText = null;
     _preScreenMetadata = null;
     _errorMessage = null;
+    _selectedImagePath = null;
     notifyListeners();
   }
 

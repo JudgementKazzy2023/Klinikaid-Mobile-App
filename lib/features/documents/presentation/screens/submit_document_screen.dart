@@ -7,6 +7,7 @@ import '../providers/document_submission_provider.dart';
 import '../../../../core/models/patient.dart';
 import '../../../../core/cache/local_database.dart';
 import '../../../ocr/domain/quality_assessment.dart';
+import '../../../ocr/domain/quality_thresholds.dart';
 
 class SubmitDocumentScreen extends StatefulWidget {
   const SubmitDocumentScreen({super.key});
@@ -17,7 +18,6 @@ class SubmitDocumentScreen extends StatefulWidget {
 
 class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with WidgetsBindingObserver {
   final ImagePicker _picker = ImagePicker();
-  String? _selectedImagePath;
   
   @override
   void initState() {
@@ -47,17 +47,11 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
         source: source,
         imageQuality: 85, // Balance size and quality for OCR text readability
       );
-
-      if (image != null) {
-        setState(() {
-          _selectedImagePath = image.path;
-        });
-        
-        if (mounted) {
-          // Trigger on-device OCR via provider
-          await Provider.of<DocumentSubmissionProvider>(context, listen: false)
-              .processOnDeviceOcr(image.path, patient);
-        }
+      
+      if (image != null && mounted) {
+        // Trigger on-device OCR via provider
+        await Provider.of<DocumentSubmissionProvider>(context, listen: false)
+            .processOnDeviceOcr(image.path, patient);
       }
     } catch (e) {
       if (mounted) {
@@ -72,19 +66,16 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
   }
 
   void _clearSelection() {
-    setState(() {
-      _selectedImagePath = null;
-    });
     if (mounted) {
       Provider.of<DocumentSubmissionProvider>(context, listen: false).clearOcrState();
     }
   }
 
   Future<void> _submit(Patient patient) async {
-    if (_selectedImagePath == null) return;
-    
     final provider = Provider.of<DocumentSubmissionProvider>(context, listen: false);
-    final fullPath = _selectedImagePath!;
+    final fullPath = provider.selectedImagePath;
+    if (fullPath == null) return;
+    
     final originalName = fullPath.split('/').last.split('\\').last;
     final ext = originalName.contains('.') ? originalName.split('.').last : 'jpg';
     
@@ -94,7 +85,7 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
       fileExtension: ext,
       patient: patient,
     );
-
+ 
     if (mounted) {
       if (success) {
         final isOffline = provider.errorMessage != null && provider.errorMessage!.contains('offline');
@@ -149,7 +140,7 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (_selectedImagePath == null)
+                if (!provider.hasCachedSubmission)
                   _buildUploadCard(patient)
                 else
                   _buildPreviewAndValidationCard(patient, provider),
@@ -296,14 +287,7 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
           // File image preview
           ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            child: SizedBox(
-              height: 180,
-              width: double.infinity,
-              child: Image.file(
-                File(_selectedImagePath!),
-                fit: BoxFit.cover,
-              ),
-            ),
+            child: _buildImagePreview(provider.selectedImagePath!),
           ),
           
           const SizedBox(height: 20),
@@ -345,20 +329,24 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
                   ),
                 ),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      width: 16,
-                      height: 16,
-                      decoration: BoxDecoration(
-                        color: assessment.verdictColor,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: assessment.verdictColor.withValues(alpha: 0.4),
-                            blurRadius: 6,
-                            spreadRadius: 1,
-                          ),
-                        ],
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2.0),
+                      child: Container(
+                        width: 16,
+                        height: 16,
+                        decoration: BoxDecoration(
+                          color: assessment.verdictColor,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: assessment.verdictColor.withValues(alpha: 0.4),
+                              blurRadius: 6,
+                              spreadRadius: 1,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                     const SizedBox(width: 16),
@@ -383,6 +371,17 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
                               fontWeight: FontWeight.w600,
                             ),
                           ),
+                          if (assessment.score < QualityThresholds.minOcrPassScore) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              'This document may be hard to read (blurry / illegible text detected). You can submit as-is or retake for a clearer photo.',
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.8),
+                                fontSize: 13,
+                                height: 1.4,
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -390,8 +389,8 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
                 ),
               ),
             
-            // B. Issue List (rendered if issues are present)
-            if (assessment != null && assessment.issues.isNotEmpty) ...[
+            // B. Issue List (rendered if issues are present and score is below threshold)
+            if (assessment != null && assessment.score < QualityThresholds.minOcrPassScore && assessment.issues.isNotEmpty) ...[
               const SizedBox(height: 16),
               Text(
                 'Identified Quality Issues',
@@ -485,23 +484,21 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
             ],
 
             const SizedBox(height: 24),
-            Row(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
-                      side: BorderSide(color: Theme.of(context).colorScheme.outline),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                _buildSubmitButton(assessment, patient, provider),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: provider.isLoading ? null : _clearSelection,
+                  child: Text(
+                    'Retake',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
                     ),
-                    onPressed: provider.isLoading ? null : _clearSelection,
-                    child: const Text('Retake', style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _buildSubmitButton(assessment, patient, provider),
                 ),
               ],
             ),
@@ -516,9 +513,8 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
     Patient patient,
     DocumentSubmissionProvider provider,
   ) {
-    final isPoor = assessment?.verdict == QualityVerdict.poor;
     final isLoading = provider.isLoading;
-
+ 
     if (isLoading) {
       return ElevatedButton(
         style: ElevatedButton.styleFrom(
@@ -538,22 +534,7 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
         ),
       );
     }
-
-    if (isPoor) {
-      // Outlined style for poor verdict (visually de-emphasized but fully enabled)
-      return OutlinedButton(
-        style: OutlinedButton.styleFrom(
-          foregroundColor: Theme.of(context).colorScheme.primary,
-          side: BorderSide(color: Theme.of(context).colorScheme.primary, width: 1.5),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
-        onPressed: () => _submit(patient),
-        child: const Text('Submit Request', style: TextStyle(fontWeight: FontWeight.bold)),
-      );
-    }
-
-    // Standard filled style for good/marginal
+ 
     return ElevatedButton(
       style: ElevatedButton.styleFrom(
         backgroundColor: Theme.of(context).colorScheme.primary,
@@ -612,6 +593,49 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
           IconButton(
             icon: Icon(Icons.delete_outline_rounded, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.38), size: 20),
             onPressed: () => provider.removeQueuedItem(doc.id),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImagePreview(String path) {
+    try {
+      final file = File(path);
+      if (!file.existsSync() || file.lengthSync() == 0) {
+        return _buildImagePlaceholder();
+      }
+    } catch (_) {
+      return _buildImagePlaceholder();
+    }
+    return Image.file(
+      File(path),
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) => _buildImagePlaceholder(),
+    );
+  }
+
+  Widget _buildImagePlaceholder() {
+    return Container(
+      height: 180,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.broken_image_outlined, size: 40, color: Theme.of(context).colorScheme.error),
+          const SizedBox(height: 8),
+          Text(
+            'Preview unavailable',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ],
       ),
