@@ -2,17 +2,12 @@
 
 KlinikAid Mobile — a patient-and-staff-facing Android app for Bloodcare Medical Laboratory, built in Flutter with a Supabase backend.
 
-[![Flutter Version](https://img.shields.io/badge/Flutter-v3.12.0-blue.svg)](https://flutter.dev)
+[![Flutter Version](https://img.shields.io/badge/Flutter-v3.44.0-blue.svg)](https://flutter.dev)
 [![Android minSdk](https://img.shields.io/badge/Android-minSdk%2026-green.svg)](https://developer.android.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Screenshots
-| Login Screen | Patient Dashboard | Chatbot |
-| :---: | :---: | :---: |
-| ![Login](docs/assets/screenshots/admin_block_dialog.png) | ![Patient Dashboard](docs/assets/screenshots/queue_patient_now_calling.png) | ![Chatbot](docs/assets/screenshots/triage_after_clean_notes.png) |
-
 ## Quick Start
-1. **Clone the repository**: `git clone <placeholder-repo-url>`
+1. **Clone the repository**: `git clone https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App.git`
 2. **Configure environment**: Copy `lib/core/config/env.dart.example` to `lib/core/config/env.dart` and enter your Supabase URL & Anon Key placeholders.
 3. **Download packages**: `flutter pub get`
 4. **Run the application**: `flutter run`
@@ -27,8 +22,8 @@ The application also embeds three specialized staff portals tailored to differen
 | :--- | :--- | :--- |
 | **Framework** | Flutter / Dart | Native Android client wrapper & state rendering |
 | **Backend** | Supabase | Auth, Postgres DB, Edge Functions, Storage, Realtime sync |
-| **Database Extensions** | pgvector | Enables vector similarity search over text embeddings in Postgres |
-| **AI LLM Engine** | Gemini API | Powered administrative QA chatbot via Supabase Edge Function |
+| **Database Extensions** | pgvector | Backend-side vector similarity search over text embeddings (server-side; not on the device) |
+| **AI LLM Engine** | Gemini API (server-side) | Powers the QA chatbot via a Supabase Edge Function; the client never calls the model directly and holds no AI key |
 | **Device AI** | Google ML Kit | Performs local OCR processing of document files for intake |
 | **Local Cache** | Drift (SQLite) | Manages offline-first database sync with patient profile isolation |
 
@@ -36,10 +31,12 @@ The application also embeds three specialized staff portals tailored to differen
 | Role | Mobile Access | Details |
 | :--- | :--- | :--- |
 | **Patient** | Full access | Consent, onboarding, document upload with OCR, chatbot, records, queue |
-| **Receptionist** | Documents lookup | Read-only tabbed lists of Pending, Approved, and Rejected uploads |
-| **Department Staff** | Department queue | Read-only access to department-scoped waitlists and records |
+| **Receptionist** | Reception workstation | Document validation, queue approve/route/reject, dashboard (write-capable) |
+| **Department Staff** | Department workstation | Department-scoped queue + records, and clinical result entry (write-capable) |
 | **Medical Specialist**| Patient history | Multi-term search, cross-department records timeline (read-only) |
 | **Admin / Owner** | **None** | Mobile access is strictly blocked; system administration is web-only |
+
+> Receptionist and Department Staff are write-capable as of the receptionist workstation (R1–R5) and department result entry (D2). Specialist and admin/owner mobile behavior may change in future phases. See [docs/04-development-story.md](docs/04-development-story.md).
 
 ## Documentation Index
 - [01-Overview: Project Scope & Boundaries](docs/01-overview.md)
