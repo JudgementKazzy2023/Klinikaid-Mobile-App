@@ -33,10 +33,11 @@ The application also embeds three specialized staff portals tailored to differen
 | **Patient** | Full access | Consent, onboarding, document upload with OCR, chatbot, records, queue |
 | **Receptionist** | Reception workstation | Document validation, queue approve/route/reject, dashboard (write-capable) |
 | **Department Staff** | Department workstation | Department-scoped queue + records, and clinical result entry (write-capable) |
-| **Medical Specialist**| Patient history | Multi-term search, cross-department records timeline (read-only) |
-| **Admin / Owner** | **None** | Mobile access is strictly blocked; system administration is web-only |
+| **Medical Specialist**| Private-practice workstation | Private patient roster, private lab record entry, and read-only diagnostic analytics over isolated tables (write-capable) |
+| **Admin** | Oversight + management (AAL2) | Dashboards, logs, cost tracking, cross-department records, plus RLS-governed management: staff status/role edits, reception triage, department result entry, RAG delete |
+| **Owner** | **None** | Mobile access is strictly blocked |
 
-> Receptionist and Department Staff are write-capable as of the receptionist workstation (R1–R5) and department result entry (D2). Specialist and admin/owner mobile behavior may change in future phases. See [docs/04-development-story.md](docs/04-development-story.md).
+> The role model evolved across the project: Receptionist and Department Staff became write-capable (R1–R5, D1–D2); Medical Specialist gained a write-capable private-practice workstation (S1–S3); and Admin — previously blocked — was brought onto mobile as an oversight-plus-management client (A1–A3), scoped so that **no service-role operation runs on the device** (account creation, password resets, session revocation, metadata sync, and RAG upload stay web-only). The client holds only the public anon key. See [docs/04-development-story.md](docs/04-development-story.md) and [docs/06-security.md](docs/06-security.md).
 
 ## Documentation Index
 - [01-Overview: Project Scope & Boundaries](docs/01-overview.md)
