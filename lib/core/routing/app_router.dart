@@ -34,6 +34,14 @@ import '../../features/department/presentation/screens/department_queue_screen.d
 import '../../features/department/presentation/screens/department_records_screen.dart';
 import '../../features/department/presentation/screens/result_entry_screen.dart';
 import '../../features/department/data/department_repository.dart';
+import '../../features/specialist/presentation/specialist_shell.dart';
+import '../../features/specialist/presentation/screens/specialist_dashboard_screen.dart';
+import '../../features/specialist/presentation/screens/specialist_directory_screen.dart';
+import '../../features/specialist/presentation/providers/specialist_provider.dart';
+import '../../features/specialist/presentation/providers/record_entry_provider.dart';
+import '../../features/specialist/presentation/screens/record_entry_screen.dart';
+import '../../features/specialist/presentation/providers/analytics_provider.dart';
+import '../../features/specialist/presentation/screens/analytics_screen.dart';
 
 /// AppRouter defines the structural gating/redirection rules for the application.
 class AppRouter {
@@ -146,7 +154,8 @@ class AppRouter {
         
         final isStaffPath = state.matchedLocation.startsWith('/staff/') || 
                             state.matchedLocation.startsWith('/reception/') ||
-                            state.matchedLocation.startsWith('/department/');
+                            state.matchedLocation.startsWith('/department/') ||
+                            state.matchedLocation.startsWith('/specialist/');
         final isCommonPath = isLoggingIn || isRegistering || isConsenting;
 
         // Staff trying to access / or patient routes are routed to their home
@@ -156,7 +165,7 @@ class AppRouter {
           } else if (role == UserRole.departmentStaff) {
             return '/department/queue';
           } else if (role == UserRole.medicalSpecialist) {
-            return '/staff/specialist';
+            return '/specialist/dashboard';
           }
         }
 
@@ -176,8 +185,10 @@ class AppRouter {
             return '/department/queue';
           }
         }
-        if (role == UserRole.medicalSpecialist && state.matchedLocation != '/staff/specialist') {
-          return '/staff/specialist';
+        if (role == UserRole.medicalSpecialist) {
+          if (!state.matchedLocation.startsWith('/specialist/')) {
+            return '/specialist/dashboard';
+          }
         }
 
         return null; // Allow staff routes
@@ -252,6 +263,75 @@ class AppRouter {
       GoRoute(
         path: '/staff/specialist',
         builder: (context, state) => const SpecialistHomeScreen(),
+      ),
+      ShellRoute(
+        builder: (context, state, child) {
+          return SpecialistShell(child: child);
+        },
+        routes: [
+          GoRoute(
+            path: '/specialist/dashboard',
+            builder: (context, state) => const SpecialistDashboardScreen(),
+          ),
+          GoRoute(
+            path: '/specialist/patients',
+            builder: (context, state) => const SpecialistDirectoryScreen(),
+          ),
+          GoRoute(
+            path: '/specialist/profile',
+            builder: (context, state) => const ProfileScreen(),
+          ),
+        ],
+      ),
+      GoRoute(
+        path: '/specialist/record-entry/:patientId',
+        builder: (context, state) {
+          final patientId = state.pathParameters['patientId']!;
+          SpecialistProvider? parentProvider;
+          try {
+            parentProvider = Provider.of<SpecialistProvider>(context, listen: false);
+          } catch (_) {}
+
+          return MultiProvider(
+            providers: [
+              if (parentProvider != null)
+                ChangeNotifierProvider<SpecialistProvider>.value(value: parentProvider)
+              else
+                ChangeNotifierProvider<SpecialistProvider>(create: (context) => SpecialistProvider()),
+              ChangeNotifierProvider<RecordEntryProvider>(
+                create: (context) => RecordEntryProvider(
+                  repository: Provider.of<SpecialistProvider>(context, listen: false).repository,
+                ),
+              ),
+            ],
+            child: RecordEntryScreen(patientId: patientId),
+          );
+        },
+      ),
+      GoRoute(
+        path: '/specialist/analytics/:patientId',
+        builder: (context, state) {
+          final patientId = state.pathParameters['patientId']!;
+          SpecialistProvider? parentProvider;
+          try {
+            parentProvider = Provider.of<SpecialistProvider>(context, listen: false);
+          } catch (_) {}
+
+          return MultiProvider(
+            providers: [
+              if (parentProvider != null)
+                ChangeNotifierProvider<SpecialistProvider>.value(value: parentProvider)
+              else
+                ChangeNotifierProvider<SpecialistProvider>(create: (context) => SpecialistProvider()),
+              ChangeNotifierProvider<AnalyticsProvider>(
+                create: (context) => AnalyticsProvider(
+                  repository: Provider.of<SpecialistProvider>(context, listen: false).repository,
+                ),
+              ),
+            ],
+            child: AnalyticsScreen(patientId: patientId),
+          );
+        },
       ),
       GoRoute(
         path: '/reception/document/:submissionId',

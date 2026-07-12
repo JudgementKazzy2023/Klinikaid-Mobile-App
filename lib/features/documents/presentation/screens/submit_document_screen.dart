@@ -522,8 +522,7 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
               children: [
                 _buildSubmitButton(assessment, patient, provider),
                 if (assessment == null ||
-                    assessment.score < QualityThresholds.minOcrPassScore ||
-                    !identityMatch) ...[
+                    assessment.score < QualityThresholds.minOcrPassScore) ...[
                   const SizedBox(height: 12),
                   TextButton(
                     key: const Key('retake_button'),
