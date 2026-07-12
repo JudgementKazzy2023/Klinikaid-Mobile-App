@@ -21,7 +21,16 @@ Enforced in `lib/core/routing/app_router.dart` for staff routes, in this order:
 authenticated → role match → department assigned → AAL2 (step-up MFA) → allow
 ```
 
-The ordering is deliberate. Department assignment is validated **before** the MFA challenge, so an unassigned department-staff account is redirected to logout/login rather than completing TOTP and then hitting a dead end. Patients attempting staff routes (and vice versa) are redirected to their own area. Admin/owner accounts are blocked from the client entirely.
+The ordering is deliberate. Department assignment is validated **before** the MFA challenge, so an unassigned department-staff account is redirected to logout/login rather than completing TOTP and then hitting a dead end. Patients attempting staff routes (and vice versa) are redirected to their own area. The **admin** role is permitted on the client (admin routes require mandatory AAL2 step-up, admin being the highest-privilege role); the **owner** role remains blocked.
+
+## Admin Scoping — Service-Role Boundary
+
+The admin workstation is deliberately scoped so that **no service-role operation ever runs on the mobile device**. The client holds only the public anon key; the service-role key stays server-side (in the web platform's Next.js routes) and is never bundled into the mobile binary. The admin can therefore perform only what Row-Level Security permits with an admin JWT:
+
+- **Permitted on mobile (RLS-governed):** staff activate/deactivate (`profiles.is_active`) and role/department edits (both under the `"Admins have full access to profiles" FOR ALL` policy); reception triage (approve/route/reject); department result entry; and RAG document delete.
+- **Permanently web-only (service-role):** staff account creation and password-reset emails (Auth admin API), live-session revocation on deactivate, Auth-metadata sync on role change, and RAG document upload/embedding (server-side Gemini key). Where mobile performs the RLS half but cannot perform the service-role side-effect, the gap is surfaced honestly in-app (for example, deactivation notes that immediate session revocation requires the web portal).
+
+This boundary is why the release APK grep must stay clean of any `service_role` / `GEMINI` / API-key strings — the admin capability adds no secrets to the client.
 
 ## Data Isolation
 

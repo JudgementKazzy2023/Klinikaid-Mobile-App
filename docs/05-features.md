@@ -10,9 +10,11 @@ Access is role-gated at the router and enforced again by Supabase RLS on the bac
 | **Receptionist** | Reception workstation | Pending/approved/rejected document lists, raw OCR | Document approve/route/reject, `patient_queue` writes (queue numbers), reject reasons |
 | **Department Staff** | Department workstation (scoped to one department) | Department daily queue, department records history | **Clinical result entry** (lab structured + free-text), queue status → `completed` |
 | **Medical Specialist** | Patient lookup | Multi-term patient search, cross-department record timeline | Read-only (may change in a future phase) |
-| **Admin / Owner** | **Blocked** | — | — |
+| **Medical Specialist** | Private-practice workstation | Own private roster + records + analytics | Create private patients, enter private lab results (isolated tables; no shared-clinic writes) |
+| **Admin** | Oversight + management workstation (AAL2) | Everything (dashboard, logs, cost, cross-dept records, queue, staff, RAG) | Staff activate/deactivate + role/dept edit, admin-as-receptionist (approve/route/reject), admin-as-department-staff (result entry), RAG delete — all RLS-governed |
+| **Owner** | **Blocked** | — | — |
 
-> The read-only characterization of Receptionist and Department Staff from early drafts no longer holds: both are write-capable as of the receptionist workstation (R1–R5) and department result entry (D2). See Constraint #12 in [04-development-story](04-development-story.md). Specialist and admin/owner mobile behavior may change in future phases.
+> The role model evolved across the project: Receptionist and Department Staff became write-capable (R1–R5, D1–D2); Medical Specialist gained a write-capable private-practice workstation (S1–S3); and Admin — previously blocked entirely — was brought onto mobile as an oversight-plus-management client (A1–A3). Each change aligned mobile with the documented system design and the web platform. **Service-role operations remain permanently web-only**: staff account creation, password resets, live-session revocation, Auth-metadata sync, and RAG upload/embedding. The admin client holds only the public anon key and performs only what RLS permits. See Constraint #12 in [04-development-story](04-development-story.md).
 
 ## Patient Features
 

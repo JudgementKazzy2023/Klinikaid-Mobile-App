@@ -18,9 +18,13 @@ The mobile client is one half of a two-client system. A separate web platform (r
 - Department staff workstation: department-scoped daily queue, records history, **clinical result entry** (lab structured + free-text)
 - Medical specialist: multi-term patient search, cross-department record timeline (read-only)
 
-**Out of scope (web platform owns these):**
-- System administration, user management
-- Any admin/owner functionality — **admin and owner accounts are blocked from the mobile client entirely**
+**Admin on mobile (oversight + RLS-governed management):**
+- The admin role, previously blocked, now has a mobile workstation for oversight (dashboards, logs, cost tracking, cross-department records) and RLS-governed management (staff status/role edits, reception and department actions, RAG delete). It is scoped so that **no service-role operation runs on the device**.
+
+**Out of scope — permanently web-only:**
+- The **owner** role is blocked from mobile entirely.
+- Service-role operations: staff account creation, password-reset emails, live-session revocation, Auth-metadata sync, and RAG document upload/embedding (server-side Gemini key). These require the service-role key, which never ships in the mobile binary.
+- Backend Edge Function implementation and RAG ingestion/embedding pipeline.
 - Backend Edge Function implementation, RAG document ingestion, pgvector embedding (backend-side; mobile only consumes the chat function)
 
 ## Cross-Platform Contract

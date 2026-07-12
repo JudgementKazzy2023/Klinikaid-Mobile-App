@@ -33,7 +33,9 @@ lib/
     ├── queue/         patient queue view
     ├── reception/     receptionist workstation (R1–R5): validation, queue, dashboard
     ├── records/       patient record viewing + grouping
-    └── staff/         role landing screens (reception/department/specialist home)
+    ├── staff/         role landing screens (reception/department/specialist home)
+    ├── specialist/    private-practice workstation (dashboard, directory, record entry, analytics)
+    └── admin/         oversight + management workstation (dashboard, logs, staff, queue, records, RAG)
 ```
 
 Within a feature the convention is `data/` (repositories, services), `domain/` (models, pure logic), and `presentation/` (providers, screens, widgets).
@@ -63,7 +65,8 @@ Route groups:
 - **Patient:** `/patient`, `/submit`, `/records`, `/queue`, `/documents/status`, `/chatbot`, `/profile`
 - **Reception:** `/staff/reception`, `/reception/queue`, `/reception/dashboard`, `/reception/document/:submissionId`, `/reception/profile`
 - **Department (ShellRoute):** `/department/queue`, `/department/records`, `/department/profile`; plus `/department/result-entry/:patientId` (full-screen, **outside** the shell so back-navigation returns to the queue)
-- **Specialist:** `/staff/specialist`
+- **Specialist:** `/specialist/dashboard`, `/specialist/patients`, `/specialist/record-entry/:patientId`, `/specialist/analytics/:patientId`, `/specialist/profile` (private-practice workstation over isolated `specialist_patients` / `specialist_records` tables, RLS-scoped to the specialist)
+- **Admin:** `/admin/dashboard`, `/admin/staff`, `/admin/queue`, `/admin/records`, `/admin/logs`, `/admin/rag`, `/admin/profile`, plus standalone action routes `/admin/document/:submissionId` (reception triage) and `/admin/department-entry/:patientId` (department result entry). Admin routes require **AAL2** step-up. Standalone action routes live outside the receptionist/department shells so the shell role guards don't reject the admin.
 
 ## Shared Backend Touchpoints
 
