@@ -6,6 +6,7 @@ import '../providers/dashboard_provider.dart';
 import '../../../../core/models/patient_queue.dart';
 import '../../../../core/utils/triage_notes_formatter.dart';
 import '../../../../core/utils/queue_status_formatter.dart';
+import '../../../../core/utils/date_formatter.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -339,7 +340,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     ),
                                     const SizedBox(height: 6),
                                     Text(
-                                      'Recorded: ${provider.latestRecord!.createdAt.toLocal().toString().substring(0, 16)}',
+                                      'Recorded: ${DateFormatter.formatPht(provider.latestRecord!.createdAt)}',
                                       style: TextStyle(
                                         color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                                         fontSize: 12,

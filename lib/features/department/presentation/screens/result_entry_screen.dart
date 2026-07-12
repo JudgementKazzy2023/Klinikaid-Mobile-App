@@ -11,12 +11,14 @@ import '../providers/result_entry_provider.dart';
 class ResultEntryScreen extends StatefulWidget {
   final String patientId;
   final DepartmentRepository repo;
+  final String? departmentOverride;
 
   ResultEntryScreen({
     super.key,
     required this.patientId,
     DepartmentRepository? repo,
-  }) : repo = repo ?? DepartmentRepository();
+    this.departmentOverride,
+  }) : repo = (repo ?? DepartmentRepository())..adminDepartmentOverride = departmentOverride;
 
   @override
   State<ResultEntryScreen> createState() => _ResultEntryScreenState();
@@ -81,7 +83,7 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
       create: (_) => ResultEntryProvider(widget.repo),
       child: Consumer2<AuthProvider, ResultEntryProvider>(
         builder: (context, authProvider, provider, child) {
-          final department = authProvider.profile?.department?.toJsonValue() ?? '';
+          final department = widget.departmentOverride ?? authProvider.profile?.department?.toJsonValue() ?? '';
           final deptColor = _getDeptColor(department);
           final theme = Theme.of(context);
 

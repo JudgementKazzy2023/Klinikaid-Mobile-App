@@ -69,12 +69,17 @@ class LabResultRow {
 class DepartmentRepository {
   SupabaseClient get _client => SupabaseService.client;
 
+  String? adminDepartmentOverride;
+
   /// Returns the current authenticated user's ID.
   String? get currentUserId => _client.auth.currentUser?.id;
 
   /// Fetches the user's department from the profile table.
   /// Throws [DepartmentUnassignedException] if department is null or unknown.
   Future<String> _getCurrentUserDept() async {
+    if (adminDepartmentOverride != null) {
+      return adminDepartmentOverride!;
+    }
     final userId = _client.auth.currentUser?.id;
     if (userId == null) {
       throw const AuthFailure('User not authenticated');

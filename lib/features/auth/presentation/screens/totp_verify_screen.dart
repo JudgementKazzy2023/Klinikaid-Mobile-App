@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../providers/auth_provider.dart';
@@ -15,6 +16,42 @@ class _TotpVerifyScreenState extends State<TotpVerifyScreen> {
   final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
   final List<TextEditingController> _controllers = List.generate(6, (_) => TextEditingController());
   String? _localError;
+
+  bool _enrollmentInitiated = false;
+  String? _enrollSecret;
+  String? _enrollmentError;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final authProvider = Provider.of<AuthProvider>(context);
+    if (authProvider.needsMfaEnrollment && !_enrollmentInitiated) {
+      _enrollmentInitiated = true;
+      Future.microtask(() {
+        if (mounted) {
+          _startMfaEnrollment();
+        }
+      });
+    }
+  }
+
+  Future<void> _startMfaEnrollment() async {
+    setState(() {
+      _enrollmentError = null;
+    });
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final response = await authProvider.startMfaEnrollment();
+      setState(() {
+        _enrollSecret = response.totp.secret;
+      });
+    } catch (e) {
+      setState(() {
+        _enrollmentError = 'Failed to initiate MFA enrollment: $e';
+        _enrollmentInitiated = false;
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -81,6 +118,7 @@ class _TotpVerifyScreenState extends State<TotpVerifyScreen> {
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
     final size = MediaQuery.of(context).size;
+    final isEnrollment = authProvider.needsMfaEnrollment;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -113,7 +151,7 @@ class _TotpVerifyScreenState extends State<TotpVerifyScreen> {
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  'Two-Factor Verification',
+                  isEnrollment ? 'Setup Two-Factor Auth' : 'Two-Factor Verification',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.onSurface,
@@ -123,7 +161,9 @@ class _TotpVerifyScreenState extends State<TotpVerifyScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Open your authenticator app and enter the 6-digit code',
+                  isEnrollment
+                      ? 'Add this account to your authenticator app using the secret key below'
+                      : 'Open your authenticator app and enter the 6-digit code',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
@@ -131,7 +171,7 @@ class _TotpVerifyScreenState extends State<TotpVerifyScreen> {
                     height: 1.4,
                   ),
                 ),
-                const SizedBox(height: 36),
+                const SizedBox(height: 24),
 
                 Card(
                   margin: EdgeInsets.zero,
@@ -140,12 +180,89 @@ class _TotpVerifyScreenState extends State<TotpVerifyScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        // Enrollment UI
+                        if (isEnrollment) ...[
+                          if (_enrollSecret == null && _enrollmentError == null) ...[
+                            const Center(
+                              child: Padding(
+                                padding: EdgeInsets.symmetric(vertical: 20.0),
+                                child: CircularProgressIndicator(),
+                              ),
+                            ),
+                          ] else if (_enrollmentError != null) ...[
+                            Text(
+                              _enrollmentError!,
+                              style: TextStyle(color: Theme.of(context).colorScheme.error),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 12),
+                            ElevatedButton(
+                              onPressed: _startMfaEnrollment,
+                              child: const Text('Retry Setup'),
+                            ),
+                          ] else if (_enrollSecret != null) ...[
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.3)),
+                              ),
+                              child: Column(
+                                children: [
+                                  const Text(
+                                    'SECRET SETUP KEY',
+                                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.5),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  SelectableText(
+                                    _enrollSecret!,
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      fontFamily: 'monospace',
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                      minimumSize: Size.zero,
+                                    ),
+                                    onPressed: () {
+                                      Clipboard.setData(ClipboardData(text: _enrollSecret!));
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('Setup key copied to clipboard!'),
+                                          duration: Duration(seconds: 1),
+                                        ),
+                                      );
+                                    },
+                                    icon: const Icon(Icons.copy_rounded, size: 14),
+                                    label: const Text('Copy Key', style: TextStyle(fontSize: 12)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            const Text(
+                              'Instructions:\n'
+                              '1. Open Google Authenticator or Microsoft Authenticator.\n'
+                              '2. Select "Enter a setup key".\n'
+                              '3. Enter the key above and verify the 6-digit code below.',
+                              style: TextStyle(fontSize: 12, height: 1.5),
+                            ),
+                            const SizedBox(height: 24),
+                          ],
+                        ],
+
                         // OTP Input Row
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: List.generate(6, (index) {
                             return SizedBox(
-                              width: 44,
+                              width: 42,
                               height: 54,
                               child: TextFormField(
                                 controller: _controllers[index],
@@ -216,22 +333,23 @@ class _TotpVerifyScreenState extends State<TotpVerifyScreen> {
                         ],
 
                         // Info / Timer hint
-                        Center(
-                          child: Text(
-                            'Codes refresh every 30 seconds',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                        if (!isEnrollment)
+                          Center(
+                            child: Text(
+                              'Codes refresh every 30 seconds',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                              ),
                             ),
                           ),
-                        ),
                         const SizedBox(height: 16),
 
                         // Verify button
                         SizedBox(
                           height: 54,
                           child: ElevatedButton(
-                            onPressed: (authProvider.isLoading || !_isCodeComplete())
+                            onPressed: (authProvider.isLoading || !_isCodeComplete() || (isEnrollment && _enrollSecret == null))
                                 ? null
                                 : _onVerifyPressed,
                             child: authProvider.isLoading
@@ -243,9 +361,9 @@ class _TotpVerifyScreenState extends State<TotpVerifyScreen> {
                                       valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.onPrimary),
                                     ),
                                   )
-                                : const Text(
-                                    'Verify',
-                                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                : Text(
+                                    isEnrollment ? 'Verify & Enable 2FA' : 'Verify',
+                                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                                   ),
                           ),
                         ),

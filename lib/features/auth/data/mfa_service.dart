@@ -31,16 +31,27 @@ class MfaService {
     required String code,
   }) async {
     try {
+      print('[MfaService verifyTotp] Initiating challenge for factorId: $factorId');
       final challenge = await _supabase.auth.mfa.challenge(
         factorId: factorId,
       );
-      await _supabase.auth.mfa.verify(
+      print('[MfaService verifyTotp] Challenge created: challengeId = ${challenge.id}');
+      
+      if (challenge.id.isEmpty) {
+        print('[MfaService verifyTotp] Error: challengeId is empty or stale!');
+        return MfaVerifyResult.error;
+      }
+
+      print('[MfaService verifyTotp] Verifying code with challengeId: ${challenge.id}');
+      final response = await _supabase.auth.mfa.verify(
         factorId: factorId,
         challengeId: challenge.id,
         code: code,
       );
+      print('[MfaService verifyTotp] Verify response user ID: ${response.user?.id}');
       return MfaVerifyResult.success;
     } on AuthException catch (e) {
+      print('[MfaService verifyTotp] AuthException: $e');
       if (e.message.toLowerCase().contains('invalid')) {
         return MfaVerifyResult.invalidCode;
       }
@@ -48,8 +59,10 @@ class MfaService {
         return MfaVerifyResult.expired;
       }
       return MfaVerifyResult.error;
-    } catch (_) {
-      return MfaVerifyResult.error;
+    } catch (e, stack) {
+      print('[MfaService verifyTotp] UNKNOWN ERROR: $e');
+      print('[MfaService verifyTotp] Stack: $stack');
+      rethrow;  // let caller's try/finally clear _isLoading
     }
   }
 }

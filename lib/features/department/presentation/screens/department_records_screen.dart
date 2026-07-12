@@ -6,6 +6,7 @@ import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../records/domain/record_grouper.dart';
 import '../../../records/presentation/widgets/grouped_record_detail_modal.dart';
 import '../providers/department_provider.dart';
+import '../../../../core/utils/date_formatter.dart';
 
 class DepartmentRecordsScreen extends StatefulWidget {
   const DepartmentRecordsScreen({super.key});
@@ -181,7 +182,7 @@ class _DepartmentRecordsScreenState extends State<DepartmentRecordsScreen> {
     final patientName = firstRecord.patient?.fullName ?? 'Unknown Patient';
 
     // Format the date
-    final dateStr = firstRecord.createdAt.toLocal().toString().substring(0, 16);
+    final dateStr = DateFormatter.formatPht(firstRecord.createdAt);
 
     // Defensive fallback for recorder name: if null or empty, display "Unknown"
     final recorderName = (firstRecord.recorder?.fullName == null ||

@@ -6,6 +6,13 @@ class RagDocument {
   final Map<String, dynamic>? metadata;
   final DateTime createdAt;
 
+  String get type => metadata?['type'] as String? ?? 'Document';
+  int get totalChunks => metadata?['total_chunks'] as int? ?? 1;
+  int get characterCount => metadata?['character_count'] as int? ?? content.length;
+  DateTime get indexedDate => metadata?['indexed_date'] != null
+      ? DateTime.parse(metadata!['indexed_date'] as String)
+      : createdAt;
+
   RagDocument({
     required this.id,
     required this.title,

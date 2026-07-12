@@ -42,6 +42,13 @@ import '../../features/specialist/presentation/providers/record_entry_provider.d
 import '../../features/specialist/presentation/screens/record_entry_screen.dart';
 import '../../features/specialist/presentation/providers/analytics_provider.dart';
 import '../../features/specialist/presentation/screens/analytics_screen.dart';
+import '../../features/admin/presentation/admin_shell.dart';
+import '../../features/admin/presentation/screens/admin_dashboard_screen.dart';
+import '../../features/admin/presentation/screens/admin_staff_screen.dart';
+import '../../features/admin/presentation/screens/admin_queue_screen.dart';
+import '../../features/admin/presentation/screens/admin_records_screen.dart';
+import '../../features/admin/presentation/screens/admin_logs_screen.dart';
+import '../../features/admin/presentation/screens/admin_rag_screen.dart';
 
 /// AppRouter defines the structural gating/redirection rules for the application.
 class AppRouter {
@@ -100,13 +107,24 @@ class AppRouter {
           return '/department/queue';
         } else if (role == UserRole.medicalSpecialist) {
           return '/staff/specialist';
+        } else if (role == UserRole.admin && authProvider.isAal2) {
+          return '/admin/dashboard';
         }
-        return '/';
+        return null;
       }
 
-      // 3. Admin Account blocking
+      // 3. Admin Routing & AAL2 Guarding
       if (role == UserRole.admin) {
-        return '/login';
+        if (!authProvider.isAal2) {
+          return '/mfa-verify';
+        }
+
+        // Redirect admins trying to access non-admin paths to dashboard
+        final isAdminPath = state.matchedLocation.startsWith('/admin/');
+        if (!isAdminPath && state.matchedLocation != '/login') {
+          return '/admin/dashboard';
+        }
+        return null;
       }
 
       // 4. Role-based routing
@@ -137,10 +155,11 @@ class AppRouter {
           return '/patient';
         }
 
-        // Patient trying to access staff routes is redirected to /patient
+        // Patient trying to access staff/admin routes is redirected to /patient
         if (state.matchedLocation.startsWith('/staff/') || 
             state.matchedLocation.startsWith('/reception/') ||
-            state.matchedLocation.startsWith('/department/')) {
+            state.matchedLocation.startsWith('/department/') ||
+            state.matchedLocation.startsWith('/admin/')) {
           return '/patient';
         }
 
@@ -152,6 +171,17 @@ class AppRouter {
           role == UserRole.departmentStaff ||
           role == UserRole.medicalSpecialist) {
         
+        // Block other staff roles from admin paths
+        if (state.matchedLocation.startsWith('/admin/')) {
+          if (role == UserRole.receptionist) {
+            return '/reception/queue';
+          } else if (role == UserRole.departmentStaff) {
+            return '/department/queue';
+          } else if (role == UserRole.medicalSpecialist) {
+            return '/specialist/dashboard';
+          }
+        }
+
         final isStaffPath = state.matchedLocation.startsWith('/staff/') || 
                             state.matchedLocation.startsWith('/reception/') ||
                             state.matchedLocation.startsWith('/department/') ||
@@ -261,6 +291,22 @@ class AppRouter {
         },
       ),
       GoRoute(
+        path: '/admin/department/result-entry/:patientId',
+        builder: (context, state) {
+          final patientId = state.pathParameters['patientId']!;
+          final dept = state.uri.queryParameters['dept'];
+          DepartmentRepository? repo;
+          try {
+            repo = Provider.of<DepartmentRepository>(context, listen: false);
+          } catch (_) {}
+          return ResultEntryScreen(
+            patientId: patientId,
+            repo: repo,
+            departmentOverride: dept,
+          );
+        },
+      ),
+      GoRoute(
         path: '/staff/specialist',
         builder: (context, state) => const SpecialistHomeScreen(),
       ),
@@ -340,6 +386,13 @@ class AppRouter {
           return DocumentValidationScreen(submissionId: submissionId);
         },
       ),
+      GoRoute(
+        path: '/admin/document/:submissionId',
+        builder: (context, state) {
+          final submissionId = state.pathParameters['submissionId']!;
+          return DocumentValidationScreen(submissionId: submissionId);
+        },
+      ),
       ShellRoute(
         builder: (context, state, child) {
           return ReceptionShell(child: child);
@@ -355,6 +408,41 @@ class AppRouter {
           ),
           GoRoute(
             path: '/reception/profile',
+            builder: (context, state) => const ProfileScreen(),
+          ),
+        ],
+      ),
+      ShellRoute(
+        builder: (context, state, child) {
+          return AdminShell(child: child);
+        },
+        routes: [
+          GoRoute(
+            path: '/admin/dashboard',
+            builder: (context, state) => const AdminDashboardScreen(),
+          ),
+          GoRoute(
+            path: '/admin/staff',
+            builder: (context, state) => const AdminStaffScreen(),
+          ),
+          GoRoute(
+            path: '/admin/queue',
+            builder: (context, state) => const AdminQueueScreen(),
+          ),
+          GoRoute(
+            path: '/admin/records',
+            builder: (context, state) => const AdminRecordsScreen(),
+          ),
+          GoRoute(
+            path: '/admin/logs',
+            builder: (context, state) => const AdminLogsScreen(),
+          ),
+          GoRoute(
+            path: '/admin/rag',
+            builder: (context, state) => const AdminRagScreen(),
+          ),
+          GoRoute(
+            path: '/admin/profile',
             builder: (context, state) => const ProfileScreen(),
           ),
         ],

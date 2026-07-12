@@ -10,6 +10,7 @@ import '../../../records/domain/record_grouper.dart';
 import '../widgets/queue_entry_card.dart';
 import '../../../../core/utils/triage_notes_formatter.dart';
 import '../../../../core/utils/queue_status_formatter.dart';
+import '../../../../core/utils/date_formatter.dart';
 
 class DepartmentHomeScreen extends StatefulWidget {
   final DepartmentProvider? providerOverride;
@@ -510,7 +511,7 @@ class _DepartmentHomeScreenState extends State<DepartmentHomeScreen> with Single
                                             const SizedBox(height: 4),
                                             Text('Patient: $patientName'),
                                             Text(
-                                              'Recorded: ${firstRecord.createdAt.toLocal().toString().substring(0, 16)}',
+                                              'Recorded: ${DateFormatter.formatPht(firstRecord.createdAt)}',
                                               style: TextStyle(
                                                 fontSize: 12,
                                                 color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),

@@ -8,6 +8,8 @@ import '../../domain/submission_status.dart';
 import '../providers/reception_queue_provider.dart';
 import '../widgets/triage_routing_sheet.dart';
 import '../widgets/reject_document_sheet.dart';
+import '../../../../features/auth/presentation/providers/auth_provider.dart';
+import '../../../../core/models/profile.dart';
 
 class DocumentValidationScreen extends StatefulWidget {
   final String submissionId;
@@ -58,6 +60,20 @@ class _DocumentValidationScreenState extends State<DocumentValidationScreen> {
         _errorMessage = e.toString();
         _isLoading = false;
       });
+    }
+  }
+
+  void _navigateBack() {
+    UserRole? role;
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      role = authProvider.profile?.role;
+    } catch (_) {}
+
+    if (role == UserRole.admin) {
+      context.go('/admin/queue');
+    } else {
+      context.go('/reception/queue');
     }
   }
 
@@ -170,7 +186,7 @@ class _DocumentValidationScreenState extends State<DocumentValidationScreen> {
                       backgroundColor: Colors.green,
                     ),
                   );
-                  context.go('/reception/queue');
+                  _navigateBack();
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -243,7 +259,7 @@ class _DocumentValidationScreenState extends State<DocumentValidationScreen> {
                       backgroundColor: Colors.green,
                     ),
                   );
-                  context.go('/reception/queue');
+                  _navigateBack();
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -353,7 +369,7 @@ class _DocumentValidationScreenState extends State<DocumentValidationScreen> {
         centerTitle: true,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/reception/queue'),
+          onPressed: () => _navigateBack(),
         ),
         actions: [
           if (detail != null)

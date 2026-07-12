@@ -16,9 +16,9 @@ import '../../domain/login_outcome.dart';
 
 /// Provider that manages authentication state, RA 10173 consent, and patient onboarding flow.
 class AuthProvider extends ChangeNotifier {
-  final _client = Supabase.instance.client;
-  final _patientsRepo = PatientsRepository();
-  final _profilesRepo = ProfilesRepository();
+  final SupabaseClient _client;
+  final PatientsRepository _patientsRepo;
+  final ProfilesRepository _profilesRepo;
   final VerificationService _verificationService;
   final SessionActivityService _activityService;
   final MfaService _mfaService;
@@ -35,23 +35,40 @@ class AuthProvider extends ChangeNotifier {
   bool _wasLoggedOutForInactivity = false;
   bool _isFirstAuthCheck = true;
   String? _pendingMfaFactorId;
+  bool _needsMfaEnrollment = false;
 
   Profile? get profile => _profile;
   Patient? get patient => _patient;
   VerificationState get verificationState => _verificationState;
   bool get wasLoggedOutForInactivity => _wasLoggedOutForInactivity;
   String? get pendingMfaFactorId => _pendingMfaFactorId;
-  bool get isAal1Pending => _pendingMfaFactorId != null;
+  bool get needsMfaEnrollment => _needsMfaEnrollment;
+  bool get isAal1Pending => _pendingMfaFactorId != null || _needsMfaEnrollment;
+
+  bool get isAal2 {
+    try {
+      final aal = _client.auth.mfa.getAuthenticatorAssuranceLevel();
+      return aal.currentLevel == AuthenticatorAssuranceLevels.aal2;
+    } catch (_) {
+      return false;
+    }
+  }
 
   StreamSubscription<AuthState>? _authStateSubscription;
 
   AuthProvider({
+    SupabaseClient? client,
+    PatientsRepository? patientsRepo,
+    ProfilesRepository? profilesRepo,
     VerificationService? verificationService,
     SessionActivityService? activityService,
     MfaService? mfaService,
-  })  : _verificationService = verificationService ?? SupabaseVerificationService(),
+  })  : _client = client ?? Supabase.instance.client,
+        _patientsRepo = patientsRepo ?? PatientsRepository(),
+        _profilesRepo = profilesRepo ?? ProfilesRepository(),
+        _verificationService = verificationService ?? SupabaseVerificationService(),
         _activityService = activityService ?? SessionActivityService(),
-        _mfaService = mfaService ?? MfaService(Supabase.instance.client),
+        _mfaService = mfaService ?? MfaService(client ?? Supabase.instance.client),
         super() {
     _init();
   }
@@ -89,9 +106,22 @@ class AuthProvider extends ChangeNotifier {
   }
 
   /// Evaluates consent and onboarding status based on active user state.
+  bool _isDisposed = false;
+  Future<void>? _currentUpdateFuture;
+
   Future<void> _updateLocalStates() async {
-    final currentUser = _user;
-    if (currentUser == null) {
+    if (_isDisposed) return;
+
+    // Mutex lock to ensure sequential execution of state updates
+    while (_currentUpdateFuture != null) {
+      await _currentUpdateFuture;
+    }
+    final completer = Completer<void>();
+    _currentUpdateFuture = completer.future;
+
+    try {
+      final currentUser = _user;
+      if (currentUser == null) {
        _hasConsented = false;
        _isOnboarded = false;
        _profile = null;
@@ -105,27 +135,46 @@ class AuthProvider extends ChangeNotifier {
       _profile = null;
     }
 
-    // If the profile is admin, block access, sign out, and clear state
-    if (_profile?.role == UserRole.admin) {
-      _errorMessage = 'Admin accounts must sign in via the web portal.';
-      await _client.auth.signOut();
-      _user = null;
-      _session = null;
-      _profile = null;
-      _patient = null;
-      _hasConsented = false;
-      _isOnboarded = false;
-      return;
-    }
-
-    // If staff role, bypass consent and onboarding gates
-    if (_profile?.role == UserRole.receptionist ||
+    // If admin or staff role, bypass consent and onboarding gates
+    if (_profile?.role == UserRole.admin ||
+        _profile?.role == UserRole.receptionist ||
         _profile?.role == UserRole.departmentStaff ||
         _profile?.role == UserRole.medicalSpecialist) {
       _hasConsented = true;
       _isOnboarded = true;
       _patient = null;
+
+      if (_profile?.role == UserRole.admin && !isAal2) {
+        // IMPORTANT: If we already have a pending factor from enrollment/login,
+        // do NOT call listVerifiedFactors — the newly-enrolled factor is still
+        // unverified and will not appear, and overwriting _pendingMfaFactorId
+        // mid-verify would kill the challenge→verify sequence.
+        if (_pendingMfaFactorId != null) {
+          print('[AuthProvider _updateLocalStates] Admin has pendingMfaFactorId=$_pendingMfaFactorId — skipping listVerifiedFactors to preserve mid-verify state.');
+          _needsMfaEnrollment = false;
+        } else {
+          try {
+            print('[AuthProvider _updateLocalStates] Admin AAL1, no pending factor — calling listVerifiedFactors.');
+            final factors = await _mfaService.listVerifiedFactors();
+            print('[AuthProvider _updateLocalStates] listVerifiedFactors returned ${factors.length} factor(s).');
+            if (factors.isNotEmpty) {
+              _pendingMfaFactorId = factors.first.id;
+              _needsMfaEnrollment = false;
+              print('[AuthProvider _updateLocalStates] Set pendingMfaFactorId=${factors.first.id} from verified factor.');
+            } else {
+              _needsMfaEnrollment = true;
+              print('[AuthProvider _updateLocalStates] No verified factors — needs enrollment.');
+            }
+          } catch (e) {
+            print('[AuthProvider _updateLocalStates] listVerifiedFactors error: $e — defaulting to needs enrollment.');
+            _needsMfaEnrollment = true;
+          }
+        }
+      } else if (_profile?.role != UserRole.admin) {
+        _needsMfaEnrollment = false;
+      }
     } else {
+      _needsMfaEnrollment = false;
       // 2. Evaluate Privacy Consent (read exclusively from database profiles.accepted_privacy_at)
       _hasConsented = _profile?.acceptedPrivacyAt != null;
 
@@ -165,9 +214,16 @@ class AuthProvider extends ChangeNotifier {
     } else {
       _isFirstAuthCheck = false;
     }
+    } finally {
+      completer.complete();
+      if (_currentUpdateFuture == completer.future) {
+        _currentUpdateFuture = null;
+      }
+    }
   }
 
   void _startInactivityMonitor() {
+    if (_isDisposed) return;
     final role = _profile?.role;
     if (role == null) return;
 
@@ -257,31 +313,79 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  /// Starts MFA Enrollment for admin
+  Future<dynamic> startMfaEnrollment() async {
+    _isLoading = true;
+    notifyListeners();
+    try {
+      print('[AuthProvider startMfaEnrollment] (${identityHashCode(this)}) Enrolling TOTP factor...');
+      final response = await _client.auth.mfa.enroll(
+        factorType: FactorType.totp,
+        issuer: 'KlinikAid',
+      );
+      _pendingMfaFactorId = response.id;
+      _needsMfaEnrollment = false; // Factor enrolled, now verify it
+      print('[AuthProvider startMfaEnrollment] (${identityHashCode(this)}) Success: factorId = ${response.id}');
+      _isLoading = false;
+      notifyListeners();
+      return response;
+    } catch (e) {
+      print('[AuthProvider startMfaEnrollment] (${identityHashCode(this)}) Error: $e');
+      _isLoading = false;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
   /// Verify TOTP code → upgrades session to AAL2
   Future<MfaVerifyResult> verifyMfa(String code) async {
-    if (_pendingMfaFactorId == null) return MfaVerifyResult.error;
+    print('[AuthProvider verifyMfa] Called. _pendingMfaFactorId=$_pendingMfaFactorId, code length=${code.length}');
+    if (_pendingMfaFactorId == null) {
+      print('[AuthProvider verifyMfa] ABORT: _pendingMfaFactorId is null — cannot verify.');
+      return MfaVerifyResult.error;
+    }
 
     _isLoading = true;
     notifyListeners();
 
-    final result = await _mfaService.verifyTotp(
-      factorId: _pendingMfaFactorId!,
-      code: code,
-    );
+    try {
+      print('[AuthProvider verifyMfa] Calling verifyTotp: factorId=$_pendingMfaFactorId code=$code');
+      final result = await _mfaService.verifyTotp(
+        factorId: _pendingMfaFactorId!,
+        code: code,
+      );
+      print('[AuthProvider verifyMfa] verifyTotp outcome: $result');
 
-    if (result == MfaVerifyResult.success) {
-      _pendingMfaFactorId = null;
-      await _updateLocalStates();
+      if (result == MfaVerifyResult.success) {
+        _pendingMfaFactorId = null;
+        _needsMfaEnrollment = false;
+        print('[AuthProvider verifyMfa] Success. Refreshing session...');
+        try {
+          await _client.auth.refreshSession();
+          print('[AuthProvider verifyMfa] Session refreshed. isAal2=${isAal2}');
+        } catch (e) {
+          print('[AuthProvider verifyMfa] refreshSession error (non-fatal): $e');
+        }
+        await _updateLocalStates();
+      }
+
+      return result;
+    } catch (e, stack) {
+      print('[AuthProvider verifyMfa] UNEXPECTED EXCEPTION: $e');
+      print('[AuthProvider verifyMfa] Stack: $stack');
+      return MfaVerifyResult.error;
+    } finally {
+      // ALWAYS clear loading — this was missing and caused the spinner to lock
+      _isLoading = false;
+      notifyListeners();
+      print('[AuthProvider verifyMfa] finally: _isLoading cleared.');
     }
-
-    _isLoading = false;
-    notifyListeners();
-    return result;
   }
 
   /// Cancels registration/MFA flow, signs out, and resets state.
   Future<void> cancelMfaFlow() async {
     _pendingMfaFactorId = null;
+    _needsMfaEnrollment = false;
     await signOut();
   }
 
@@ -740,7 +844,27 @@ class AuthProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    _isDisposed = true;
     _authStateSubscription?.cancel();
+    _activityService.stopMonitoring();
     super.dispose();
+  }
+
+  @visibleForTesting
+  void setMockState({
+    Session? session,
+    User? user,
+    Profile? profile,
+    bool? needsMfaEnrollment,
+    String? pendingMfaFactorId,
+    bool? isLoading,
+  }) {
+    _session = session;
+    _user = user;
+    _profile = profile;
+    if (needsMfaEnrollment != null) _needsMfaEnrollment = needsMfaEnrollment;
+    if (pendingMfaFactorId != null) _pendingMfaFactorId = pendingMfaFactorId;
+    if (isLoading != null) _isLoading = isLoading;
+    notifyListeners();
   }
 }

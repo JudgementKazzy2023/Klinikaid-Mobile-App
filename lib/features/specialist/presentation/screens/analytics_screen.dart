@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
-import '../providers/specialist_provider.dart';
 import '../providers/analytics_provider.dart';
 import '../../domain/analytics_series.dart';
 
@@ -412,14 +411,17 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               getTitlesWidget: (value, meta) {
                 final index = value.round();
                 if (index >= 0 && index < points.length && (value - index).abs() < 0.01) {
-                  final date = points[index].createdAt;
+                  final rawDate = points[index].createdAt;
+                  // Normalize to PHT (UTC+8)
+                  final date = rawDate.toUtc().add(const Duration(hours: 8));
                   // Formatting date: if multiple records share a day, show time or dedupe
                   bool sharesDay = false;
                   for (int i = 0; i < points.length; i++) {
+                    final otherDate = points[i].createdAt.toUtc().add(const Duration(hours: 8));
                     if (i != index &&
-                        points[i].createdAt.year == date.year &&
-                        points[i].createdAt.month == date.month &&
-                        points[i].createdAt.day == date.day) {
+                        otherDate.year == date.year &&
+                        otherDate.month == date.month &&
+                        otherDate.day == date.day) {
                       sharesDay = true;
                       break;
                     }
