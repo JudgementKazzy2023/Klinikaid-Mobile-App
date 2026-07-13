@@ -76,6 +76,38 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
     final fullPath = provider.selectedImagePath;
     if (fullPath == null) return;
     
+    final metadata = provider.preScreenMetadata;
+    final qualityAssessmentMap = metadata?['quality_assessment'] as Map<String, dynamic>?;
+    final QualityAssessment? assessment = qualityAssessmentMap != null 
+        ? QualityAssessment.fromJson(qualityAssessmentMap) 
+        : null;
+
+    if (assessment != null && assessment.score <= QualityThresholds.kPoorQualityThreshold) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Confirm Submission'),
+          content: const Text(
+            'This document is poor quality. Are you sure you want to submit it? There is a higher chance the clinic will reject it. You can retake for a clearer photo, or submit as-is.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Submit Anyway'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true) {
+        return;
+      }
+    }
+
     final originalName = fullPath.split('/').last.split('\\').last;
     final ext = originalName.contains('.') ? originalName.split('.').last : 'jpg';
     
