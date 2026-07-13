@@ -113,7 +113,7 @@ class _AdminRagScreenState extends State<AdminRagScreen> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'RAG Document Manager is Read-Only in Phase A1. File uploads/deletions are locked.',
+                      'Uploads are managed on the web portal.',
                       style: TextStyle(fontSize: 12, color: Colors.blue),
                     ),
                   ),
@@ -188,17 +188,14 @@ class _AdminRagScreenState extends State<AdminRagScreen> {
                 ],
               ),
             ),
-            // Disabled Delete button
+            // Delete button
             IconButton(
-              icon: Icon(Icons.delete_outline_rounded, color: theme.colorScheme.onSurface.withValues(alpha: 0.2)),
-              tooltip: 'Delete Document (Locked)',
+              key: ValueKey('delete_rag_${doc.id}'),
+              icon: Icon(Icons.delete_outline_rounded, color: theme.colorScheme.error),
+              tooltip: 'Delete Document',
               onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('RAG document deletion is locked in Phase A1.'),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
+                final provider = Provider.of<AdminProvider>(context, listen: false);
+                _confirmDelete(context, provider, doc);
               },
             ),
           ],
@@ -244,5 +241,68 @@ class _AdminRagScreenState extends State<AdminRagScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _confirmDelete(
+    BuildContext context,
+    AdminProvider provider,
+    RagDocument doc,
+  ) async {
+    final title = doc.title;
+    final documentId = doc.metadata?['document_id'] as String?;
+    if (documentId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot delete: missing document ID in metadata.'),
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Document?'),
+        content: Text(
+          "Delete '$title'? This removes it from the chatbot knowledge base. This cannot be undone.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await provider.deleteRag(documentId);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("Successfully deleted '$title'."),
+              backgroundColor: const Color(0xFF047857),
+            ),
+          );
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error deleting document: $e'),
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+          );
+        }
+      }
+    }
   }
 }

@@ -249,6 +249,21 @@ class AdminProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> deleteRag(String documentId) async {
+    _isRagLoading = true;
+    notifyListeners();
+
+    try {
+      await _repository.deleteRagDocument(documentId: documentId);
+      _ragDocuments.removeWhere((doc) => doc.metadata?['document_id'] == documentId);
+    } catch (e) {
+      rethrow;
+    } finally {
+      _isRagLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> toggleStaffActive(String userId, bool isActive) async {
     _isStaffLoading = true;
     _staffError = null;

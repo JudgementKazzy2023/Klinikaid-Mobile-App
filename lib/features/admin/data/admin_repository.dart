@@ -437,6 +437,17 @@ class AdminRepository {
     }
   }
 
+  Future<void> deleteRagDocument({required String documentId}) async {
+    try {
+      await _client
+          .from('rag_documents')
+          .delete()
+          .eq('metadata->>document_id', documentId);
+    } catch (e) {
+      throw FailureMapper.fromException(e);
+    }
+  }
+
   // --- MOCK DATA FOR SAFETY FALLBACKS ---
 
   List<SystemLog> _getMockSystemLogs() {
