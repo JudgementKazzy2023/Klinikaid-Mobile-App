@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/models/patient.dart';
@@ -372,6 +373,7 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
                   TextFormField(
                     key: Key('param_input_$param'),
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [MaxFourIntegerDigitsFormatter()],
                     decoration: InputDecoration(
                       hintText: 'Enter value (${range.unit})',
                       border: OutlineInputBorder(
@@ -465,6 +467,73 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
     final goRouter = GoRouter.of(context);
 
+    final patient = _patient;
+    if (department.toLowerCase() == 'laboratory' && patient != null) {
+      final outOfRangeMessages = <String>[];
+      final parameters = kLabTestGroups[provider.selectedLabGroup] ?? [];
+      for (final param in parameters) {
+        final valStr = provider.parameterValues[param] ?? '';
+        final double? parsedVal = double.tryParse(valStr);
+        if (parsedVal != null) {
+          final range = kLabReferenceRanges.firstWhere(
+            (r) => r.parameter == param,
+            orElse: () => const LabReferenceRange(
+              parameter: '',
+              unit: '',
+              maleMin: 0,
+              maleMax: 0,
+              femaleMin: 0,
+              femaleMax: 0,
+            ),
+          );
+          if (range.parameter.isNotEmpty) {
+            if (isValueFlagged(parsedVal, range, patient.gender.name)) {
+              final isFemale = patient.gender == Gender.female;
+              final min = isFemale ? range.femaleMin : range.maleMin;
+              final max = isFemale ? range.femaleMax : range.maleMax;
+              final unitStr = range.unit.isEmpty ? '' : ' ${range.unit}';
+              outOfRangeMessages.add(
+                '$param: ${formatDouble(parsedVal)}$unitStr (normal ${formatDouble(min)}–${formatDouble(max)}). Please confirm this value was entered correctly.',
+              );
+            }
+          }
+        }
+      }
+
+      if (outOfRangeMessages.isNotEmpty) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Confirm flagged value(s)'),
+            content: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: outOfRangeMessages.map((msg) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0),
+                  child: Text(msg),
+                )).toList(),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Review'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Confirm & Save'),
+              ),
+            ],
+          ),
+        );
+
+        if (confirmed != true) {
+          return;
+        }
+      }
+    }
+
     bool success = false;
     if (department.toLowerCase() == 'laboratory') {
       success = await provider.submitLabResults(
@@ -487,5 +556,29 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
       );
       goRouter.pop();
     }
+  }
+}
+
+String formatDouble(double val) {
+  if (val % 1 == 0) {
+    return val.toInt().toString();
+  }
+  return val.toString();
+}
+
+class MaxFourIntegerDigitsFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.isEmpty) {
+      return newValue;
+    }
+    final regExp = RegExp(r'^\d{0,4}(\.\d*)?$');
+    if (regExp.hasMatch(newValue.text)) {
+      return newValue;
+    }
+    return oldValue;
   }
 }

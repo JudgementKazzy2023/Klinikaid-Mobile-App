@@ -74,6 +74,12 @@ class AppRouter {
         return null;
       }
 
+      // 1b. Block deactivated users immediately
+      if (isAuthenticated && authProvider.profile?.isActive == false) {
+        authProvider.signOut();
+        return '/login';
+      }
+
       // 2. Unauthenticated User gating
       if (!isAuthenticated) {
         if (isLoggingIn || isRegistering || state.matchedLocation == '/forgot-password') {

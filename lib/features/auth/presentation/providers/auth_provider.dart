@@ -135,6 +135,18 @@ class AuthProvider extends ChangeNotifier {
       _profile = null;
     }
 
+    if (_profile?.isActive == false) {
+      _errorMessage = 'This account has been deactivated. Contact an administrator.';
+      _user = null;
+      _session = null;
+      _profile = null;
+      _patient = null;
+      _hasConsented = false;
+      _isOnboarded = false;
+      _client.auth.signOut().catchError((_) {});
+      return;
+    }
+
     // If admin or staff role, bypass consent and onboarding gates
     if (_profile?.role == UserRole.admin ||
         _profile?.role == UserRole.receptionist ||
@@ -290,6 +302,12 @@ class AuthProvider extends ChangeNotifier {
       _session = response.session;
       _user = response.user;
       await _updateLocalStates();
+
+      if (_errorMessage == 'This account has been deactivated. Contact an administrator.') {
+        _isLoading = false;
+        notifyListeners();
+        return LoginOutcome.invalidCredentials;
+      }
 
       // Check if step-up required
       if (_mfaService.requiresStepUp()) {
