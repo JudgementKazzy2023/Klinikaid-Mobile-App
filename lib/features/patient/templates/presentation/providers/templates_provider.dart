@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../data/templates_repository.dart';
+import '../../../submissions/document_dedup.dart';
 
 class TemplatesProvider extends ChangeNotifier {
   final _repository = TemplatesRepository();
@@ -35,6 +36,11 @@ class TemplatesProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final duplicateDate = await checkPendingDuplicate(patientId, templateId);
+      if (duplicateDate != null) {
+        final label = getCategoryLabel(templateId);
+        throw Exception("You already have a pending [$label] submitted on $duplicateDate. You can submit a new one once it's reviewed.");
+      }
       final Map<String, dynamic> extractedMetadata = {
         'template_id': templateId,
         'template_name': templateName,

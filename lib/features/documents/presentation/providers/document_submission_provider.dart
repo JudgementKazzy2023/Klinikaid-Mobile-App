@@ -12,6 +12,7 @@ import '../../../../core/repositories/documents_repository.dart';
 import '../../../ocr/data/document_quality_service.dart';
 import '../../../ocr/domain/quality_assessment.dart';
 import '../../../ocr/domain/quality_thresholds.dart';
+import '../../../patient/submissions/document_dedup.dart';
 
 class DocumentSubmissionProvider extends ChangeNotifier {
   final LocalDatabase _localDb;
@@ -196,11 +197,22 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     required String originalFileName,
     required String fileExtension,
     required Patient patient,
+    required String documentType,
     bool isTest = false,
   }) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
+
+    // Check duplicate
+    final duplicateDate = await checkPendingDuplicate(patient.id, documentType);
+    if (duplicateDate != null) {
+      final label = getCategoryLabel(documentType);
+      _isLoading = false;
+      _errorMessage = "You already have a pending [$label] submitted on $duplicateDate. You can submit a new one once it's reviewed.";
+      notifyListeners();
+      return false;
+    }
     
     final currentUser = SupabaseService.client.auth.currentUser;
     if (currentUser == null && !isTest) {
@@ -218,7 +230,10 @@ class DocumentSubmissionProvider extends ChangeNotifier {
         : '$currentUserId/${uuid}_$originalFileName';
         
     final ocrText = _extractedOcrText ?? '';
-    final metadata = _preScreenMetadata ?? preScreenOcrText(ocrText, patient.firstName, patient.lastName);
+    final Map<String, dynamic> metadata = Map<String, dynamic>.from(
+      _preScreenMetadata ?? preScreenOcrText(ocrText, patient.firstName, patient.lastName),
+    );
+    metadata['document_type'] = documentType;
     
     try {
       if (isTest) {

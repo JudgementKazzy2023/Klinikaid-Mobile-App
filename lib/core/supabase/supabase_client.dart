@@ -15,6 +15,9 @@ class SupabaseService {
     );
   }
 
+  static SupabaseClient? _mockClient;
+  static set mockClient(SupabaseClient? mock) => _mockClient = mock;
+
   /// Returns the singleton [SupabaseClient] instance.
-  static SupabaseClient get client => Supabase.instance.client;
+  static SupabaseClient get client => _mockClient ?? Supabase.instance.client;
 }

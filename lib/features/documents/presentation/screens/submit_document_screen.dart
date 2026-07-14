@@ -8,6 +8,8 @@ import '../../../../core/models/patient.dart';
 import '../../../../core/cache/local_database.dart';
 import '../../../ocr/domain/quality_assessment.dart';
 import '../../../ocr/domain/quality_thresholds.dart';
+import '../../../../features/patient/templates/document_templates.dart';
+import '../../../../features/patient/submissions/document_dedup.dart';
 
 class SubmitDocumentScreen extends StatefulWidget {
   const SubmitDocumentScreen({super.key});
@@ -18,6 +20,7 @@ class SubmitDocumentScreen extends StatefulWidget {
 
 class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with WidgetsBindingObserver {
   final ImagePicker _picker = ImagePicker();
+  String? _selectedDocumentType;
   
   @override
   void initState() {
@@ -67,11 +70,26 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
 
   void _clearSelection() {
     if (mounted) {
+      setState(() {
+        _selectedDocumentType = null;
+      });
       Provider.of<DocumentSubmissionProvider>(context, listen: false).clearOcrState();
     }
   }
 
   Future<void> _submit(Patient patient) async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    if (_selectedDocumentType == null) {
+      scaffoldMessenger.clearSnackBars();
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(
+          content: Text('Please select a Document Type before submitting.'),
+          backgroundColor: Color(0xFFFF3B30),
+        ),
+      );
+      return;
+    }
+
     final provider = Provider.of<DocumentSubmissionProvider>(context, listen: false);
     final fullPath = provider.selectedImagePath;
     if (fullPath == null) return;
@@ -116,12 +134,14 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
       originalFileName: originalName,
       fileExtension: ext,
       patient: patient,
+      documentType: _selectedDocumentType!,
     );
  
     if (mounted) {
+      scaffoldMessenger.clearSnackBars();
       if (success) {
         final isOffline = provider.errorMessage != null && provider.errorMessage!.contains('offline');
-        ScaffoldMessenger.of(context).showSnackBar(
+        scaffoldMessenger.showSnackBar(
           SnackBar(
             content: Text(isOffline 
                 ? 'Offline mode: Document queued locally.' 
@@ -131,7 +151,7 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
         );
         _clearSelection();
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
+        scaffoldMessenger.showSnackBar(
           SnackBar(
             content: Text(provider.errorMessage ?? 'Submission failed.'),
             backgroundColor: const Color(0xFFFF3B30),
@@ -547,6 +567,39 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
                 ),
               ),
             ],
+
+            const SizedBox(height: 20),
+            Text(
+              'Select Document Type *',
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              key: const Key('document_type_picker'),
+              value: _selectedDocumentType,
+              decoration: InputDecoration(
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                hintText: 'Select a category',
+              ),
+              items: [
+                ...clinicTemplates.map((t) => DropdownMenuItem(
+                      value: t.id,
+                      child: Text(t.name),
+                    )),
+                const DropdownMenuItem(
+                  value: 'other',
+                  child: Text('Other / Uncategorized'),
+                ),
+              ],
+              onChanged: provider.isLoading
+                  ? null
+                  : (val) {
+                      setState(() {
+                        _selectedDocumentType = val;
+                      });
+                    },
+            ),
 
             const SizedBox(height: 24),
             Column(
