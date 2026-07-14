@@ -11,6 +11,9 @@ import '../../features/dashboard/presentation/screens/dashboard_screen.dart';
 import '../../features/dashboard/presentation/screens/profile_screen.dart';
 import '../../features/documents/presentation/screens/submit_document_screen.dart';
 import '../../features/records/presentation/screens/records_screen.dart';
+import '../../features/patient/templates/presentation/screens/template_picker_screen.dart';
+import '../../features/patient/templates/presentation/screens/template_form_renderer_screen.dart';
+import '../../features/patient/templates/presentation/providers/templates_provider.dart';
 import '../../features/records/presentation/providers/records_provider.dart';
 import '../../features/queue/presentation/screens/queue_screen.dart';
 import '../../features/queue/presentation/providers/queue_provider.dart';
@@ -463,6 +466,17 @@ class AppRouter {
             builder: (context, state) => const DashboardScreen(),
           ),
           GoRoute(
+            path: '/patient/templates',
+            builder: (context, state) => const TemplatePickerScreen(),
+          ),
+          GoRoute(
+            path: '/patient/templates/:templateId',
+            builder: (context, state) {
+              final templateId = state.pathParameters['templateId']!;
+              return TemplateFormRendererScreen(templateId: templateId);
+            },
+          ),
+          GoRoute(
             path: '/submit',
             builder: (context, state) => const SubmitDocumentScreen(),
           ),
@@ -520,6 +534,9 @@ class AppShell extends StatelessWidget {
         ),
         ChangeNotifierProvider<DocumentStatusProvider>(
           create: (_) => DocumentStatusProvider(localDb),
+        ),
+        ChangeNotifierProvider<TemplatesProvider>(
+          create: (_) => TemplatesProvider(),
         ),
       ],
       child: Scaffold(

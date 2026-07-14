@@ -5,6 +5,7 @@ import '../../../department/domain/lab_reference_ranges.dart';
 import '../../../department/domain/flag_calculator.dart';
 import '../../data/specialist_repository.dart';
 import 'specialist_provider.dart';
+import '../../../../core/utils/lab_validators.dart';
 
 class RecordEntryProvider extends ChangeNotifier {
   final SpecialistRepository _repo;
@@ -96,6 +97,12 @@ class RecordEntryProvider extends ChangeNotifier {
         final textValue = controller?.text.trim() ?? '';
         if (textValue.isEmpty) continue;
 
+        // Shared validation check
+        final error = validateLabValue(textValue);
+        if (error != null) {
+          throw Exception('Value for $paramName must be a valid number.');
+        }
+
         // Numeric parsing check
         final double? parsedVal = double.tryParse(textValue);
         if (parsedVal == null) {
@@ -149,6 +156,11 @@ class RecordEntryProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  void setErrorMessage(String? msg) {
+    _errorMessage = msg;
+    notifyListeners();
   }
 
   @override

@@ -96,7 +96,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       );
     }
 
-    final hasData = provider.parameters.isNotEmpty && provider.series != null;
+    final hasData = provider.parameters.isNotEmpty &&
+        provider.series != null &&
+        provider.series!.points.isNotEmpty;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -342,13 +344,28 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final bandMin = series.referenceBandMin;
     final bandMax = series.referenceBandMax;
 
-    // Calculate Y range limits
+    // Calculate Y range limits safely
     double minY = bandMin ?? 0.0;
     double maxY = bandMax ?? 10.0;
+    if (minY.isNaN || minY.isInfinite) minY = 0.0;
+    if (maxY.isNaN || maxY.isInfinite) maxY = 10.0;
+
     for (final p in points) {
       if (p.value < minY) minY = p.value;
       if (p.value > maxY) maxY = p.value;
     }
+
+    if (minY > maxY) {
+      final temp = minY;
+      minY = maxY;
+      maxY = temp;
+    }
+
+    if (minY == maxY) {
+      minY = minY - 1.0;
+      maxY = maxY + 1.0;
+    }
+
     final rangeY = maxY - minY;
     // Pad bottom by 15%, pad top by 35% to give top label room and avoid collisions.
     final padBottom = rangeY == 0 ? 2.0 : rangeY * 0.15;
@@ -356,8 +373,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final double computedMinY = minY - padBottom < 0 && minY >= 0 ? 0.0 : minY - padBottom;
     final double computedMaxY = maxY + padTop;
 
-    final totalRangeY = computedMaxY - computedMinY;
-    double yInterval = totalRangeY == 0 ? 1.0 : totalRangeY / 4;
+    double totalRangeY = computedMaxY - computedMinY;
+    if (totalRangeY.isNaN || totalRangeY.isInfinite || totalRangeY <= 0) {
+      totalRangeY = 2.0;
+    }
+    double yInterval = totalRangeY / 4;
+    if (yInterval.isNaN || yInterval.isInfinite || yInterval <= 0) {
+      yInterval = 0.5;
+    }
     if (yInterval < 0.01) yInterval = 0.01;
 
     // Use index-based X-axis to ensure exactly one label renders per actual data point

@@ -9,6 +9,7 @@ class SubmissionDetail {
   final String patientContact;
   final String patientEmail;
   final String patientAddress;
+  final Map<String, dynamic>? extractedMetadata;
 
   SubmissionDetail({
     required this.submission,
@@ -19,5 +20,6 @@ class SubmissionDetail {
     required this.patientContact,
     required this.patientEmail,
     required this.patientAddress,
+    this.extractedMetadata,
   });
 }

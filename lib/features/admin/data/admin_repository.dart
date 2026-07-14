@@ -120,7 +120,7 @@ class AdminRepository {
     try {
       // Query system_logs or fallback to mock
       try {
-        var query = _client.from('system_logs').select();
+        var query = _client.from('system_logs').select('*, user:profiles(full_name, role)');
         
         if (eventType != null && eventType.isNotEmpty && eventType != 'All') {
           query = query.eq('event_type', eventType.toLowerCase());

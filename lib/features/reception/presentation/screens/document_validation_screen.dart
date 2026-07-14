@@ -437,96 +437,161 @@ class _DocumentValidationScreenState extends State<DocumentValidationScreen> {
                               ),
                               const SizedBox(height: 16),
 
-                              // 2. OCR Text Output Card
-                              Card(
-                                elevation: 0.5,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                  side: BorderSide(
-                                      color: theme.colorScheme.outline
-                                          .withValues(alpha: 0.1)),
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(16.0),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      _buildCardHeader(
-                                          'MONOSPACE RAW',
-                                          Icons.text_snippet_outlined,
-                                          theme),
-                                      const Divider(height: 24),
-                                      Container(
-                                        width: double.infinity,
-                                        padding: const EdgeInsets.all(12),
-                                        decoration: BoxDecoration(
-                                          color: theme
-                                              .colorScheme
-                                              .surfaceContainerHighest
-                                              .withValues(alpha: 0.3),
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                          border: Border.all(
-                                              color: theme.colorScheme.outline
-                                                  .withValues(alpha: 0.2)),
-                                        ),
-                                        child: Text(
-                                          (detail.ocrText == null ||
-                                                  detail.ocrText!
-                                                      .trim()
-                                                      .isEmpty)
-                                              ? 'No OCR text extraction available for this document.'
-                                              : detail.ocrText!,
-                                          style: const TextStyle(
-                                            fontFamily: 'monospace',
-                                            fontSize: 13,
-                                            height: 1.4,
-                                          ),
-                                        ),
+                              // 2. OCR/Template Text Output Card
+                              (() {
+                                final isTemplate = detail.submission.fileType == 'template';
+                                if (isTemplate) {
+                                  final metadata = detail.extractedMetadata ?? {};
+                                  final displayFields = metadata.entries.where((e) {
+                                    final k = e.key;
+                                    return k != 'template_id' &&
+                                           k != 'template_name' &&
+                                           k != 'submission_type' &&
+                                           k != 'submitted_at' &&
+                                           k != 'patient_name';
+                                  }).toList();
+
+                                  return Card(
+                                    elevation: 0.5,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      side: BorderSide(
+                                          color: theme.colorScheme.outline
+                                              .withValues(alpha: 0.1)),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(16.0),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          _buildCardHeader(
+                                              'STRUCTURED FORM DETAILS',
+                                              Icons.assignment_outlined,
+                                              theme),
+                                          const Divider(height: 24),
+                                          ...displayFields.map((field) {
+                                            final label = field.key.replaceAll('_', ' ').toUpperCase();
+                                            return _buildDetailRow(label, field.value.toString(), theme);
+                                          }),
+                                          if (displayFields.isEmpty)
+                                            Padding(
+                                              padding: const EdgeInsets.all(12.0),
+                                              child: Text(
+                                                'No custom fields available.',
+                                                style: TextStyle(
+                                                  color: theme.colorScheme.onSurface
+                                                      .withValues(alpha: 0.5),
+                                                  fontStyle: FontStyle.italic,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
                                       ),
-                                    ],
-                                  ),
-                                ),
-                              ),
+                                    ),
+                                  );
+                                } else {
+                                  return Card(
+                                    elevation: 0.5,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      side: BorderSide(
+                                          color: theme.colorScheme.outline
+                                              .withValues(alpha: 0.1)),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(16.0),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          _buildCardHeader(
+                                              'MONOSPACE RAW',
+                                              Icons.text_snippet_outlined,
+                                              theme),
+                                          const Divider(height: 24),
+                                          Container(
+                                            width: double.infinity,
+                                            padding: const EdgeInsets.all(12),
+                                            decoration: BoxDecoration(
+                                              color: theme
+                                                  .colorScheme
+                                                  .surfaceContainerHighest
+                                                  .withValues(alpha: 0.3),
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                              border: Border.all(
+                                                  color: theme.colorScheme.outline
+                                                      .withValues(alpha: 0.2)),
+                                            ),
+                                            child: Text(
+                                              (detail.ocrText == null ||
+                                                      detail.ocrText!
+                                                          .trim()
+                                                          .isEmpty)
+                                                  ? 'No OCR text extraction available for this document.'
+                                                  : detail.ocrText!,
+                                              style: const TextStyle(
+                                                fontFamily: 'monospace',
+                                                fontSize: 13,
+                                                height: 1.4,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                }
+                              }()),
                               const SizedBox(height: 16),
 
-                              // 3. AI Validation Report Card (Static Placeholder)
-                              Card(
-                                elevation: 0.5,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                  side: BorderSide(
-                                      color: theme.colorScheme.outline
-                                          .withValues(alpha: 0.1)),
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(16.0),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      _buildCardHeader(
-                                          'AI Validation Report',
-                                          Icons.psychology_outlined,
-                                          theme),
-                                      const Divider(height: 24),
-                                      _buildDetailRow('Overall AI Confidence',
-                                          'No OCR Score', theme),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        'Confidence score not available for this upload.',
-                                        style: TextStyle(
-                                          color: theme.colorScheme.onSurface
-                                              .withValues(alpha: 0.5),
-                                          fontSize: 13,
-                                          fontStyle: FontStyle.italic,
-                                        ),
-                                      ),
-                                    ],
+                              // 3. AI Validation Report Card
+                              (() {
+                                final isTemplate = detail.submission.fileType == 'template';
+                                return Card(
+                                  elevation: 0.5,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    side: BorderSide(
+                                        color: theme.colorScheme.outline
+                                            .withValues(alpha: 0.1)),
                                   ),
-                                ),
-                              ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(16.0),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        _buildCardHeader(
+                                            'AI Validation Report',
+                                            Icons.psychology_outlined,
+                                            theme),
+                                        const Divider(height: 24),
+                                        _buildDetailRow(
+                                          'Overall AI Confidence',
+                                          isTemplate
+                                              ? '100% Validated (Structured Form)'
+                                              : 'No OCR Score',
+                                          theme,
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          isTemplate
+                                              ? 'Structured templates bypass OCR and AI evaluation triggers.'
+                                              : 'Confidence score not available for this upload.',
+                                          style: TextStyle(
+                                            color: theme.colorScheme.onSurface
+                                                .withValues(alpha: 0.5),
+                                            fontSize: 13,
+                                            fontStyle: FontStyle.italic,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              }()),
                               const SizedBox(height: 16),
 
                               // 4. Document Metadata Card
@@ -570,26 +635,30 @@ class _DocumentValidationScreenState extends State<DocumentValidationScreen> {
                                         theme,
                                       ),
                                       const SizedBox(height: 16),
-                                      SizedBox(
-                                        width: double.infinity,
-                                        height: 48,
-                                        child: ElevatedButton.icon(
-                                          onPressed: () =>
-                                              _viewOriginal(detail.submission.id),
-                                          icon: const Icon(Icons.open_in_new),
-                                          label: const Text(
-                                              'View Original Document'),
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor:
-                                                theme.colorScheme.primary,
-                                            foregroundColor:
-                                                theme.colorScheme.onPrimary,
-                                            shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(8)),
+                                      (() {
+                                        final isTemplate = detail.submission.fileType == 'template';
+                                        return SizedBox(
+                                          width: double.infinity,
+                                          height: 48,
+                                          child: ElevatedButton.icon(
+                                            onPressed: isTemplate ? null : () =>
+                                                _viewOriginal(detail.submission.id),
+                                            icon: const Icon(Icons.open_in_new),
+                                            label: Text(isTemplate ? 'Structured Form (No Image)' : 'View Original Document'),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: isTemplate
+                                                  ? theme.disabledColor
+                                                  : theme.colorScheme.primary,
+                                              foregroundColor: isTemplate
+                                                  ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
+                                                  : theme.colorScheme.onPrimary,
+                                              shape: RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(8)),
+                                            ),
                                           ),
-                                        ),
-                                      ),
+                                        );
+                                      }()),
                                     ],
                                   ),
                                 ),

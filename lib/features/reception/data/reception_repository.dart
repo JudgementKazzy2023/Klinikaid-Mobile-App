@@ -129,6 +129,10 @@ class ReceptionRepository {
       final String patientAddress =
           patient != null ? (patient['address'] as String? ?? '—') : '—';
 
+      final Map<String, dynamic>? extractedMetadata = doc['extracted_metadata'] != null
+          ? doc['extracted_metadata'] as Map<String, dynamic>?
+          : null;
+
       return SubmissionDetail(
         submission: submission,
         ocrText: doc['ocr_text'] as String?,
@@ -138,6 +142,7 @@ class ReceptionRepository {
         patientContact: patientContact,
         patientEmail: patientEmail,
         patientAddress: patientAddress,
+        extractedMetadata: extractedMetadata,
       );
     } catch (e) {
       throw FailureMapper.fromException(e);

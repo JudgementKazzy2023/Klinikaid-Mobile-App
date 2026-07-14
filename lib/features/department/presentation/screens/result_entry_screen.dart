@@ -8,6 +8,8 @@ import '../../data/department_repository.dart';
 import '../../domain/flag_calculator.dart';
 import '../../domain/lab_reference_ranges.dart';
 import '../providers/result_entry_provider.dart';
+import '../../../../core/utils/lab_validators.dart';
+import '../../../../core/widgets/flagged_value_confirmation_dialog.dart';
 
 class ResultEntryScreen extends StatefulWidget {
   final String patientId;
@@ -373,7 +375,7 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
                   TextFormField(
                     key: Key('param_input_$param'),
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [MaxFourIntegerDigitsFormatter()],
+                    inputFormatters: [const MaxIntegerDigitsFormatter(4)],
                     decoration: InputDecoration(
                       hintText: 'Enter value (${range.unit})',
                       border: OutlineInputBorder(
@@ -503,28 +505,8 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
       if (outOfRangeMessages.isNotEmpty) {
         final confirmed = await showDialog<bool>(
           context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Confirm flagged value(s)'),
-            content: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: outOfRangeMessages.map((msg) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8.0),
-                  child: Text(msg),
-                )).toList(),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Review'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Confirm & Save'),
-              ),
-            ],
+          builder: (context) => FlaggedValueConfirmationDialog(
+            outOfRangeMessages: outOfRangeMessages,
           ),
         );
 
@@ -564,21 +546,4 @@ String formatDouble(double val) {
     return val.toInt().toString();
   }
   return val.toString();
-}
-
-class MaxFourIntegerDigitsFormatter extends TextInputFormatter {
-  @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    if (newValue.text.isEmpty) {
-      return newValue;
-    }
-    final regExp = RegExp(r'^\d{0,4}(\.\d*)?$');
-    if (regExp.hasMatch(newValue.text)) {
-      return newValue;
-    }
-    return oldValue;
-  }
 }

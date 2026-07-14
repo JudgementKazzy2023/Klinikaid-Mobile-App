@@ -5,6 +5,7 @@ import '../../../auth/presentation/providers/auth_provider.dart';
 import '../providers/specialist_provider.dart';
 import '../../../../core/models/specialist_patient.dart';
 import '../../../../core/models/specialist_record.dart';
+import '../../../../core/utils/lab_validators.dart';
 
 class SpecialistDashboardScreen extends StatelessWidget {
   const SpecialistDashboardScreen({super.key});
@@ -232,7 +233,11 @@ class SpecialistDashboardScreen extends StatelessWidget {
 
   Widget _buildCriticalResults(BuildContext context, SpecialistProvider provider) {
     final theme = Theme.of(context);
-    final list = provider.criticalFlaggedResults;
+    final rawList = provider.criticalFlaggedResults;
+    final list = rawList.where((item) {
+      final record = item['record'] as SpecialistRecord;
+      return isDisplayableLabValue(record.testValue);
+    }).toList();
 
     if (list.isEmpty) {
       return Card(
@@ -311,6 +316,8 @@ class SpecialistDashboardScreen extends StatelessWidget {
                     children: [
                       Text(
                         '${record.testValue} ${record.unit ?? ''}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: Colors.red.shade700,
                           fontWeight: FontWeight.bold,

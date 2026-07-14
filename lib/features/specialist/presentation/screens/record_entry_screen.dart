@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../../../core/models/specialist_patient.dart';
 import '../../../department/domain/lab_reference_ranges.dart';
 import '../../../department/domain/flag_calculator.dart';
 import '../providers/specialist_provider.dart';
 import '../providers/record_entry_provider.dart';
+import '../../../../core/utils/lab_validators.dart';
+import '../../../../core/widgets/flagged_value_confirmation_dialog.dart';
 
 class RecordEntryScreen extends StatefulWidget {
   final String patientId;
@@ -255,11 +258,16 @@ class _RecordEntryScreenState extends State<RecordEntryScreen> {
                                 key: Key('param_input_${paramName}'),
                                 controller: controller,
                                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                                  const MaxIntegerDigitsFormatter(4),
+                                ],
                                 enabled: !recordProvider.isLoading,
-                                decoration: const InputDecoration(
+                                decoration: InputDecoration(
                                   hintText: 'Enter value',
                                   isDense: true,
-                                  contentPadding: EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                                  contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                                  errorText: validateLabValue(valText),
                                 ),
                               ),
                               const SizedBox(height: 8),
@@ -318,18 +326,96 @@ class _RecordEntryScreenState extends State<RecordEntryScreen> {
                         onPressed: recordProvider.isLoading
                             ? null
                             : () async {
-                                final success = await recordProvider.submit(
+                                final selectedTestType = recordProvider.selectedTestType;
+                                if (selectedTestType == null) return;
+                                final patientGender = patient.gender;
+
+                                // Capture provider and navigation refs before showDialog
+                                final navigator = Navigator.of(context);
+                                final scaffoldMessenger = ScaffoldMessenger.of(context);
+                                final currentRecordProvider = recordProvider;
+                                final currentSpecialistProvider = specialistProvider;
+
+                                // 1. Validate fields inline
+                                final invalidFields = <String>[];
+                                final params = kLabTestGroups[selectedTestType] ?? [];
+                                for (final paramName in params) {
+                                  final controller = currentRecordProvider.controllers[paramName];
+                                  final text = controller?.text.trim() ?? '';
+                                  final error = validateLabValue(text);
+                                  if (error != null) {
+                                    invalidFields.add(paramName);
+                                  }
+                                }
+
+                                if (invalidFields.isNotEmpty) {
+                                  currentRecordProvider.setErrorMessage('Value for ${invalidFields.join(", ")} must be a valid number.');
+                                  scaffoldMessenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text('Invalid input in: ${invalidFields.join(", ")}'),
+                                      backgroundColor: Colors.red,
+                                    ),
+                                  );
+                                  return;
+                                }
+
+                                // 2. Check for flagged values
+                                final outOfRangeMessages = <String>[];
+                                for (final paramName in params) {
+                                  final controller = currentRecordProvider.controllers[paramName];
+                                  final valText = controller?.text.trim() ?? '';
+                                  final double? parsedVal = double.tryParse(valText);
+                                  if (parsedVal != null) {
+                                    final range = kLabReferenceRanges.firstWhere(
+                                      (r) => r.parameter == paramName,
+                                      orElse: () => const LabReferenceRange(
+                                        parameter: '',
+                                        unit: '',
+                                        maleMin: 0,
+                                        maleMax: 0,
+                                        femaleMin: 0,
+                                        femaleMax: 0,
+                                      ),
+                                    );
+                                    if (range.parameter.isNotEmpty) {
+                                      if (isValueFlagged(parsedVal, range, patientGender)) {
+                                        final isFemaleGender = patientGender.toLowerCase() == 'female';
+                                        final min = isFemaleGender ? range.femaleMin : range.maleMin;
+                                        final max = isFemaleGender ? range.femaleMax : range.maleMax;
+                                        final unitStr = range.unit.isEmpty ? '' : ' ${range.unit}';
+                                        outOfRangeMessages.add(
+                                          '$paramName: ${formatDouble(parsedVal)}$unitStr (normal ${formatDouble(min)}–${formatDouble(max)}). Please confirm this value was entered correctly.',
+                                        );
+                                      }
+                                    }
+                                  }
+                                }
+
+                                if (outOfRangeMessages.isNotEmpty) {
+                                  final confirmed = await showDialog<bool>(
+                                    context: context,
+                                    builder: (dialogContext) => FlaggedValueConfirmationDialog(
+                                      outOfRangeMessages: outOfRangeMessages,
+                                    ),
+                                  );
+
+                                  if (confirmed != true) {
+                                    return;
+                                  }
+                                }
+
+                                final success = await currentRecordProvider.submit(
                                   context,
-                                  specialistProvider,
+                                  currentSpecialistProvider,
                                 );
-                                if (success && context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
+                                if (success) {
+                                  scaffoldMessenger.showSnackBar(
                                     const SnackBar(
                                       content: Text('Record saved successfully.'),
                                       backgroundColor: Colors.green,
                                     ),
                                   );
-                                  Navigator.of(context).pop();
+                                  navigator.pop();
                                 }
                               },
                         style: ElevatedButton.styleFrom(
@@ -380,4 +466,11 @@ class _RecordEntryScreenState extends State<RecordEntryScreen> {
       ),
     );
   }
+}
+
+String formatDouble(double val) {
+  if (val % 1 == 0) {
+    return val.toInt().toString();
+  }
+  return val.toString();
 }

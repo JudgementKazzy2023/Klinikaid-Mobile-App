@@ -19,14 +19,14 @@ class SystemLog {
 
   factory SystemLog.fromJson(Map<String, dynamic> json) {
     String name = 'System';
-    String role = 'system';
+    String role = '';
     if (json['user'] is Map) {
       final userMap = json['user'] as Map;
-      name = userMap['name'] as String? ?? 'System';
-      role = userMap['role'] as String? ?? 'system';
+      name = userMap['full_name'] as String? ?? userMap['name'] as String? ?? 'System';
+      role = userMap['role'] as String? ?? '';
     } else if (json['user_name'] != null) {
       name = json['user_name'] as String? ?? 'System';
-      role = json['user_role'] as String? ?? 'system';
+      role = json['user_role'] as String? ?? '';
     }
     
     return SystemLog(

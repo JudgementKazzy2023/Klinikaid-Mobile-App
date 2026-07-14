@@ -1,4 +1,5 @@
 import '../../../../core/models/specialist_record.dart';
+import '../../../../core/utils/lab_validators.dart';
 
 class ChartDataPoint {
   final DateTime createdAt;
@@ -66,11 +67,11 @@ ParameterSeries buildSeries(List<SpecialistRecord> records, String testName) {
   String? unit;
 
   for (final r in filtered) {
-    final double? val = double.tryParse(r.testValue);
-    if (val == null) {
-      // Skip unparseable values defensively
+    if (!isDisplayableLabValue(r.testValue)) {
+      // Skip null, NaN, Infinity, negative, or absurdly large values defensively
       continue;
     }
+    final double val = double.parse(r.testValue.trim());
 
     points.add(ChartDataPoint(
       createdAt: r.createdAt,

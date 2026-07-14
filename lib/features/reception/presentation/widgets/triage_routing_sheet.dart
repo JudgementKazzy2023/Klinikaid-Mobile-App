@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../../../core/utils/lab_validators.dart';
 import '../../domain/routing_priority.dart';
 
 /// Department values — must match patient_queue.department CHECK constraint.
@@ -65,7 +66,15 @@ class _TriageRoutingSheetState extends State<TriageRoutingSheet> {
   }
 
   void _submit() {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please correct the invalid vitals fields'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
     if (_selectedDepartment == null) return;
 
     final weight = _weightController.text.trim().isNotEmpty
@@ -187,6 +196,7 @@ class _TriageRoutingSheetState extends State<TriageRoutingSheet> {
               children: [
                 Expanded(
                   child: TextFormField(
+                    key: const Key('bp_input_field'),
                     controller: _bpController,
                     decoration: InputDecoration(
                       labelText: 'Blood Press.',
@@ -197,11 +207,14 @@ class _TriageRoutingSheetState extends State<TriageRoutingSheet> {
                           horizontal: 12, vertical: 14),
                     ),
                     keyboardType: TextInputType.text,
+                    inputFormatters: [BloodPressureFormatter()],
+                    validator: validateBloodPressure,
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: TextFormField(
+                    key: const Key('weight_input_field'),
                     controller: _weightController,
                     decoration: InputDecoration(
                       labelText: 'Weight (kg)',
@@ -214,21 +227,20 @@ class _TriageRoutingSheetState extends State<TriageRoutingSheet> {
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: [
-                      FilteringTextInputFormatter.allow(
-                          RegExp(r'^\d*\.?\d*')),
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                      const MaxIntegerDigitsFormatter(3, maxDecimalDigits: 1),
                     ],
-                    validator: (val) {
-                      if (val == null || val.trim().isEmpty) return null;
-                      if (num.tryParse(val.trim()) == null) {
-                        return 'Enter a number';
-                      }
-                      return null;
-                    },
+                    validator: (val) => validateVitalsValue(
+                      val ?? '',
+                      maxIntegerDigits: 3,
+                      maxDecimalDigits: 1,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: TextFormField(
+                    key: const Key('temp_input_field'),
                     controller: _tempController,
                     decoration: InputDecoration(
                       labelText: 'Temp (°C)',
@@ -241,16 +253,14 @@ class _TriageRoutingSheetState extends State<TriageRoutingSheet> {
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: [
-                      FilteringTextInputFormatter.allow(
-                          RegExp(r'^\d*\.?\d*')),
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                      const MaxIntegerDigitsFormatter(3, maxDecimalDigits: 1),
                     ],
-                    validator: (val) {
-                      if (val == null || val.trim().isEmpty) return null;
-                      if (num.tryParse(val.trim()) == null) {
-                        return 'Enter a number';
-                      }
-                      return null;
-                    },
+                    validator: (val) => validateVitalsValue(
+                      val ?? '',
+                      maxIntegerDigits: 3,
+                      maxDecimalDigits: 1,
+                    ),
                   ),
                 ),
               ],

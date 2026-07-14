@@ -5,6 +5,8 @@ import '../providers/admin_provider.dart';
 import '../../../../core/models/system_log.dart';
 import '../../../../core/models/chatbot_log.dart';
 import '../../../../core/utils/date_formatter.dart';
+import '../../../../core/utils/csv_export.dart';
+import 'package:media_store_plus/media_store_plus.dart';
 
 class AdminLogsScreen extends StatefulWidget {
   const AdminLogsScreen({super.key});
@@ -28,6 +30,8 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     
+
+
     // Bind listeners to refresh logs automatically on filter change
     _userSearchController.addListener(_onFilterChanged);
     _textSearchController.addListener(_onFilterChanged);
@@ -78,24 +82,101 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
     }
   }
 
-  void _triggerCsvExport(List<SystemLog> logs) {
-    final buffer = StringBuffer();
-    buffer.writeln('ID,Timestamp,User,Role,Event Type,Description,IP Address');
-    for (final log in logs) {
-      buffer.writeln('${log.id},"${log.createdAt.toIso8601String()}","${log.userName}","${log.userRole}","${log.eventType}","${log.description}","${log.ipAddress}"');
-    }
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('CSV exported successfully (mocked).'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        action: SnackBarAction(
-          label: 'SHARE',
-          textColor: Colors.white,
-          onPressed: () {},
-        ),
-      ),
-    );
+  void _triggerCsvExport(List<SystemLog> logs) async {
+    try {
+      if (logs.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Nothing to export.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      final headers = ['Timestamp (PHT)', 'User', 'Role', 'Event Type', 'Description', 'IP Address'];
+      final rows = <List<dynamic>>[headers];
+
+      String sanitizeCell(dynamic value) {
+        if (value == null) return '';
+        final str = value.toString();
+        if (str.isEmpty) return str;
+        final firstChar = str[0];
+        if (firstChar == '=' ||
+            firstChar == '+' ||
+            firstChar == '-' ||
+            firstChar == '@' ||
+            firstChar == '\t' ||
+            firstChar == '\r') {
+          return "'$str";
+        }
+        return str;
+      }
+
+      String humanizeRole(String rawRole) {
+        if (rawRole.trim().isEmpty) return '';
+        final norm = rawRole.trim().toLowerCase();
+        if (norm == 'admin') return 'Admin';
+        if (norm == 'receptionist') return 'Receptionist';
+        if (norm == 'department_staff') return 'Department Staff';
+        if (norm == 'medical_specialist') return 'Medical Specialist';
+        if (norm == 'patient') return 'Patient';
+        return rawRole;
+      }
+
+      for (final log in logs) {
+        final phtTime = DateFormatter.formatPht(log.createdAt);
+        final ip = (log.ipAddress.trim().isEmpty || log.ipAddress.trim() == '0.0.0.0')
+            ? 'N/A'
+            : log.ipAddress.trim();
+
+        // Event type stored is lowercase in DB, export lowercase to match web
+        final rawEventType = log.eventType.toLowerCase();
+
+        rows.add([
+          sanitizeCell(phtTime),
+          sanitizeCell(log.userName),
+          sanitizeCell(humanizeRole(log.userRole)),
+          sanitizeCell(rawEventType),
+          sanitizeCell(log.description),
+          sanitizeCell(ip),
+        ]);
+      }
+
+      final csvContent = buildCsv(rows);
+
+      final nowPht = DateTime.now().toUtc().add(const Duration(hours: 8));
+      final year = nowPht.year;
+      final month = nowPht.month.toString().padLeft(2, '0');
+      final day = nowPht.day.toString().padLeft(2, '0');
+      final hour = nowPht.hour.toString().padLeft(2, '0');
+      final minute = nowPht.minute.toString().padLeft(2, '0');
+      final second = nowPht.second.toString().padLeft(2, '0');
+      final filename = 'system_events_${year}${month}${day}_${hour}${minute}${second}.csv';
+
+      final success = await saveCsvToDownloads(
+        filename: filename,
+        csvContent: csvContent,
+      );
+
+      if (mounted) {
+        if (success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Saved to Downloads/$filename'),
+              backgroundColor: Theme.of(context).colorScheme.primary,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to export CSV.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (_) {}
   }
 
   @override
@@ -289,7 +370,7 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  (log.userRole.toUpperCase() == 'SYSTEM' || log.userName.toLowerCase() == 'system')
+                  (log.userRole.trim().isEmpty || log.userName.toLowerCase() == 'system')
                       ? 'System'
                       : '${log.userName} (${log.userRole.toUpperCase()})',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),

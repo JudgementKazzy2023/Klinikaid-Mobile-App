@@ -213,6 +213,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                         )
                       else ...[
+                        // Document Templates Card
+                        _buildStatusCard(
+                          context: context,
+                          title: 'Document Templates',
+                          icon: Icons.assignment_outlined,
+                          iconColor: Theme.of(context).colorScheme.primary,
+                          onTap: () => context.go('/patient/templates'),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.note_add_outlined,
+                                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+                                size: 28,
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Text(
+                                  'Fill and submit structured forms directly to reception',
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 16),
+
                         // Pending Submissions Card
                         _buildStatusCard(
                           context: context,

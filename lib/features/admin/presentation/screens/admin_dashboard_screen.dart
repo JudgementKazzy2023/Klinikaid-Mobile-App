@@ -367,7 +367,7 @@ class AdminDashboardScreen extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      (log.userRole.toUpperCase() == 'SYSTEM' || log.userName.toLowerCase() == 'system')
+                      (log.userRole.trim().isEmpty || log.userName.toLowerCase() == 'system')
                           ? 'System'
                           : '${log.userName} (${log.userRole.toUpperCase()})',
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
