@@ -229,8 +229,17 @@ void main() {
       final allowedDate = await checkPendingDuplicate(testPatient.id, 'referral-form');
       expect(allowedDate, isNull); // Allowed (different type)!
 
-      final otherDate = await checkPendingDuplicate(testPatient.id, 'other');
-      expect(otherDate, isNull); // Exempt!
+      // A pending 'other' blocks a second 'other'
+      fakeClient.mockDocuments = [
+        {
+          'file_type': 'jpg',
+          'status': 'pending',
+          'extracted_metadata': {'document_type': 'other'},
+          'created_at': DateTime.now().toUtc().toIso8601String(),
+        }
+      ];
+      final otherBlockedDate = await checkPendingDuplicate(testPatient.id, 'other');
+      expect(otherBlockedDate, isNotNull); // Blocked!
 
       // 2. Approved same-type document does not block
       fakeClient.mockDocuments = [
@@ -244,6 +253,18 @@ void main() {
       final approvedCheck = await checkPendingDuplicate(testPatient.id, 'lab-request');
       expect(approvedCheck, isNull); // Allowed (no longer pending)!
 
+      // Approved 'other' does not block
+      fakeClient.mockDocuments = [
+        {
+          'file_type': 'jpg',
+          'status': 'approved',
+          'extracted_metadata': {'document_type': 'other'},
+          'created_at': DateTime.now().toUtc().toIso8601String(),
+        }
+      ];
+      final otherApprovedCheck = await checkPendingDuplicate(testPatient.id, 'other');
+      expect(otherApprovedCheck, isNull);
+
       // 3. Rejected same-type document does not block
       fakeClient.mockDocuments = [
         {
@@ -255,6 +276,18 @@ void main() {
       ];
       final rejectedCheck = await checkPendingDuplicate(testPatient.id, 'lab-request');
       expect(rejectedCheck, isNull); // Allowed (no longer pending)!
+
+      // Rejected 'other' does not block
+      fakeClient.mockDocuments = [
+        {
+          'file_type': 'jpg',
+          'status': 'rejected',
+          'extracted_metadata': {'document_type': 'other'},
+          'created_at': DateTime.now().toUtc().toIso8601String(),
+        }
+      ];
+      final otherRejectedCheck = await checkPendingDuplicate(testPatient.id, 'other');
+      expect(otherRejectedCheck, isNull);
     });
   });
 

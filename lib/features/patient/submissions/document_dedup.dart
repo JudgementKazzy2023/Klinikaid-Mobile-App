@@ -21,9 +21,6 @@ String getCategoryLabel(String category) {
 }
 
 Future<String?> checkPendingDuplicate(String patientId, String category) async {
-  if (category == 'other') {
-    return null;
-  }
   try {
     final response = await SupabaseService.client
         .from('documents')
