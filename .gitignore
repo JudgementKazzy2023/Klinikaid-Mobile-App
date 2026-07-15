@@ -37,7 +37,14 @@ coverage/
 build/app/outputs/flutter-apk/
 
 # User requested ignores
-supabase/
+supabase/*
+!supabase/functions/
+supabase/functions/*
+!supabase/functions/extract-lab-values/
+!supabase/functions/extract-lab-values/**
+supabase/.env
+supabase/functions/**/.env
+supabase/functions/**/.env.*
 files.zip
 files/
 test/
@@ -50,4 +57,3 @@ Department_Staff Revised/
 Specialist Revised/
 Admin_build/
 PATIENT_TEMPLATES_SPEC_INPUT.md
-
