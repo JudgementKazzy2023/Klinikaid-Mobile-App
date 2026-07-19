@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:klinikaid_mobile/core/models/patient.dart';
@@ -9,8 +10,10 @@ import 'package:klinikaid_mobile/core/models/profile.dart';
 import 'package:klinikaid_mobile/features/department/data/department_repository.dart';
 import 'package:klinikaid_mobile/features/department/presentation/providers/result_entry_provider.dart';
 import 'package:klinikaid_mobile/features/department/presentation/screens/result_entry_screen.dart';
+import 'package:klinikaid_mobile/features/department/data/lab_value_extraction_service.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 import 'package:klinikaid_mobile/core/routing/app_router.dart';
+import 'package:klinikaid_mobile/core/utils/lab_validators.dart';
 import 'package:klinikaid_mobile/features/auth/data/session_activity_service.dart';
 import 'package:drift/native.dart';
 import 'package:klinikaid_mobile/core/cache/local_database.dart';
@@ -104,6 +107,17 @@ class MockDepartmentRepository extends DepartmentRepository {
   }
 }
 
+class MockLabValueExtractionService extends LabValueExtractionService {
+  final LabValueExtractionResult result;
+
+  MockLabValueExtractionService(this.result);
+
+  @override
+  Future<LabValueExtractionResult> extractFromImagePath(String imagePath) async {
+    return result;
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   HttpOverrides.global = null;
@@ -176,8 +190,8 @@ void main() {
       expect(isValueFlagged(13.0, range, 'female'), isFalse);
     });
 
-    test('2. MaxFourIntegerDigitsFormatter limits digits correctly', () {
-      final formatter = MaxFourIntegerDigitsFormatter();
+    test('2. MaxIntegerDigitsFormatter limits digits correctly', () {
+      const formatter = MaxIntegerDigitsFormatter(4);
 
       // Allowed cases
       expect(
@@ -218,6 +232,58 @@ void main() {
         ).text,
         '1234',
       );
+    });
+
+    test('2b. OCR extraction filter drops unsafe Gemini values', () {
+      final valid = LabValueExtractionService.sanitizeGeminiText('''
+```json
+{
+  "panel": "Complete Blood Count (CBC)",
+  "values": {
+    "Hemoglobin": "14.2",
+    "White Blood Cells (WBC)": "7.1",
+    "Platelets": "250",
+    "Creatinine": "1.2",
+    "Unknown": "999",
+    "BadText": "high"
+  },
+  "tokens_used": 42
+}
+```
+''');
+
+      expect(valid.panel, 'Complete Blood Count (CBC)');
+      expect(valid.values, {
+        'Hemoglobin': '14.2',
+        'White Blood Cells (WBC)': '7.1',
+        'Platelets': '250',
+      });
+
+      final partial = LabValueExtractionService.sanitizeFunctionResponse({
+        'panel': 'Renal Function',
+        'values': {
+          'Creatinine': '1.15',
+          'Hemoglobin': '14.0',
+          'Extra': 'abc',
+        },
+      });
+      expect(partial.panel, 'Renal Function');
+      expect(partial.values, {'Creatinine': '1.15'});
+
+      final fbs = LabValueExtractionService.sanitizeFunctionResponse({
+        'panel': 'Fasting Blood Sugar (FBS)',
+        'values': {
+          'Fasting Blood Sugar (FBS)': '95',
+          'Creatinine': '1.2',
+          'Unknown Panel Value': '99',
+        },
+      });
+      expect(fbs.panel, 'Fasting Blood Sugar (FBS)');
+      expect(fbs.values, {'Fasting Blood Sugar (FBS)': '95'});
+
+      final failed = LabValueExtractionService.sanitizeGeminiText('I am sorry, the image is too blurry.');
+      expect(failed.panel, isNull);
+      expect(failed.values, isEmpty);
     });
 
     testWidgets('3. Out-of-range dialog warning cancels or confirms submit correctly', (tester) async {
@@ -276,6 +342,77 @@ void main() {
       expect(mockRepo.lastRows?.first.testName, 'Hemoglobin');
       expect(mockRepo.lastRows?.first.testValue, '25.5');
       expect(mockRepo.lastRows?.first.isFlagged, isTrue);
+    });
+
+    testWidgets('3b. OCR autofill sets panel and values atomically without auto-save', (tester) async {
+      tester.view.physicalSize = const Size(800, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final extractionService = MockLabValueExtractionService(
+        const LabValueExtractionResult(
+          panel: 'Renal Function',
+          values: {'Creatinine': '1.15'},
+          tokensUsed: 10,
+        ),
+      );
+
+      final testRouter = GoRouter(
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (_, _) => const SizedBox.shrink(),
+          ),
+          GoRoute(
+            path: '/entry',
+            builder: (_, _) => ResultEntryScreen(
+              patientId: 'patient-123',
+              repo: mockRepo,
+              extractionService: extractionService,
+              imagePathPicker: () async => 'dummy.jpg',
+            ),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AuthProvider>.value(value: mockAuth),
+          ],
+          child: MaterialApp.router(routerConfig: testRouter),
+        ),
+      );
+      testRouter.push('/entry');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('extract_lab_values_button')));
+      await tester.pumpAndSettle();
+
+      expect(mockRepo.submitCalled, isFalse);
+      expect(find.byKey(const Key('ocr_verify_note')), findsOneWidget);
+      expect(find.text('Renal Function'), findsOneWidget);
+      expect(find.byKey(const Key('param_input_Creatinine')), findsOneWidget);
+
+      final creatinineTextField = tester.widget<TextField>(find.descendant(
+        of: find.byKey(const Key('param_input_Creatinine')),
+        matching: find.byType(TextField),
+      ));
+      expect(creatinineTextField.controller?.text, '1.15');
+      expect(creatinineTextField.enabled, isNot(false));
+
+      await tester.enterText(find.byKey(const Key('param_input_Creatinine')), '1.0');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('submit_result_btn')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Confirm flagged value(s)'), findsNothing);
+      expect(mockRepo.submitCalled, isTrue);
+      expect(mockRepo.lastRows?.single.testName, 'Creatinine');
+      expect(mockRepo.lastRows?.single.testValue, '1.0');
     });
 
     testWidgets('4. In-range values bypass the warning dialog', (tester) async {

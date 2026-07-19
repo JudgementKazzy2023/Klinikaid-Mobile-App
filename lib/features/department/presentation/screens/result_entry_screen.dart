@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/models/patient.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../data/department_repository.dart';
+import '../../data/lab_value_extraction_service.dart';
 import '../../domain/flag_calculator.dart';
 import '../../domain/lab_reference_ranges.dart';
 import '../providers/result_entry_provider.dart';
@@ -15,13 +16,18 @@ class ResultEntryScreen extends StatefulWidget {
   final String patientId;
   final DepartmentRepository repo;
   final String? departmentOverride;
+  final LabValueExtractionService extractionService;
+  final Future<String?> Function()? imagePathPicker;
 
   ResultEntryScreen({
     super.key,
     required this.patientId,
     DepartmentRepository? repo,
     this.departmentOverride,
-  }) : repo = (repo ?? DepartmentRepository())..adminDepartmentOverride = departmentOverride;
+    LabValueExtractionService? extractionService,
+    this.imagePathPicker,
+  })  : repo = (repo ?? DepartmentRepository())..adminDepartmentOverride = departmentOverride,
+        extractionService = extractionService ?? LabValueExtractionService();
 
   @override
   State<ResultEntryScreen> createState() => _ResultEntryScreenState();
@@ -32,6 +38,8 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
   bool _isLoadingPatient = true;
   String? _patientError;
   final TextEditingController _testNameController = TextEditingController();
+  final Map<String, TextEditingController> _parameterControllers = {};
+  bool _isExtractingLabValues = false;
 
   @override
   void initState() {
@@ -42,7 +50,105 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
   @override
   void dispose() {
     _testNameController.dispose();
+    for (final controller in _parameterControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
+  }
+
+  TextEditingController _controllerForParameter(String parameter, String value) {
+    final controller = _parameterControllers.putIfAbsent(
+      parameter,
+      () => TextEditingController(),
+    );
+    if (controller.text != value) {
+      controller.value = TextEditingValue(
+        text: value,
+        selection: TextSelection.collapsed(offset: value.length),
+      );
+    }
+    return controller;
+  }
+
+  Future<String?> _pickLabResultImagePath(BuildContext context) async {
+    final picker = widget.imagePathPicker;
+    if (picker != null) return picker();
+
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_rounded),
+              title: const Text('Take Photo'),
+              onTap: () => Navigator.of(sheetContext).pop(ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded),
+              title: const Text('Choose Image'),
+              onTap: () => Navigator.of(sheetContext).pop(ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (source == null) return null;
+    final image = await ImagePicker().pickImage(
+      source: source,
+      imageQuality: 85,
+    );
+    return image?.path;
+  }
+
+  Future<void> _extractLabValues(
+    BuildContext context,
+    ResultEntryProvider provider,
+  ) async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final imagePath = await _pickLabResultImagePath(context);
+    if (imagePath == null) return;
+
+    setState(() {
+      _isExtractingLabValues = true;
+    });
+
+    try {
+      final result = await widget.extractionService.extractFromImagePath(imagePath);
+      final didApply = provider.applyOcrAutofill(
+        panel: result.panel,
+        values: result.values,
+      );
+      if (!mounted) return;
+
+      scaffoldMessenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            didApply
+                ? 'Extracted values added. Please verify before saving.'
+                : 'No values extracted, enter manually.',
+          ),
+          backgroundColor: didApply ? const Color(0xFF047857) : Colors.orange,
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      provider.applyOcrAutofill(panel: null, values: const {});
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(
+          content: Text('No values extracted, enter manually.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isExtractingLabValues = false;
+        });
+      }
+    }
   }
 
   Future<void> _loadPatientData() async {
@@ -269,6 +375,45 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        OutlinedButton.icon(
+          key: const Key('extract_lab_values_button'),
+          onPressed: _isExtractingLabValues
+              ? null
+              : () => _extractLabValues(context, provider),
+          icon: _isExtractingLabValues
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.document_scanner_outlined),
+          label: Text(_isExtractingLabValues ? 'Extracting...' : 'Extract from Result Sheet'),
+        ),
+        if (provider.hasOcrAutofill) ...[
+          const SizedBox(height: 8),
+          Container(
+            key: const Key('ocr_verify_note'),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.amber.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.amber.shade200),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.fact_check_outlined, color: Colors.amber.shade900),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Verify OCR values before saving. Edit any incorrect field.',
+                    style: TextStyle(color: Colors.amber.shade900, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 20),
         Text(
           'Select Lab Panel / Test Group',
           style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
@@ -319,6 +464,7 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
           final max = isFemale ? range.femaleMax : range.maleMax;
 
           final valStr = provider.parameterValues[param] ?? '';
+          final controller = _controllerForParameter(param, valStr);
           final double? parsedVal = double.tryParse(valStr);
           final isFlagged = parsedVal != null && isValueFlagged(parsedVal, range, patient.gender.name);
 
@@ -374,6 +520,7 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
                   const SizedBox(height: 8),
                   TextFormField(
                     key: Key('param_input_$param'),
+                    controller: controller,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: [const MaxIntegerDigitsFormatter(4)],
                     decoration: InputDecoration(

@@ -8,6 +8,7 @@ import '../../../../core/repositories/rag_documents_repository.dart';
 import '../../../records/domain/record_grouper.dart';
 import '../../../department/data/department_repository.dart';
 import '../../data/admin_repository.dart';
+import '../../domain/admin_rbac.dart';
 
 class AdminProvider extends ChangeNotifier {
   final AdminRepository _repository;
@@ -30,6 +31,11 @@ class AdminProvider extends ChangeNotifier {
   bool _isStaffLoading = false;
   String? _staffError;
   List<Profile> _staffList = [];
+
+  bool _isRbacLoading = false;
+  String? _rbacError;
+  List<AdminRole> _rbacRoles = [];
+  List<AdminPermission> _rbacPermissions = [];
 
   bool _isQueueLoading = false;
   String? _queueError;
@@ -73,6 +79,11 @@ class AdminProvider extends ChangeNotifier {
   bool get isStaffLoading => _isStaffLoading;
   String? get staffError => _staffError;
   List<Profile> get staffList => _staffList;
+
+  bool get isRbacLoading => _isRbacLoading;
+  String? get rbacError => _rbacError;
+  List<AdminRole> get rbacRoles => _rbacRoles;
+  List<AdminPermission> get rbacPermissions => _rbacPermissions;
 
   bool get isQueueLoading => _isQueueLoading;
   String? get queueError => _queueError;
@@ -134,6 +145,23 @@ class AdminProvider extends ChangeNotifier {
       _staffError = e.toString();
     } finally {
       _isStaffLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> loadRbacCatalog() async {
+    _isRbacLoading = true;
+    _rbacError = null;
+    notifyListeners();
+
+    try {
+      final catalog = await _repository.getRbacCatalog();
+      _rbacRoles = catalog.roles;
+      _rbacPermissions = catalog.permissions;
+    } catch (e) {
+      _rbacError = e.toString();
+    } finally {
+      _isRbacLoading = false;
       notifyListeners();
     }
   }
@@ -289,6 +317,37 @@ class AdminProvider extends ChangeNotifier {
 
     try {
       await _repository.updateStaffRole(userId: userId, role: role, department: department);
+      await loadStaff();
+      await loadDashboard();
+    } catch (e) {
+      _staffError = e.toString();
+      rethrow;
+    } finally {
+      _isStaffLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> editStaffProfile({
+    required String userId,
+    required String fullName,
+    required AdminRole selectedRole,
+    required String employeeType,
+    String? department,
+  }) async {
+    _isStaffLoading = true;
+    _staffError = null;
+    notifyListeners();
+
+    try {
+      await _repository.updateStaffProfile(
+        userId: userId,
+        fullName: fullName,
+        role: selectedRole.legacyProfileRole,
+        roleId: selectedRole.id,
+        department: department,
+        employeeType: employeeType,
+      );
       await loadStaff();
       await loadDashboard();
     } catch (e) {

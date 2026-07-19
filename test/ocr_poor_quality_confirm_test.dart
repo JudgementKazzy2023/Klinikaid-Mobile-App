@@ -13,8 +13,6 @@ import 'package:klinikaid_mobile/core/models/profile.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 import 'package:klinikaid_mobile/features/documents/presentation/providers/document_submission_provider.dart';
 import 'package:klinikaid_mobile/features/documents/presentation/screens/submit_document_screen.dart';
-import 'package:klinikaid_mobile/features/ocr/domain/quality_assessment.dart';
-import 'package:klinikaid_mobile/features/ocr/domain/quality_thresholds.dart';
 
 // Mock AuthProvider subclass
 class MockAuthProvider extends AuthProvider {
@@ -97,6 +95,7 @@ class MockDocProvider extends DocumentSubmissionProvider {
     required String originalFileName,
     required String fileExtension,
     required Patient patient,
+    required String documentType,
     bool isTest = false,
   }) async {
     submitCalled = true;
@@ -204,6 +203,15 @@ void main() {
       );
     }
 
+    Future<void> selectDocumentType(WidgetTester tester) async {
+      final picker = find.byKey(const Key('document_type_picker'));
+      await tester.ensureVisible(picker);
+      await tester.tap(picker);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Other / Uncategorized').last);
+      await tester.pumpAndSettle();
+    }
+
     testWidgets('1. Score 50 triggers the confirmation popup and warning card is displayed', (tester) async {
       tester.view.physicalSize = const Size(800, 1200);
       tester.view.devicePixelRatio = 1.0;
@@ -233,6 +241,7 @@ void main() {
 
       await tester.pumpWidget(createTestWidget());
       await tester.pumpAndSettle();
+      await selectDocumentType(tester);
 
       // Check that the warning card is displayed (additive warning card)
       expect(find.text('Low quality'), findsOneWidget);
@@ -279,6 +288,7 @@ void main() {
 
       await tester.pumpWidget(createTestWidget());
       await tester.pumpAndSettle();
+      await selectDocumentType(tester);
 
       // Warning card is still shown because score < 85
       expect(find.text('Low quality'), findsOneWidget);
@@ -317,6 +327,7 @@ void main() {
 
       await tester.pumpWidget(createTestWidget());
       await tester.pumpAndSettle();
+      await selectDocumentType(tester);
 
       final submitBtn = find.widgetWithText(ElevatedButton, 'Submit Request');
       await tester.ensureVisible(submitBtn);
@@ -349,6 +360,7 @@ void main() {
 
       await tester.pumpWidget(createTestWidget());
       await tester.pumpAndSettle();
+      await selectDocumentType(tester);
 
       final submitBtn = find.widgetWithText(ElevatedButton, 'Submit Request');
       await tester.ensureVisible(submitBtn);
@@ -382,6 +394,7 @@ void main() {
 
       await tester.pumpWidget(createTestWidget());
       await tester.pumpAndSettle();
+      await selectDocumentType(tester);
 
       final submitBtn = find.widgetWithText(ElevatedButton, 'Submit Request');
       await tester.ensureVisible(submitBtn);
@@ -422,6 +435,7 @@ void main() {
 
       await tester.pumpWidget(createTestWidget());
       await tester.pumpAndSettle();
+      await selectDocumentType(tester);
 
       final submitBtn = find.widgetWithText(ElevatedButton, 'Submit Request');
       await tester.ensureVisible(submitBtn);

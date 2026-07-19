@@ -16,7 +16,8 @@ class AdminShell extends StatelessWidget {
     if (location == '/admin/records') return 3;
     if (location == '/admin/logs') return 4;
     if (location == '/admin/rag') return 5;
-    if (location == '/admin/profile') return 6;
+    if (location == '/admin/rbac') return 6;
+    if (location == '/admin/profile') return 7;
     return 0; // /admin/dashboard
   }
 
@@ -44,6 +45,9 @@ class AdminShell extends StatelessWidget {
         context.go('/admin/rag');
         break;
       case 6:
+        context.go('/admin/rbac');
+        break;
+      case 7:
         context.go('/admin/profile');
         break;
     }
@@ -64,6 +68,8 @@ class AdminShell extends StatelessWidget {
       case 5:
         return 'RAG Knowledge Base';
       case 6:
+        return 'Role & Access Management';
+      case 7:
         return 'My Profile';
       default:
         return 'Admin Portal';
@@ -97,7 +103,8 @@ class AdminShell extends StatelessWidget {
               ..loadSystemEvents()
               ..loadChatbotAudit()
               ..loadApiCost()
-              ..loadRag(),
+              ..loadRag()
+              ..loadRbacCatalog(),
           ),
       ],
       child: Scaffold(
@@ -209,6 +216,14 @@ class AdminShell extends StatelessWidget {
                     _buildDrawerItem(
                       context: context,
                       index: 6,
+                      icon: Icons.admin_panel_settings_outlined,
+                      activeIcon: Icons.admin_panel_settings_rounded,
+                      label: 'Role & Access',
+                      selectedIndex: selectedIndex,
+                    ),
+                    _buildDrawerItem(
+                      context: context,
+                      index: 7,
                       icon: Icons.person_outline_rounded,
                       activeIcon: Icons.person_rounded,
                       label: 'My Profile',

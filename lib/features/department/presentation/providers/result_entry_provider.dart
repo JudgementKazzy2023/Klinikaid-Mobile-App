@@ -18,6 +18,7 @@ class ResultEntryProvider extends ChangeNotifier {
   String _findings = '';
   String _impression = '';
   String _notes = '';
+  bool _hasOcrAutofill = false;
 
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
@@ -27,12 +28,14 @@ class ResultEntryProvider extends ChangeNotifier {
   String get findings => _findings;
   String get impression => _impression;
   String get notes => _notes;
+  bool get hasOcrAutofill => _hasOcrAutofill;
 
   void setLabGroup(String group) {
     if (_selectedLabGroup != group) {
       _selectedLabGroup = group;
       _parameterValues.clear();
       _errorMessage = null;
+      _hasOcrAutofill = false;
       notifyListeners();
     }
   }
@@ -41,6 +44,40 @@ class ResultEntryProvider extends ChangeNotifier {
     _parameterValues[parameter] = value;
     _errorMessage = null;
     notifyListeners();
+  }
+
+  bool applyOcrAutofill({
+    required String? panel,
+    required Map<String, String> values,
+  }) {
+    if (panel == null || !kLabTestGroups.containsKey(panel)) {
+      _errorMessage = 'No values extracted, enter manually.';
+      notifyListeners();
+      return false;
+    }
+
+    final allowedParameters = kLabTestGroups[panel]!.toSet();
+    final filteredValues = <String, String>{};
+    for (final entry in values.entries) {
+      if (allowedParameters.contains(entry.key) && entry.value.trim().isNotEmpty) {
+        filteredValues[entry.key] = entry.value.trim();
+      }
+    }
+
+    if (filteredValues.isEmpty) {
+      _errorMessage = 'No values extracted, enter manually.';
+      notifyListeners();
+      return false;
+    }
+
+    _selectedLabGroup = panel;
+    _parameterValues
+      ..clear()
+      ..addAll(filteredValues);
+    _hasOcrAutofill = true;
+    _errorMessage = null;
+    notifyListeners();
+    return true;
   }
 
   void setFindings(String val) {
@@ -69,6 +106,7 @@ class ResultEntryProvider extends ChangeNotifier {
     _impression = '';
     _notes = '';
     _selectedLabGroup = 'Complete Blood Count (CBC)';
+    _hasOcrAutofill = false;
     notifyListeners();
   }
 

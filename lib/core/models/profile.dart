@@ -86,7 +86,9 @@ class Profile {
   final String id;
   final String fullName;
   final UserRole role;
+  final String? roleId;
   final Department? department;
+  final String? employeeType;
   final bool isActive;
   final DateTime? acceptedPrivacyAt;
   final DateTime? emailVerifiedAt;
@@ -97,7 +99,9 @@ class Profile {
     required this.id,
     required this.fullName,
     required this.role,
+    this.roleId,
     this.department,
+    this.employeeType,
     this.isActive = true,
     this.acceptedPrivacyAt,
     this.emailVerifiedAt,
@@ -110,7 +114,9 @@ class Profile {
       id: json['id'] as String,
       fullName: json['full_name'] as String? ?? 'New User',
       role: UserRole.fromString(json['role'] as String? ?? 'patient'),
+      roleId: json['role_id'] as String?,
       department: Department.fromString(json['department'] as String?),
+      employeeType: json['employee_type'] as String?,
       isActive: json['is_active'] as bool? ?? true,
       acceptedPrivacyAt: json['accepted_privacy_at'] != null
           ? DateTime.parse(json['accepted_privacy_at'] as String)
@@ -128,7 +134,9 @@ class Profile {
       'id': id,
       'full_name': fullName,
       'role': role.toJsonValue(),
+      'role_id': roleId,
       'department': department?.toJsonValue(),
+      'employee_type': employeeType,
       'is_active': isActive,
       'accepted_privacy_at': acceptedPrivacyAt?.toIso8601String(),
       'email_verified_at': emailVerifiedAt?.toIso8601String(),

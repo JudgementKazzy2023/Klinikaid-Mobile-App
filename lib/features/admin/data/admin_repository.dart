@@ -5,6 +5,7 @@ import '../../../../core/models/chatbot_log.dart';
 import '../../../../core/models/system_log.dart';
 import '../../../../core/models/department_record.dart';
 import '../../../../core/supabase/supabase_client.dart';
+import '../domain/admin_rbac.dart';
 
 // SYNC SOURCE: web constants.ts kGeminiBlendedUsdPer1MTokens. Do not edit without web sync. See Constraint #13.
 const double kGeminiBlendedUsdPer1MTokens = 0.63;
@@ -395,6 +396,59 @@ class AdminRepository {
     }
   }
 
+  Future<AdminRbacCatalog> getRbacCatalog() async {
+    try {
+      final rolesResponse = await _client
+          .from('roles')
+          .select('id, name, description, is_system, base_role')
+          .order('is_system', ascending: false)
+          .order('name', ascending: true);
+      final permissionsResponse = await _client
+          .from('permissions')
+          .select('id, name, description, module')
+          .order('module', ascending: true)
+          .order('name', ascending: true);
+      final rolePermissionsResponse = await _client
+          .from('role_permissions')
+          .select('role_id, permission_id');
+
+      final permissions = (permissionsResponse as List)
+          .map((json) => AdminPermission.fromJson(json as Map<String, dynamic>))
+          .toList();
+      final permissionsById = {
+        for (final permission in permissions) permission.id: permission,
+      };
+
+      final rolePermissionIds = <String, List<String>>{};
+      for (final row in rolePermissionsResponse as List) {
+        final map = row as Map<String, dynamic>;
+        final roleId = map['role_id'] as String?;
+        final permissionId = map['permission_id'] as String?;
+        if (roleId == null || permissionId == null) continue;
+        rolePermissionIds.putIfAbsent(roleId, () => []).add(permissionId);
+      }
+
+      final roles = (rolesResponse as List).map((json) {
+        final map = json as Map<String, dynamic>;
+        final roleId = map['id'] as String;
+        final rolePermissions = (rolePermissionIds[roleId] ?? const <String>[])
+            .map((permissionId) => permissionsById[permissionId])
+            .whereType<AdminPermission>()
+            .toList()
+          ..sort((a, b) {
+            final moduleCompare = a.module.compareTo(b.module);
+            if (moduleCompare != 0) return moduleCompare;
+            return a.name.compareTo(b.name);
+          });
+        return AdminRole.fromJson(map, permissions: rolePermissions);
+      }).toList();
+
+      return AdminRbacCatalog(roles: roles, permissions: permissions);
+    } catch (e) {
+      throw FailureMapper.fromException(e);
+    }
+  }
+
   Future<Profile> setStaffActive({
     required String userId,
     required bool isActive,
@@ -426,6 +480,38 @@ class AdminRepository {
           .update({
             'role': role,
             'department': normalizedDept,
+          })
+          .eq('id', userId)
+          .select()
+          .single();
+
+      return Profile.fromJson(response);
+    } catch (e) {
+      throw FailureMapper.fromException(e);
+    }
+  }
+
+  Future<Profile> updateStaffProfile({
+    required String userId,
+    required String fullName,
+    required String role,
+    required String roleId,
+    String? department,
+    String? employeeType,
+  }) async {
+    try {
+      final normalizedDept = role == 'department_staff' ? department : null;
+      final normalizedEmployeeType = employeeType?.trim();
+      final response = await _client
+          .from('profiles')
+          .update({
+            'full_name': fullName.trim(),
+            'role': role,
+            'role_id': roleId,
+            'department': normalizedDept,
+            'employee_type': normalizedEmployeeType == null || normalizedEmployeeType.isEmpty
+                ? null
+                : normalizedEmployeeType,
           })
           .eq('id', userId)
           .select()

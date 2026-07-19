@@ -52,6 +52,7 @@ import '../../features/admin/presentation/screens/admin_queue_screen.dart';
 import '../../features/admin/presentation/screens/admin_records_screen.dart';
 import '../../features/admin/presentation/screens/admin_logs_screen.dart';
 import '../../features/admin/presentation/screens/admin_rag_screen.dart';
+import '../../features/admin/presentation/screens/admin_rbac_screen.dart';
 
 /// AppRouter defines the structural gating/redirection rules for the application.
 class AppRouter {
@@ -449,6 +450,10 @@ class AppRouter {
           GoRoute(
             path: '/admin/rag',
             builder: (context, state) => const AdminRagScreen(),
+          ),
+          GoRoute(
+            path: '/admin/rbac',
+            builder: (context, state) => const AdminRbacScreen(),
           ),
           GoRoute(
             path: '/admin/profile',
