@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/admin_provider.dart';
+import '../../domain/admin_rbac.dart';
 import '../../../../core/models/profile.dart';
 import '../../../../core/utils/role_formatter.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
@@ -37,6 +38,13 @@ class _AdminStaffScreenState extends State<AdminStaffScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final provider = Provider.of<AdminProvider>(context);
+    if (provider.rbacRoles.isEmpty && !provider.isRbacLoading && provider.rbacError == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Provider.of<AdminProvider>(context, listen: false).loadRbacCatalog();
+        }
+      });
+    }
 
     if (provider.isStaffLoading) {
       return const Center(child: CircularProgressIndicator());
@@ -93,7 +101,7 @@ class _AdminStaffScreenState extends State<AdminStaffScreen> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          value: _roleFilter,
+                          initialValue: _roleFilter,
                           decoration: InputDecoration(
                             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
@@ -159,17 +167,26 @@ class _AdminStaffScreenState extends State<AdminStaffScreen> {
         return _EditStaffSheet(
           staff: staff,
           isOwnAccount: isOwnAccount,
-          onSave: (isActive, role, department) async {
+          roles: adminProvider.rbacRoles,
+          rolesLoading: adminProvider.isRbacLoading,
+          onSave: (isActive, selectedRole, department, fullName, employeeType) async {
             final scaffoldMessenger = ScaffoldMessenger.of(context);
             try {
               if (isActive != staff.isActive) {
                 await adminProvider.toggleStaffActive(staff.id, isActive);
               }
-              if (role.toJsonValue() != staff.role.toJsonValue() || department?.toJsonValue() != staff.department?.toJsonValue()) {
-                await adminProvider.editStaffRole(
-                  staff.id,
-                  role.toJsonValue(),
-                  department?.toJsonValue(),
+              final roleChanged = selectedRole.id != staff.roleId ||
+                  selectedRole.legacyProfileRole != staff.role.toJsonValue();
+              final profileChanged = fullName.trim() != staff.fullName.trim() ||
+                  employeeType.trim() != (staff.employeeType ?? '').trim() ||
+                  department?.toJsonValue() != staff.department?.toJsonValue();
+              if (roleChanged || profileChanged) {
+                await adminProvider.editStaffProfile(
+                  userId: staff.id,
+                  fullName: fullName,
+                  selectedRole: selectedRole,
+                  department: department?.toJsonValue(),
+                  employeeType: employeeType,
                 );
               }
               scaffoldMessenger.showSnackBar(
@@ -202,6 +219,7 @@ class _AdminStaffScreenState extends State<AdminStaffScreen> {
         : 'S';
 
     final roleLabel = roleDisplayLabel(staff.role, staff.department);
+    final positionTitles = _parseEmployeeType(staff.employeeType);
 
     return Opacity(
       opacity: staff.isActive ? 1.0 : 0.65,
@@ -258,6 +276,30 @@ class _AdminStaffScreenState extends State<AdminStaffScreen> {
                         ),
                       ),
                       const SizedBox(height: 6),
+                      if (positionTitles.isNotEmpty) ...[
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: positionTitles.map((title) {
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.primary.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                title,
+                                style: TextStyle(
+                                  color: theme.colorScheme.primary,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                        const SizedBox(height: 6),
+                      ],
                       Row(
                         children: [
                           Container(
@@ -292,6 +334,15 @@ class _AdminStaffScreenState extends State<AdminStaffScreen> {
         ),
       ),
     );
+  }
+
+  List<String> _parseEmployeeType(String? employeeType) {
+    if (employeeType == null || employeeType.trim().isEmpty) return [];
+    return employeeType
+        .split('|')
+        .map((title) => title.trim())
+        .where((title) => title.isNotEmpty)
+        .toList();
   }
 
   Widget _buildEmptyState(ThemeData theme) {
@@ -340,11 +391,21 @@ class _AdminStaffScreenState extends State<AdminStaffScreen> {
 class _EditStaffSheet extends StatefulWidget {
   final Profile staff;
   final bool isOwnAccount;
-  final Future<void> Function(bool isActive, UserRole role, Department? department) onSave;
+  final List<AdminRole> roles;
+  final bool rolesLoading;
+  final Future<void> Function(
+    bool isActive,
+    AdminRole selectedRole,
+    Department? department,
+    String fullName,
+    String employeeType,
+  ) onSave;
 
   const _EditStaffSheet({
     required this.staff,
     required this.isOwnAccount,
+    required this.roles,
+    required this.rolesLoading,
     required this.onSave,
   });
 
@@ -354,7 +415,10 @@ class _EditStaffSheet extends StatefulWidget {
 
 class _EditStaffSheetState extends State<_EditStaffSheet> {
   late bool _isActive;
-  late UserRole _role;
+  AdminRole? _selectedRole;
+  late TextEditingController _fullNameController;
+  late TextEditingController _positionController;
+  late List<String> _positionTitles;
   Department? _department;
   bool _isLoading = false;
 
@@ -362,14 +426,75 @@ class _EditStaffSheetState extends State<_EditStaffSheet> {
   void initState() {
     super.initState();
     _isActive = widget.staff.isActive;
-    _role = widget.staff.role;
+    _selectedRole = _findInitialRole(widget.roles);
+    _fullNameController = TextEditingController(text: widget.staff.fullName);
+    _positionController = TextEditingController();
+    _positionTitles = _parsePositionTitles(widget.staff.employeeType);
     _department = widget.staff.department;
+  }
+
+  @override
+  void dispose() {
+    _fullNameController.dispose();
+    _positionController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _EditStaffSheet oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_selectedRole == null && widget.roles.isNotEmpty) {
+      _selectedRole = _findInitialRole(widget.roles);
+    }
+  }
+
+  AdminRole? _findInitialRole(List<AdminRole> roles) {
+    if (roles.isEmpty) return null;
+    if (widget.staff.roleId != null) {
+      for (final role in roles) {
+        if (role.id == widget.staff.roleId) return role;
+      }
+    }
+    for (final role in roles) {
+      if (role.isSystem && role.name == widget.staff.role.toJsonValue()) return role;
+    }
+    for (final role in roles) {
+      if (role.legacyProfileRole == widget.staff.role.toJsonValue()) return role;
+    }
+    return roles.first;
+  }
+
+  List<String> _parsePositionTitles(String? employeeType) {
+    if (employeeType == null || employeeType.trim().isEmpty) return [];
+    return employeeType
+        .split('|')
+        .map((title) => title.trim())
+        .where((title) => title.isNotEmpty)
+        .toSet()
+        .toList();
+  }
+
+  String _serializePositionTitles() {
+    return _positionTitles.map((title) => title.trim()).where((title) => title.isNotEmpty).join('|');
+  }
+
+  void _addPositionTitle() {
+    final title = _positionController.text.trim();
+    if (title.isEmpty) return;
+    if (!_positionTitles.any((existing) => existing.toLowerCase() == title.toLowerCase())) {
+      setState(() {
+        _positionTitles.add(title);
+      });
+    }
+    _positionController.clear();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final showDept = _role == UserRole.departmentStaff;
+    final selectedRole = _selectedRole;
+    final showDept = selectedRole?.usesDepartment == true;
+    final rolesUnavailable = selectedRole == null;
 
     return SingleChildScrollView(
       child: Padding(
@@ -401,15 +526,20 @@ class _EditStaffSheetState extends State<_EditStaffSheet> {
           ),
           const SizedBox(height: 20),
           
-          // Read-only info
           Text(
             'Name',
             style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface.withValues(alpha: 0.6)),
           ),
           const SizedBox(height: 4),
-          Text(
-            widget.staff.fullName,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+          TextField(
+            key: const Key('edit_staff_full_name_field'),
+            controller: _fullNameController,
+            enabled: !widget.isOwnAccount && !_isLoading,
+            textCapitalization: TextCapitalization.words,
+            decoration: InputDecoration(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            ),
           ),
           const SizedBox(height: 16),
           Text(
@@ -494,29 +624,100 @@ class _EditStaffSheetState extends State<_EditStaffSheet> {
           ],
           const SizedBox(height: 16),
 
+          const Text(
+            'Position(s) / Title(s)',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const Key('position_title_input'),
+                  controller: _positionController,
+                  enabled: !widget.isOwnAccount && !_isLoading,
+                  decoration: InputDecoration(
+                    hintText: 'Add a title',
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onSubmitted: (_) => _addPositionTitle(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.filled(
+                key: const Key('add_position_title_button'),
+                onPressed: (widget.isOwnAccount || _isLoading) ? null : _addPositionTitle,
+                icon: const Icon(Icons.add_rounded),
+                tooltip: 'Add title',
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (_positionTitles.isEmpty)
+            Text(
+              'No position titles added.',
+              style: TextStyle(
+                fontSize: 12,
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.55),
+              ),
+            )
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _positionTitles.map((title) {
+                return Chip(
+                  key: Key('position_title_chip_$title'),
+                  label: Text(title),
+                  onDeleted: (widget.isOwnAccount || _isLoading)
+                      ? null
+                      : () {
+                          setState(() {
+                            _positionTitles.remove(title);
+                          });
+                        },
+                );
+              }).toList(),
+            ),
+          const SizedBox(height: 6),
+          Text(
+            'Optional display labels only. System role still controls access permissions.',
+            style: TextStyle(
+              fontSize: 11,
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.55),
+            ),
+          ),
+          const SizedBox(height: 16),
+
           // Role dropdown
           const Text(
             'Role',
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
           ),
           const SizedBox(height: 8),
-          DropdownButtonFormField<UserRole>(
+          if (rolesUnavailable && widget.rolesLoading)
+            const Center(child: CircularProgressIndicator())
+          else if (rolesUnavailable)
+            Text(
+              'Role catalog unavailable. Pull to refresh Staff Management.',
+              style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
+            )
+          else
+          DropdownButtonFormField<AdminRole>(
             key: const Key('edit_staff_role_dropdown'),
-            value: _role,
+            initialValue: selectedRole,
             decoration: InputDecoration(
               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
             ),
-            items: [
-              UserRole.admin,
-              UserRole.receptionist,
-              UserRole.departmentStaff,
-              UserRole.medicalSpecialist,
-              UserRole.patient,
-            ].map((role) {
-              return DropdownMenuItem<UserRole>(
+            items: widget.roles.map((role) {
+              return DropdownMenuItem<AdminRole>(
                 value: role,
-                child: Text(role.displayName),
+                child: Text(
+                  '${role.displayName} (${role.isSystem ? 'SYSTEM' : 'CUSTOM'})',
+                  overflow: TextOverflow.ellipsis,
+                ),
               );
             }).toList(),
             onChanged: (widget.isOwnAccount || _isLoading)
@@ -524,11 +725,11 @@ class _EditStaffSheetState extends State<_EditStaffSheet> {
                 : (val) {
                     if (val != null) {
                       setState(() {
-                        _role = val;
-                        if (_role != UserRole.departmentStaff) {
+                        _selectedRole = val;
+                        if (!val.usesDepartment) {
                           _department = null;
-                        } else if (_department == null) {
-                          _department = Department.laboratory; // default fallback if none set
+                        } else {
+                          _department ??= Department.laboratory; // default fallback if none set
                         }
                       });
                     }
@@ -545,7 +746,7 @@ class _EditStaffSheetState extends State<_EditStaffSheet> {
             const SizedBox(height: 8),
             DropdownButtonFormField<Department>(
               key: const Key('edit_staff_dept_dropdown'),
-              value: _department,
+              initialValue: _department,
               decoration: InputDecoration(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
@@ -600,13 +801,19 @@ class _EditStaffSheetState extends State<_EditStaffSheet> {
               Expanded(
                 child: ElevatedButton(
                   key: const Key('edit_staff_save_button'),
-                  onPressed: (_isLoading || widget.isOwnAccount)
+                  onPressed: (_isLoading || widget.isOwnAccount || rolesUnavailable)
                       ? null
                       : () async {
                           setState(() {
                             _isLoading = true;
                           });
-                          await widget.onSave(_isActive, _role, _department);
+                          await widget.onSave(
+                            _isActive,
+                            selectedRole,
+                            _department,
+                            _fullNameController.text,
+                            _serializePositionTitles(),
+                          );
                           if (mounted) {
                             setState(() {
                               _isLoading = false;
