@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../../auth/presentation/providers/auth_provider.dart';
 import 'providers/admin_provider.dart';
+import '../../../core/permissions/permission_constants.dart';
 
 class AdminShell extends StatelessWidget {
   final Widget child;
@@ -76,12 +77,54 @@ class AdminShell extends StatelessWidget {
     }
   }
 
+  AdminProvider _createAdminProvider(AuthProvider authProvider) {
+    final provider = AdminProvider()..loadDashboard();
+    final legacyFallback = authProvider.usesLegacyPermissionFallback;
+    final canReceptionQueue = legacyFallback ||
+        authProvider.hasAllPermissions(PermissionConstants.receptionQueue);
+    final canDepartmentRecords = legacyFallback ||
+        authProvider.hasAnyPermission(PermissionConstants.departmentRecordsAny);
+    final canSystemLogs = legacyFallback ||
+        authProvider.hasPermission(PermissionConstants.systemLogsRead);
+    final canChatbotLogs = legacyFallback ||
+        authProvider.hasPermission(PermissionConstants.chatbotLogsRead);
+
+    if (legacyFallback || authProvider.hasPermission(PermissionConstants.staffManage)) {
+      provider.loadStaff();
+    }
+    if (canReceptionQueue) {
+      provider.loadQueue();
+    }
+    if (canDepartmentRecords) {
+      provider.loadDepartmentRecords('laboratory');
+      provider.loadDepartmentQueue('laboratory');
+    }
+    if (canSystemLogs) {
+      provider.loadSystemEvents();
+    }
+    if (canChatbotLogs) {
+      provider.loadChatbotAudit();
+      provider.loadApiCost();
+    }
+    if (legacyFallback || authProvider.hasPermission(PermissionConstants.ragDocumentsManage)) {
+      provider.loadRag();
+    }
+    if (legacyFallback || authProvider.hasPermission(PermissionConstants.rolesRead)) {
+      provider.loadRbacCatalog();
+    }
+    return provider;
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
     final theme = Theme.of(context);
     final selectedIndex = _calculateSelectedIndex(context);
     final screenTitle = _getScreenTitle(selectedIndex);
+    final canReceptionQueue = authProvider.hasAllPermissions(PermissionConstants.receptionQueue);
+    final canDepartmentRecords = authProvider.hasAnyPermission(PermissionConstants.departmentRecordsAny);
+    final canLogs = authProvider.hasPermission(PermissionConstants.systemLogsRead) ||
+        authProvider.hasPermission(PermissionConstants.chatbotLogsRead);
 
     AdminProvider? parentProvider;
     try {
@@ -94,17 +137,7 @@ class AdminShell extends StatelessWidget {
           ChangeNotifierProvider<AdminProvider>.value(value: parentProvider)
         else
           ChangeNotifierProvider<AdminProvider>(
-            create: (context) => AdminProvider()
-              ..loadDashboard()
-              ..loadStaff()
-              ..loadQueue()
-              ..loadDepartmentRecords('laboratory')
-              ..loadDepartmentQueue('laboratory')
-              ..loadSystemEvents()
-              ..loadChatbotAudit()
-              ..loadApiCost()
-              ..loadRag()
-              ..loadRbacCatalog(),
+            create: (context) => _createAdminProvider(authProvider),
           ),
       ],
       child: Scaffold(
@@ -180,7 +213,8 @@ class AdminShell extends StatelessWidget {
                       activeIcon: Icons.people_rounded,
                       label: 'Staff Management',
                       selectedIndex: selectedIndex,
-                    ),
+                    )
+                    .visibleWhen(authProvider.hasPermission(PermissionConstants.staffManage)),
                     _buildDrawerItem(
                       context: context,
                       index: 2,
@@ -188,7 +222,7 @@ class AdminShell extends StatelessWidget {
                       activeIcon: Icons.list_alt_rounded,
                       label: 'Reception Queue',
                       selectedIndex: selectedIndex,
-                    ),
+                    ).visibleWhen(canReceptionQueue),
                     _buildDrawerItem(
                       context: context,
                       index: 3,
@@ -196,7 +230,7 @@ class AdminShell extends StatelessWidget {
                       activeIcon: Icons.receipt_long_rounded,
                       label: 'Clinical Records',
                       selectedIndex: selectedIndex,
-                    ),
+                    ).visibleWhen(canDepartmentRecords),
                     _buildDrawerItem(
                       context: context,
                       index: 4,
@@ -204,7 +238,7 @@ class AdminShell extends StatelessWidget {
                       activeIcon: Icons.analytics_rounded,
                       label: 'System & Audit Logs',
                       selectedIndex: selectedIndex,
-                    ),
+                    ).visibleWhen(canLogs),
                     _buildDrawerItem(
                       context: context,
                       index: 5,
@@ -212,7 +246,7 @@ class AdminShell extends StatelessWidget {
                       activeIcon: Icons.folder_rounded,
                       label: 'RAG Knowledge',
                       selectedIndex: selectedIndex,
-                    ),
+                    ).visibleWhen(authProvider.hasPermission(PermissionConstants.ragDocumentsManage)),
                     _buildDrawerItem(
                       context: context,
                       index: 6,
@@ -220,7 +254,7 @@ class AdminShell extends StatelessWidget {
                       activeIcon: Icons.admin_panel_settings_rounded,
                       label: 'Role & Access',
                       selectedIndex: selectedIndex,
-                    ),
+                    ).visibleWhen(authProvider.hasPermission(PermissionConstants.rolesRead)),
                     _buildDrawerItem(
                       context: context,
                       index: 7,
@@ -293,4 +327,8 @@ class AdminShell extends StatelessWidget {
       ),
     );
   }
+}
+
+extension _ConditionalWidget on Widget {
+  Widget visibleWhen(bool visible) => visible ? this : const SizedBox.shrink();
 }

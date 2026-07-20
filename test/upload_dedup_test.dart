@@ -120,6 +120,7 @@ class MockDocumentSubmissionProvider extends DocumentSubmissionProvider {
     required String fileExtension,
     required Patient patient,
     required String documentType,
+    List<String>? selectedTestIds,
     bool isTest = false,
   }) async {
     final duplicateDate = await checkPendingDuplicate(patient.id, documentType);

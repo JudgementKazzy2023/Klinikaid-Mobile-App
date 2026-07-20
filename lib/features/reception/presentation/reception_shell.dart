@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/permissions/permission_constants.dart';
+import '../../auth/presentation/providers/auth_provider.dart';
 import '../data/reception_repository.dart';
 import 'providers/reception_queue_provider.dart';
 import 'providers/reception_dashboard_provider.dart';
@@ -58,30 +60,48 @@ class ReceptionShell extends StatelessWidget {
 class _ReceptionBottomNavBar extends StatelessWidget {
   const _ReceptionBottomNavBar();
 
-  int _calculateSelectedIndex(BuildContext context) {
-    final String location = GoRouterState.of(context).matchedLocation;
-    if (location == '/reception/queue') return 1;
-    if (location == '/reception/profile') return 2;
-    return 0; // /reception/dashboard
+  List<_ReceptionNavItem> _items(BuildContext context) {
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final canQueue = auth.usesLegacyPermissionFallback ||
+        auth.hasAllPermissions(PermissionConstants.receptionQueue);
+    return [
+      if (canQueue)
+        const _ReceptionNavItem(
+          path: '/reception/dashboard',
+          icon: Icons.dashboard_outlined,
+          activeIcon: Icons.dashboard_rounded,
+          label: 'Dashboard',
+        ),
+      if (canQueue)
+        const _ReceptionNavItem(
+          path: '/reception/queue',
+          icon: Icons.list_alt_outlined,
+          activeIcon: Icons.list_alt_rounded,
+          label: 'Queue',
+        ),
+      const _ReceptionNavItem(
+        path: '/reception/profile',
+        icon: Icons.person_outline_rounded,
+        activeIcon: Icons.person_rounded,
+        label: 'Profile',
+      ),
+    ];
   }
 
-  void _onItemTapped(int index, BuildContext context) {
-    switch (index) {
-      case 0:
-        context.go('/reception/dashboard');
-        break;
-      case 1:
-        context.go('/reception/queue');
-        break;
-      case 2:
-        context.go('/reception/profile');
-        break;
-    }
+  int _calculateSelectedIndex(BuildContext context, List<_ReceptionNavItem> items) {
+    final String location = GoRouterState.of(context).matchedLocation;
+    final index = items.indexWhere((item) => item.path == location);
+    return index < 0 ? 0 : index;
+  }
+
+  void _onItemTapped(int index, BuildContext context, List<_ReceptionNavItem> items) {
+    context.go(items[index].path);
   }
 
   @override
   Widget build(BuildContext context) {
-    final selectedIndex = _calculateSelectedIndex(context);
+    final items = _items(context);
+    final selectedIndex = _calculateSelectedIndex(context, items);
 
     return Container(
       decoration: BoxDecoration(
@@ -91,31 +111,37 @@ class _ReceptionBottomNavBar extends StatelessWidget {
       ),
       child: BottomNavigationBar(
         currentIndex: selectedIndex,
-        onTap: (index) => _onItemTapped(index, context),
+        onTap: (index) => _onItemTapped(index, context, items),
         backgroundColor: Theme.of(context).colorScheme.surface,
         selectedItemColor: Theme.of(context).colorScheme.primary,
         unselectedItemColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
         type: BottomNavigationBarType.fixed,
         selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
         unselectedLabelStyle: const TextStyle(fontSize: 11),
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.dashboard_outlined),
-            activeIcon: Icon(Icons.dashboard_rounded),
-            label: 'Dashboard',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.list_alt_outlined),
-            activeIcon: Icon(Icons.list_alt_rounded),
-            label: 'Queue',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline_rounded),
-            activeIcon: Icon(Icons.person_rounded),
-            label: 'Profile',
-          ),
-        ],
+        items: items
+            .map(
+              (item) => BottomNavigationBarItem(
+                icon: Icon(item.icon),
+                activeIcon: Icon(item.activeIcon),
+                label: item.label,
+              ),
+            )
+            .toList(),
       ),
     );
   }
+}
+
+class _ReceptionNavItem {
+  final String path;
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
+
+  const _ReceptionNavItem({
+    required this.path,
+    required this.icon,
+    required this.activeIcon,
+    required this.label,
+  });
 }

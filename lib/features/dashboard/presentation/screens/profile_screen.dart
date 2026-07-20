@@ -428,7 +428,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5)),
                     decoration: _buildInputDecoration(Icons.person_outline),
                   ),
-                  _buildAdminWarning(),
 
                   // Last Name
                   _buildLabel('Last Name'),
@@ -438,7 +437,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5)),
                     decoration: _buildInputDecoration(Icons.person_outline),
                   ),
-                  _buildAdminWarning(),
 
                   // Date of Birth & Gender row
                   Row(
@@ -475,7 +473,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 ],
                               ),
                             ),
-                            _buildAdminWarning(),
                           ],
                         ),
                       ),
@@ -502,7 +499,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               }).toList(),
                               onChanged: null, // Disabled dropdown
                             ),
-                            _buildAdminWarning(),
                           ],
                         ),
                       ),
@@ -722,19 +718,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
           fontSize: 13,
           fontWeight: FontWeight.w500,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAdminWarning() {
-    return Padding(
-      padding: const EdgeInsets.only(left: 4.0, top: 4.0, bottom: 12.0),
-      child: Text(
-        'Contact clinic administrator to change',
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
-          fontSize: 11,
         ),
       ),
     );

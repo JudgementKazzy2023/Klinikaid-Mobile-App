@@ -29,6 +29,16 @@ class SpecialistPatient {
 
   String get fullName => '$firstName $lastName';
 
+  String get emailDisplay {
+    final value = email?.trim();
+    return value == null || value.isEmpty ? 'No email on file' : value;
+  }
+
+  String get contactNumberDisplay {
+    final value = contactNumber?.trim();
+    return value == null || value.isEmpty ? 'No contact number on file' : value;
+  }
+
   int get age {
     final now = DateTime.now();
     int age = now.year - dateOfBirth.year;

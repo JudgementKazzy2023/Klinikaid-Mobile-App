@@ -1,4 +1,6 @@
 class RegistrationValidators {
+  static const int minimumRegistrationAge = 18;
+
   /// Validates standard email format
   static bool validateEmail(String email) {
     final trimmed = email.trim();
@@ -31,7 +33,7 @@ class RegistrationValidators {
   /// - Cannot be future date
   /// - Cannot be today or yesterday (block obvious garbage)
   /// - Cannot be more than 120 years ago
-  /// - Enforces hard 13+ age minimum
+  /// - Enforces hard 18+ age minimum
   static String? validateDob(DateTime? dob) {
     if (dob == null) return 'Date of birth is required';
     
@@ -54,12 +56,12 @@ class RegistrationValidators {
       return 'Please enter a realistic date of birth';
     }
     
-    // Under 13
+    // Under 18
     final age = now.year - dob.year
       - (now.month < dob.month || 
          (now.month == dob.month && now.day < dob.day) ? 1 : 0);
-    if (age < 13) {
-      return 'You must be 13 years old or older to register';
+    if (age < minimumRegistrationAge) {
+      return 'You must be 18 years old or older to register';
     }
     
     return null; // valid

@@ -96,6 +96,7 @@ class MockDocProvider extends DocumentSubmissionProvider {
     required String fileExtension,
     required Patient patient,
     required String documentType,
+    List<String>? selectedTestIds,
     bool isTest = false,
   }) async {
     submitCalled = true;

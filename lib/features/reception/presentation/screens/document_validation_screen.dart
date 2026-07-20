@@ -2,21 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:go_router/go_router.dart';
+import '../../../documents/clinic_test_catalog.dart';
 import '../../data/reception_repository.dart';
 import '../../domain/submission_detail.dart';
 import '../../domain/submission_status.dart';
 import '../providers/reception_queue_provider.dart';
 import '../widgets/triage_routing_sheet.dart';
 import '../widgets/reject_document_sheet.dart';
-import '../../../../features/auth/presentation/providers/auth_provider.dart';
-import '../../../../core/models/profile.dart';
 
 class DocumentValidationScreen extends StatefulWidget {
   final String submissionId;
+  final String? returnRoute;
 
   const DocumentValidationScreen({
     super.key,
     required this.submissionId,
+    this.returnRoute,
   });
 
   @override
@@ -64,17 +65,11 @@ class _DocumentValidationScreenState extends State<DocumentValidationScreen> {
   }
 
   void _navigateBack() {
-    UserRole? role;
-    try {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      role = authProvider.profile?.role;
-    } catch (_) {}
-
-    if (role == UserRole.admin) {
-      context.go('/admin/queue');
-    } else {
-      context.go('/reception/queue');
+    if (context.canPop()) {
+      context.pop();
+      return;
     }
+    context.go(widget.returnRoute ?? '/reception/queue');
   }
 
   Future<void> _viewOriginal(String id) async {
@@ -634,6 +629,10 @@ class _DocumentValidationScreenState extends State<DocumentValidationScreen> {
                                             : 'Unknown Uploader',
                                         theme,
                                       ),
+                                      _buildSelectedTestsSection(
+                                        readSelectedTests(detail.extractedMetadata),
+                                        theme,
+                                      ),
                                       const SizedBox(height: 16),
                                       (() {
                                         final isTemplate = detail.submission.fileType == 'template';
@@ -755,6 +754,51 @@ class _DocumentValidationScreenState extends State<DocumentValidationScreen> {
                     ],
                   ),
       ),
+    );
+  }
+
+  Widget _buildSelectedTestsSection(List<Map<String, dynamic>> selectedTests, ThemeData theme) {
+    if (selectedTests.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 12),
+        Text(
+          'Patient-selected Tests',
+          style: TextStyle(
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: selectedTests.map((test) {
+            return Container(
+              key: Key('selected_test_badge_${test['id']}'),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0D7C66).withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: const Color(0xFF0D7C66).withValues(alpha: 0.28)),
+              ),
+              child: Text(
+                test['label'] as String,
+                style: const TextStyle(
+                  color: Color(0xFF0D7C66),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
     );
   }
 }

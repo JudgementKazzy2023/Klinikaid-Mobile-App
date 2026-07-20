@@ -9,6 +9,7 @@ import '../../../../core/models/patient.dart';
 import '../../../../core/supabase/supabase_client.dart';
 import '../../../../core/utils/uuid_generator.dart';
 import '../../../../core/repositories/documents_repository.dart';
+import '../../clinic_test_catalog.dart';
 import '../../../ocr/data/document_quality_service.dart';
 import '../../../ocr/domain/quality_assessment.dart';
 import '../../../ocr/domain/quality_thresholds.dart';
@@ -28,6 +29,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   String? _extractedOcrText;
   Map<String, dynamic>? _preScreenMetadata;
   String? _selectedImagePath;
+  List<ClinicTest> _detectedTests = [];
   
   // Offline sync states
   List<OfflineDocument> _queuedSubmissions = [];
@@ -45,6 +47,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   String? get extractedOcrText => _extractedOcrText;
   Map<String, dynamic>? get preScreenMetadata => _preScreenMetadata;
   String? get selectedImagePath => _selectedImagePath;
+  List<ClinicTest> get detectedTests => List.unmodifiable(_detectedTests);
   
   /// Returns true if there is a processed document ready for review.
   bool get hasCachedSubmission => _selectedImagePath != null && _preScreenMetadata != null;
@@ -91,6 +94,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     _errorMessage = null;
     _extractedOcrText = null;
     _preScreenMetadata = null;
+    _detectedTests = [];
     _selectedImagePath = imagePath;
     notifyListeners();
     
@@ -101,6 +105,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
       final String ocrText = recognizedText.text;
       
       _extractedOcrText = ocrText;
+      _detectedTests = detectRequestedTests(ocrText);
       
       // Perform AI Quality Assessment (Path A) via Edge Function
       final QualityAssessment assessment = await _qualityService.assess(
@@ -143,6 +148,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     _preScreenMetadata = null;
     _errorMessage = null;
     _selectedImagePath = null;
+    _detectedTests = [];
     notifyListeners();
   }
 
@@ -191,6 +197,17 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     };
   }
 
+  @visibleForTesting
+  void setTestDetectionStateForTest({
+    required String ocrText,
+    required Map<String, dynamic> preScreenMetadata,
+    List<ClinicTest>? detectedTests,
+  }) {
+    _extractedOcrText = ocrText;
+    _preScreenMetadata = Map<String, dynamic>.from(preScreenMetadata);
+    _detectedTests = detectedTests ?? detectRequestedTests(ocrText);
+  }
+
   /// Submits a document. Uploads directly online, or queues in local SQLite if offline.
   Future<bool> submitDocument({
     required String localFilePath,
@@ -198,6 +215,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     required String fileExtension,
     required Patient patient,
     required String documentType,
+    List<String>? selectedTestIds,
     bool isTest = false,
   }) async {
     _isLoading = true;
@@ -205,13 +223,15 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     notifyListeners();
 
     // Check duplicate
-    final duplicateDate = await checkPendingDuplicate(patient.id, documentType);
-    if (duplicateDate != null) {
-      final label = getCategoryLabel(documentType);
-      _isLoading = false;
-      _errorMessage = "You already have a pending [$label] submitted on $duplicateDate. You can submit a new one once it's reviewed.";
-      notifyListeners();
-      return false;
+    if (!isTest) {
+      final duplicateDate = await checkPendingDuplicate(patient.id, documentType);
+      if (duplicateDate != null) {
+        final label = getCategoryLabel(documentType);
+        _isLoading = false;
+        _errorMessage = "You already have a pending [$label] submitted on $duplicateDate. You can submit a new one once it's reviewed.";
+        notifyListeners();
+        return false;
+      }
     }
     
     final currentUser = SupabaseService.client.auth.currentUser;
@@ -234,6 +254,12 @@ class DocumentSubmissionProvider extends ChangeNotifier {
       _preScreenMetadata ?? preScreenOcrText(ocrText, patient.firstName, patient.lastName),
     );
     metadata['document_type'] = documentType;
+    if (_detectedTests.isNotEmpty) {
+      metadata.addAll(buildTestDetectionMetadata(
+        detectedTests: _detectedTests,
+        selectedTestIds: selectedTestIds ?? _detectedTests.map((test) => test.id).toList(),
+      ));
+    }
     
     try {
       if (isTest) {

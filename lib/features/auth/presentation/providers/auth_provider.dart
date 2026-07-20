@@ -6,8 +6,10 @@ import '../../../../core/repositories/profiles_repository.dart';
 import '../../../../core/models/patient.dart';
 import '../../../../core/models/profile.dart';
 import '../../../../core/errors/failures.dart';
+import '../../../../core/permissions/permission_service.dart';
 import '../../domain/verification_state.dart';
 import '../../data/verification_service.dart';
+import '../../data/patient_provisioning_service.dart';
 import '../../data/session_activity_service.dart';
 import '../../domain/password_reset_result.dart';
 import '../../domain/password_change_result.dart';
@@ -20,6 +22,8 @@ class AuthProvider extends ChangeNotifier {
   final PatientsRepository _patientsRepo;
   final ProfilesRepository _profilesRepo;
   final VerificationService _verificationService;
+  final PatientProvisioningService _patientProvisioningService;
+  final PermissionService _permissionService;
   final SessionActivityService _activityService;
   final MfaService _mfaService;
 
@@ -36,6 +40,8 @@ class AuthProvider extends ChangeNotifier {
   bool _isFirstAuthCheck = true;
   String? _pendingMfaFactorId;
   bool _needsMfaEnrollment = false;
+  Set<String> _permissions = const <String>{};
+  bool _permissionFallbackActive = false;
 
   Profile? get profile => _profile;
   Patient? get patient => _patient;
@@ -44,6 +50,16 @@ class AuthProvider extends ChangeNotifier {
   String? get pendingMfaFactorId => _pendingMfaFactorId;
   bool get needsMfaEnrollment => _needsMfaEnrollment;
   bool get isAal1Pending => _pendingMfaFactorId != null || _needsMfaEnrollment;
+  Set<String> get permissions => _permissions;
+  bool get permissionFallbackActive => _permissionFallbackActive;
+  bool get usesLegacyPermissionFallback =>
+      _permissionFallbackActive || _permissions.isEmpty;
+
+  bool hasPermission(String permission) => _permissions.contains(permission);
+  bool hasAllPermissions(List<String> permissions) =>
+      permissions.every(_permissions.contains);
+  bool hasAnyPermission(List<String> permissions) =>
+      permissions.any(_permissions.contains);
 
   bool get isAal2 {
     try {
@@ -61,12 +77,18 @@ class AuthProvider extends ChangeNotifier {
     PatientsRepository? patientsRepo,
     ProfilesRepository? profilesRepo,
     VerificationService? verificationService,
+    PatientProvisioningService? patientProvisioningService,
+    PermissionService? permissionService,
     SessionActivityService? activityService,
     MfaService? mfaService,
   })  : _client = client ?? Supabase.instance.client,
         _patientsRepo = patientsRepo ?? PatientsRepository(),
         _profilesRepo = profilesRepo ?? ProfilesRepository(),
         _verificationService = verificationService ?? SupabaseVerificationService(),
+        _patientProvisioningService =
+            patientProvisioningService ?? SupabasePatientProvisioningService(),
+        _permissionService = permissionService ??
+            SupabasePermissionService(client: client ?? Supabase.instance.client),
         _activityService = activityService ?? SessionActivityService(),
         _mfaService = mfaService ?? MfaService(client ?? Supabase.instance.client),
         super() {
@@ -125,6 +147,8 @@ class AuthProvider extends ChangeNotifier {
        _hasConsented = false;
        _isOnboarded = false;
        _profile = null;
+       _permissions = const <String>{};
+       _permissionFallbackActive = false;
        return;
      }
 
@@ -135,12 +159,16 @@ class AuthProvider extends ChangeNotifier {
       _profile = null;
     }
 
+    await _loadPermissionsForProfile();
+
     if (_profile?.isActive == false) {
       _errorMessage = 'This account has been deactivated. Contact an administrator.';
       _user = null;
       _session = null;
       _profile = null;
       _patient = null;
+      _permissions = const <String>{};
+      _permissionFallbackActive = false;
       _hasConsented = false;
       _isOnboarded = false;
       _client.auth.signOut().catchError((_) {});
@@ -216,6 +244,8 @@ class AuthProvider extends ChangeNotifier {
           _session = null;
           _profile = null;
           _patient = null;
+          _permissions = const <String>{};
+          _permissionFallbackActive = false;
           _hasConsented = false;
           _isOnboarded = false;
           _activityService.stopMonitoring();
@@ -436,10 +466,7 @@ class AuthProvider extends ChangeNotifier {
       _user = response.user;
 
       if (_user != null) {
-        // Create the Patient record in the public table
-        final patient = Patient(
-          id: _user!.id,
-          profileId: _user!.id,
+        final provisionedPatient = await _provisionPatientAfterSignUp(
           firstName: firstName,
           lastName: lastName,
           dateOfBirth: dateOfBirth,
@@ -447,11 +474,11 @@ class AuthProvider extends ChangeNotifier {
           contactNumber: contactNumber,
           email: email,
           address: address,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
         );
-        await _patientsRepo.createPatient(patient);
-        _patient = patient;
+        if (provisionedPatient == null) {
+          return false;
+        }
+        _patient = provisionedPatient;
         _isOnboarded = true;
 
         // Record the privacy policy consent immediately
@@ -460,7 +487,9 @@ class AuthProvider extends ChangeNotifier {
           id: profile.id,
           fullName: fullName,
           role: profile.role,
+          roleId: profile.roleId,
           department: profile.department,
+          employeeType: profile.employeeType,
           isActive: profile.isActive,
           acceptedPrivacyAt: DateTime.now(),
           emailVerifiedAt: profile.emailVerifiedAt,
@@ -479,6 +508,8 @@ class AuthProvider extends ChangeNotifier {
           _session = null;
           _profile = null;
           _patient = null;
+          _permissions = const <String>{};
+          _permissionFallbackActive = false;
           _hasConsented = false;
           _isOnboarded = false;
           _isLoading = false;
@@ -498,11 +529,67 @@ class AuthProvider extends ChangeNotifier {
       _session = null;
       _profile = null;
       _patient = null;
+      _permissions = const <String>{};
+      _permissionFallbackActive = false;
       _hasConsented = false;
       _isOnboarded = false;
       _isLoading = false;
       notifyListeners();
       return false;
+    }
+  }
+
+  Future<Patient?> _provisionPatientAfterSignUp({
+    required String firstName,
+    required String lastName,
+    required DateTime dateOfBirth,
+    required Gender gender,
+    required String contactNumber,
+    required String email,
+    required String address,
+  }) async {
+    try {
+      final provisionedPatient = await _patientProvisioningService.createPatientRecord(
+        firstName: firstName,
+        lastName: lastName,
+        dateOfBirth: dateOfBirth,
+        gender: gender,
+        contactNumber: contactNumber,
+        email: email,
+        address: address,
+      );
+
+      return provisionedPatient ??
+          Patient(
+            id: _user!.id,
+            profileId: _user!.id,
+            firstName: firstName,
+            lastName: lastName,
+            dateOfBirth: dateOfBirth,
+            gender: gender,
+            contactNumber: contactNumber,
+            email: email,
+            address: address,
+            createdAt: DateTime.now(),
+            updatedAt: DateTime.now(),
+          );
+    } on PatientProvisioningException catch (e) {
+      _errorMessage = e.message;
+      if (!e.functionRan) {
+        await _verificationService.deletePendingUser();
+      }
+      await _client.auth.signOut().catchError((_) {});
+      _user = null;
+      _session = null;
+      _profile = null;
+      _patient = null;
+      _permissions = const <String>{};
+      _permissionFallbackActive = false;
+      _hasConsented = false;
+      _isOnboarded = false;
+      _isLoading = false;
+      notifyListeners();
+      return null;
     }
   }
 
@@ -521,7 +608,9 @@ class AuthProvider extends ChangeNotifier {
           id: profile.id,
           fullName: profile.fullName,
           role: profile.role,
+          roleId: profile.roleId,
           department: profile.department,
+          employeeType: profile.employeeType,
           isActive: profile.isActive,
           acceptedPrivacyAt: DateTime.now(),
           emailVerifiedAt: profile.emailVerifiedAt,
@@ -662,10 +751,39 @@ class AuthProvider extends ChangeNotifier {
       _session = null;
       _profile = null;
       _patient = null;
+      _permissions = const <String>{};
+      _permissionFallbackActive = false;
       _hasConsented = false;
       _isOnboarded = false;
       _isLoading = false;
       notifyListeners();
+    }
+  }
+
+  Future<void> _loadPermissionsForProfile() async {
+    final roleId = _profile?.roleId;
+    if (roleId == null || roleId.trim().isEmpty) {
+      _permissions = const <String>{};
+      _permissionFallbackActive = _profile?.role != UserRole.patient;
+      if (_permissionFallbackActive) {
+        print('[AuthProvider] Permission routing fallback active: missing role_id.');
+      }
+      return;
+    }
+
+    try {
+      final loaded = await _permissionService.loadPermissionsForRole(roleId);
+      _permissions = loaded;
+      _permissionFallbackActive = loaded.isEmpty && _profile?.role != UserRole.patient;
+      if (_permissionFallbackActive) {
+        print('[AuthProvider] Permission routing fallback active: no permissions returned.');
+      }
+    } catch (e) {
+      _permissions = const <String>{};
+      _permissionFallbackActive = _profile?.role != UserRole.patient;
+      if (_permissionFallbackActive) {
+        print('[AuthProvider] Permission routing fallback active: $e');
+      }
     }
   }
 
@@ -749,7 +867,9 @@ class AuthProvider extends ChangeNotifier {
 
       if (response.status == 200) {
         // Force refresh session to get updated user token with new email
-        await _client.auth.refreshSession().catchError((_) {});
+        try {
+          await _client.auth.refreshSession();
+        } catch (_) {}
         await _updateLocalStates();
         _isLoading = false;
         notifyListeners();
