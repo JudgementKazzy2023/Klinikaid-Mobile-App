@@ -53,12 +53,64 @@ import '../../features/admin/presentation/screens/admin_records_screen.dart';
 import '../../features/admin/presentation/screens/admin_logs_screen.dart';
 import '../../features/admin/presentation/screens/admin_rag_screen.dart';
 import '../../features/admin/presentation/screens/admin_rbac_screen.dart';
+import '../permissions/permission_route_policy.dart';
 
 /// AppRouter defines the structural gating/redirection rules for the application.
 class AppRouter {
   final AuthProvider authProvider;
 
   AppRouter(this.authProvider);
+
+  PermissionRoutePolicy get _permissionPolicy => PermissionRoutePolicy(
+        permissions: authProvider.permissions,
+        legacyRole: authProvider.profile?.role,
+      );
+
+  String? _legacyHomeForRole(UserRole? role) {
+    if (role == UserRole.patient) return '/patient';
+    if (role == UserRole.admin) return '/admin/dashboard';
+    if (role == UserRole.receptionist) return '/reception/queue';
+    if (role == UserRole.departmentStaff) return '/department/queue';
+    if (role == UserRole.medicalSpecialist) return '/specialist/dashboard';
+    return null;
+  }
+
+  String? _permissionHomeForRole(UserRole? role) {
+    return PermissionRoutePolicy(
+      permissions: authProvider.permissions,
+      legacyRole: role,
+    ).home();
+  }
+
+  String? _homeForCurrentUser() {
+    final role = authProvider.profile?.role;
+    if (authProvider.usesLegacyPermissionFallback) {
+      return _legacyHomeForRole(role);
+    }
+    return _permissionHomeForRole(role);
+  }
+
+  String? _permissionRedirect(String location) {
+    if (location == '/login' ||
+        location == '/register' ||
+        location == '/consent' ||
+        location == '/verify' ||
+        location == '/' ||
+        location == '/staff/reception' ||
+        location == '/staff/specialist') {
+      return _permissionHomeForRole(authProvider.profile?.role);
+    }
+
+    if (_isPermissionAllowedPath(location)) {
+      return null;
+    }
+
+    return _permissionHomeForRole(authProvider.profile?.role);
+  }
+
+  bool _isPermissionAllowedPath(String location) {
+    return _permissionPolicy.isAllowedPath(location);
+  }
 
   late final router = GoRouter(
     initialLocation: '/',
@@ -68,10 +120,11 @@ class AppRouter {
       final hasConsented = authProvider.hasConsented;
       final isLoading = authProvider.isLoading;
       final role = authProvider.profile?.role;
+      final location = state.matchedLocation;
 
-      final isLoggingIn = state.matchedLocation == '/login';
-      final isRegistering = state.matchedLocation == '/register';
-      final isConsenting = state.matchedLocation == '/consent';
+      final isLoggingIn = location == '/login';
+      final isRegistering = location == '/register';
+      final isConsenting = location == '/consent';
 
       // 1. If auth is loading, do not perform redirects yet (let it show loading states)
       if (isLoading) {
@@ -86,7 +139,7 @@ class AppRouter {
 
       // 2. Unauthenticated User gating
       if (!isAuthenticated) {
-        if (isLoggingIn || isRegistering || state.matchedLocation == '/forgot-password') {
+        if (isLoggingIn || isRegistering || location == '/forgot-password') {
           return null; // Allow login, register, or forgot password screen
         }
         return '/login';
@@ -101,54 +154,37 @@ class AppRouter {
             return '/login';
           }
         }
-        if (state.matchedLocation == '/mfa-verify') {
+        if (location == '/mfa-verify') {
           return null;
         }
         return '/mfa-verify';
       }
 
       // Prevent non-pending users from accessing /mfa-verify
-      if (state.matchedLocation == '/mfa-verify') {
-        if (role == UserRole.patient) {
-          return '/patient';
-        } else if (role == UserRole.receptionist) {
-          return '/reception/queue';
-        } else if (role == UserRole.departmentStaff) {
-          return '/department/queue';
-        } else if (role == UserRole.medicalSpecialist) {
-          return '/staff/specialist';
-        } else if (role == UserRole.admin && authProvider.isAal2) {
-          return '/admin/dashboard';
+      if (location == '/mfa-verify') {
+        if (role == UserRole.admin && !authProvider.isAal2) {
+          return null;
         }
-        return null;
+        return _homeForCurrentUser();
       }
 
-      // 3. Admin Routing & AAL2 Guarding
-      if (role == UserRole.admin) {
-        if (!authProvider.isAal2) {
-          return '/mfa-verify';
-        }
-
-        // Redirect admins trying to access non-admin paths to dashboard
-        final isAdminPath = state.matchedLocation.startsWith('/admin/');
-        if (!isAdminPath && state.matchedLocation != '/login') {
-          return '/admin/dashboard';
-        }
-        return null;
+      // 3. Admin AAL2 guarding remains tied to the legacy admin role.
+      if (role == UserRole.admin && !authProvider.isAal2) {
+        return '/mfa-verify';
       }
 
       // 4. Role-based routing
       if (role == UserRole.patient) {
         // Enforce Email OTP Verification Gate
         if (authProvider.profile?.emailVerifiedAt == null) {
-          if (state.matchedLocation == '/verify') {
-            return null; // Stay on verify screen
-          }
+        if (location == '/verify') {
+          return null; // Stay on verify screen
+        }
           return '/verify';
         }
 
         // If verified patient attempts to visit verify screen, redirect them away
-        if (state.matchedLocation == '/verify') {
+        if (location == '/verify') {
           return '/patient';
         }
 
@@ -161,19 +197,34 @@ class AppRouter {
         }
 
         // Authenticated & Consented Patient redirection
-        if (isLoggingIn || isRegistering || isConsenting || state.matchedLocation == '/' || state.matchedLocation == '/verify') {
+        if (isLoggingIn || isRegistering || isConsenting || location == '/' || location == '/verify') {
           return '/patient';
         }
 
         // Patient trying to access staff/admin routes is redirected to /patient
-        if (state.matchedLocation.startsWith('/staff/') || 
-            state.matchedLocation.startsWith('/reception/') ||
-            state.matchedLocation.startsWith('/department/') ||
-            state.matchedLocation.startsWith('/admin/')) {
+        if (location.startsWith('/staff/') ||
+            location.startsWith('/reception/') ||
+            location.startsWith('/department/') ||
+            location.startsWith('/admin/') ||
+            location.startsWith('/specialist/')) {
           return '/patient';
         }
 
         return null; // Allow patient routes
+      }
+
+      if (!authProvider.usesLegacyPermissionFallback) {
+        return _permissionRedirect(location);
+      }
+
+      // 4b. Legacy fallback routing. This activates when role_id is missing or
+      // permissions cannot be loaded, and preserves the old production behavior.
+      if (role == UserRole.admin) {
+        final isAdminPath = location.startsWith('/admin/');
+        if (!isAdminPath && location != '/login') {
+          return '/admin/dashboard';
+        }
+        return null;
       }
 
       // 5. Staff Roles (receptionist, departmentStaff, medicalSpecialist)
@@ -182,7 +233,7 @@ class AppRouter {
           role == UserRole.medicalSpecialist) {
         
         // Block other staff roles from admin paths
-        if (state.matchedLocation.startsWith('/admin/')) {
+        if (location.startsWith('/admin/')) {
           if (role == UserRole.receptionist) {
             return '/reception/queue';
           } else if (role == UserRole.departmentStaff) {
@@ -192,10 +243,10 @@ class AppRouter {
           }
         }
 
-        final isStaffPath = state.matchedLocation.startsWith('/staff/') || 
-                            state.matchedLocation.startsWith('/reception/') ||
-                            state.matchedLocation.startsWith('/department/') ||
-                            state.matchedLocation.startsWith('/specialist/');
+        final isStaffPath = location.startsWith('/staff/') ||
+                            location.startsWith('/reception/') ||
+                            location.startsWith('/department/') ||
+                            location.startsWith('/specialist/');
         final isCommonPath = isLoggingIn || isRegistering || isConsenting;
 
         // Staff trying to access / or patient routes are routed to their home
@@ -211,7 +262,7 @@ class AppRouter {
 
         // Enforce staff role guards (cross-role isolation)
         if (role == UserRole.receptionist) {
-          if (!state.matchedLocation.startsWith('/reception/')) {
+          if (!location.startsWith('/reception/')) {
             return '/reception/queue';
           }
         }
@@ -221,12 +272,12 @@ class AppRouter {
             authProvider.signOut();
             return '/login';
           }
-          if (!state.matchedLocation.startsWith('/department/')) {
+          if (!location.startsWith('/department/')) {
             return '/department/queue';
           }
         }
         if (role == UserRole.medicalSpecialist) {
-          if (!state.matchedLocation.startsWith('/specialist/')) {
+          if (!location.startsWith('/specialist/')) {
             return '/specialist/dashboard';
           }
         }
@@ -393,14 +444,20 @@ class AppRouter {
         path: '/reception/document/:submissionId',
         builder: (context, state) {
           final submissionId = state.pathParameters['submissionId']!;
-          return DocumentValidationScreen(submissionId: submissionId);
+          return DocumentValidationScreen(
+            submissionId: submissionId,
+            returnRoute: '/reception/queue',
+          );
         },
       ),
       GoRoute(
         path: '/admin/document/:submissionId',
         builder: (context, state) {
           final submissionId = state.pathParameters['submissionId']!;
-          return DocumentValidationScreen(submissionId: submissionId);
+          return DocumentValidationScreen(
+            submissionId: submissionId,
+            returnRoute: '/admin/queue',
+          );
         },
       ),
       ShellRoute(

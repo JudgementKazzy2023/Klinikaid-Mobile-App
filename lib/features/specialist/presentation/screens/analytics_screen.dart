@@ -141,6 +141,20 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       ),
                       const SizedBox(height: 6),
                       Text(
+                        'Email: ${patient.emailDisplay}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Contact: ${patient.contactNumberDisplay}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
                         'Age: ${_calculateAge(patient.dateOfBirth)} • Gender: ${patient.gender} • DOB: ${patient.dateOfBirth.year}-${patient.dateOfBirth.month.toString().padLeft(2, '0')}-${patient.dateOfBirth.day.toString().padLeft(2, '0')}',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
@@ -192,7 +206,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 // 2. Trajectory selector
                 DropdownButtonFormField<String>(
                   key: const Key('parameter_selector_dropdown'),
-                  value: provider.selectedParameter,
+                  initialValue: provider.selectedParameter,
                   hint: const Text('Select parameter'),
                   decoration: InputDecoration(
                     labelText: 'Diagnostic Trajectory for parameter',

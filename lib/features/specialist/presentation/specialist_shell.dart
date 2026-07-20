@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/permissions/permission_constants.dart';
+import '../../auth/presentation/providers/auth_provider.dart';
 import 'providers/specialist_provider.dart';
 
 class SpecialistShell extends StatelessWidget {
@@ -10,6 +12,7 @@ class SpecialistShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final auth = Provider.of<AuthProvider>(context, listen: false);
     SpecialistProvider? parentProvider;
     try {
       parentProvider = Provider.of<SpecialistProvider>(context, listen: false);
@@ -21,7 +24,18 @@ class SpecialistShell extends StatelessWidget {
           ChangeNotifierProvider<SpecialistProvider>.value(value: parentProvider)
         else
           ChangeNotifierProvider<SpecialistProvider>(
-            create: (context) => SpecialistProvider()..loadDashboard()..loadDirectory(),
+            create: (context) {
+              final provider = SpecialistProvider();
+              if (auth.usesLegacyPermissionFallback ||
+                  auth.hasPermission(PermissionConstants.specialistAnalytics)) {
+                provider.loadDashboard();
+              }
+              if (auth.usesLegacyPermissionFallback ||
+                  auth.hasPermission(PermissionConstants.specialistPatients)) {
+                provider.loadDirectory();
+              }
+              return provider;
+            },
           ),
       ],
       child: Scaffold(
@@ -35,30 +49,47 @@ class SpecialistShell extends StatelessWidget {
 class _SpecialistBottomNavBar extends StatelessWidget {
   const _SpecialistBottomNavBar();
 
-  int _calculateSelectedIndex(BuildContext context) {
-    final String location = GoRouterState.of(context).matchedLocation;
-    if (location == '/specialist/patients') return 1;
-    if (location == '/specialist/profile') return 2;
-    return 0; // /specialist/dashboard
+  List<_SpecialistNavItem> _items(BuildContext context) {
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final legacyFallback = auth.usesLegacyPermissionFallback;
+    return [
+      if (legacyFallback || auth.hasPermission(PermissionConstants.specialistAnalytics))
+        const _SpecialistNavItem(
+          path: '/specialist/dashboard',
+          icon: Icons.dashboard_outlined,
+          activeIcon: Icons.dashboard_rounded,
+          label: 'Dashboard',
+        ),
+      if (legacyFallback || auth.hasPermission(PermissionConstants.specialistPatients))
+        const _SpecialistNavItem(
+          path: '/specialist/patients',
+          icon: Icons.people_outline_rounded,
+          activeIcon: Icons.people_rounded,
+          label: 'My Patients',
+        ),
+      const _SpecialistNavItem(
+        path: '/specialist/profile',
+        icon: Icons.person_outline_rounded,
+        activeIcon: Icons.person_rounded,
+        label: 'Profile',
+      ),
+    ];
   }
 
-  void _onItemTapped(int index, BuildContext context) {
-    switch (index) {
-      case 0:
-        context.go('/specialist/dashboard');
-        break;
-      case 1:
-        context.go('/specialist/patients');
-        break;
-      case 2:
-        context.go('/specialist/profile');
-        break;
-    }
+  int _calculateSelectedIndex(BuildContext context, List<_SpecialistNavItem> items) {
+    final String location = GoRouterState.of(context).matchedLocation;
+    final index = items.indexWhere((item) => item.path == location);
+    return index < 0 ? 0 : index;
+  }
+
+  void _onItemTapped(int index, BuildContext context, List<_SpecialistNavItem> items) {
+    context.go(items[index].path);
   }
 
   @override
   Widget build(BuildContext context) {
-    final selectedIndex = _calculateSelectedIndex(context);
+    final items = _items(context);
+    final selectedIndex = _calculateSelectedIndex(context, items);
 
     return Container(
       decoration: BoxDecoration(
@@ -68,31 +99,37 @@ class _SpecialistBottomNavBar extends StatelessWidget {
       ),
       child: BottomNavigationBar(
         currentIndex: selectedIndex,
-        onTap: (index) => _onItemTapped(index, context),
+        onTap: (index) => _onItemTapped(index, context, items),
         backgroundColor: Theme.of(context).colorScheme.surface,
         selectedItemColor: Theme.of(context).colorScheme.primary,
         unselectedItemColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
         type: BottomNavigationBarType.fixed,
         selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
         unselectedLabelStyle: const TextStyle(fontSize: 11),
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.dashboard_outlined),
-            activeIcon: Icon(Icons.dashboard_rounded),
-            label: 'Dashboard',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.people_outline_rounded),
-            activeIcon: Icon(Icons.people_rounded),
-            label: 'My Patients',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline_rounded),
-            activeIcon: Icon(Icons.person_rounded),
-            label: 'Profile',
-          ),
-        ],
+        items: items
+            .map(
+              (item) => BottomNavigationBarItem(
+                icon: Icon(item.icon),
+                activeIcon: Icon(item.activeIcon),
+                label: item.label,
+              ),
+            )
+            .toList(),
       ),
     );
   }
+}
+
+class _SpecialistNavItem {
+  final String path;
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
+
+  const _SpecialistNavItem({
+    required this.path,
+    required this.icon,
+    required this.activeIcon,
+    required this.label,
+  });
 }

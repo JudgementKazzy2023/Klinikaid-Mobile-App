@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import '../../../../core/models/specialist_patient.dart';
 import '../../../department/domain/lab_reference_ranges.dart';
 import '../../../department/domain/flag_calculator.dart';
 import '../providers/specialist_provider.dart';
@@ -110,6 +109,20 @@ class _RecordEntryScreenState extends State<RecordEntryScreen> {
                           color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
                         ),
                       ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Email: ${patient.emailDisplay}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Contact: ${patient.contactNumberDisplay}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -149,7 +162,7 @@ class _RecordEntryScreenState extends State<RecordEntryScreen> {
               // Diagnostic Group Dropdown Selector
               DropdownButtonFormField<String>(
                 key: const Key('diagnostic_group_dropdown'),
-                value: recordProvider.selectedTestType,
+                initialValue: recordProvider.selectedTestType,
                 hint: const Text('Select Diagnostic Group'),
                 decoration: InputDecoration(
                   labelText: 'Diagnostic Group',
@@ -255,7 +268,7 @@ class _RecordEntryScreenState extends State<RecordEntryScreen> {
                               ),
                               const SizedBox(height: 12),
                               TextField(
-                                key: Key('param_input_${paramName}'),
+                                key: Key('param_input_$paramName'),
                                 controller: controller,
                                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                 inputFormatters: [
@@ -400,6 +413,9 @@ class _RecordEntryScreenState extends State<RecordEntryScreen> {
                                   );
 
                                   if (confirmed != true) {
+                                    return;
+                                  }
+                                  if (!context.mounted) {
                                     return;
                                   }
                                 }

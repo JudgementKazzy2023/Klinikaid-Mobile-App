@@ -8,8 +8,8 @@ import '../../../../core/models/patient.dart';
 import '../../../../core/cache/local_database.dart';
 import '../../../ocr/domain/quality_assessment.dart';
 import '../../../ocr/domain/quality_thresholds.dart';
+import '../../clinic_test_catalog.dart';
 import '../../../../features/patient/templates/document_templates.dart';
-import '../../../../features/patient/submissions/document_dedup.dart';
 
 class SubmitDocumentScreen extends StatefulWidget {
   const SubmitDocumentScreen({super.key});
@@ -21,6 +21,8 @@ class SubmitDocumentScreen extends StatefulWidget {
 class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with WidgetsBindingObserver {
   final ImagePicker _picker = ImagePicker();
   String? _selectedDocumentType;
+  List<String> _selectedTestIds = [];
+  String? _initializedDetectionSignature;
   
   @override
   void initState() {
@@ -55,6 +57,12 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
         // Trigger on-device OCR via provider
         await Provider.of<DocumentSubmissionProvider>(context, listen: false)
             .processOnDeviceOcr(image.path, patient);
+        if (!mounted) return;
+        final detectedTests = Provider.of<DocumentSubmissionProvider>(context, listen: false).detectedTests;
+        setState(() {
+          _selectedTestIds = detectedTests.map((test) => test.id).toList();
+          _initializedDetectionSignature = _detectionSignature(detectedTests);
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -72,6 +80,8 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
     if (mounted) {
       setState(() {
         _selectedDocumentType = null;
+        _selectedTestIds = [];
+        _initializedDetectionSignature = null;
       });
       Provider.of<DocumentSubmissionProvider>(context, listen: false).clearOcrState();
     }
@@ -135,6 +145,7 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
       fileExtension: ext,
       patient: patient,
       documentType: _selectedDocumentType!,
+      selectedTestIds: _selectedTestIds,
     );
  
     if (mounted) {
@@ -335,6 +346,12 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
 
   Widget _buildPreviewAndValidationCard(Patient patient, DocumentSubmissionProvider provider) {
     final metadata = provider.preScreenMetadata;
+    final detectedTests = provider.detectedTests;
+    final detectionSignature = _detectionSignature(detectedTests);
+    if (detectedTests.isNotEmpty && _initializedDetectionSignature != detectionSignature) {
+      _selectedTestIds = detectedTests.map((test) => test.id).toList();
+      _initializedDetectionSignature = detectionSignature;
+    }
     
     final qualityAssessmentMap = metadata?['quality_assessment'] as Map<String, dynamic>?;
     final QualityAssessment? assessment = qualityAssessmentMap != null 
@@ -568,6 +585,11 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
               ),
             ],
 
+            if (detectedTests.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              _buildDetectedTestsSelection(detectedTests, provider.isLoading),
+            ],
+
             const SizedBox(height: 20),
             Text(
               'Select Document Type *',
@@ -576,7 +598,7 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
               key: const Key('document_type_picker'),
-              value: _selectedDocumentType,
+              initialValue: _selectedDocumentType,
               decoration: InputDecoration(
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
@@ -625,6 +647,140 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
               ],
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  String _detectionSignature(List<ClinicTest> tests) {
+    return tests.map((test) => test.id).join('|');
+  }
+
+  Widget _buildDetectedTestsSelection(List<ClinicTest> detectedTests, bool disabled) {
+    return Container(
+      key: const Key('detected_tests_section'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D7C66).withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF0D7C66).withValues(alpha: 0.22)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.checklist_rounded, color: Color(0xFF0D7C66), size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Detected tests from your lab request',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Select the tests you want sent for receptionist review.',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.65),
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Preparation notes are general guidance only. Confirm final instructions with the clinic.',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...detectedTests.map((test) {
+            final selected = _selectedTestIds.contains(test.id);
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: disabled
+                    ? null
+                    : () {
+                        setState(() {
+                          if (selected) {
+                            _selectedTestIds.remove(test.id);
+                          } else {
+                            _selectedTestIds.add(test.id);
+                          }
+                        });
+                      },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFF0D7C66).withValues(alpha: 0.2)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Checkbox(
+                        key: Key('detected_test_checkbox_${test.id}'),
+                        value: selected,
+                        onChanged: disabled
+                            ? null
+                            : (value) {
+                                setState(() {
+                                  if (value == true) {
+                                    if (!_selectedTestIds.contains(test.id)) {
+                                      _selectedTestIds.add(test.id);
+                                    }
+                                  } else {
+                                    _selectedTestIds.remove(test.id);
+                                  }
+                                });
+                              },
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              test.label,
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurface,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              clinicTestPrepInstructions[test.id] ?? '',
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.62),
+                                fontSize: 12,
+                                height: 1.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
         ],
       ),
     );

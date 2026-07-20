@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../providers/specialist_provider.dart';
 import '../widgets/add_patient_form.dart';
-import '../../../../core/models/specialist_patient.dart';
 
 class SpecialistDirectoryScreen extends StatefulWidget {
   const SpecialistDirectoryScreen({super.key});
@@ -220,6 +219,20 @@ class _SpecialistDirectoryScreenState extends State<SpecialistDirectoryScreen> {
                                                       const SizedBox(height: 4),
                                                       Text(
                                                         'Code: ${patient.patientCode} • ${patient.age}y/o • ${patient.gender.toUpperCase()}',
+                                                        style: theme.textTheme.bodySmall?.copyWith(
+                                                          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                                                        ),
+                                                      ),
+                                                      const SizedBox(height: 4),
+                                                      Text(
+                                                        'Email: ${patient.emailDisplay}',
+                                                        style: theme.textTheme.bodySmall?.copyWith(
+                                                          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                                                        ),
+                                                      ),
+                                                      const SizedBox(height: 4),
+                                                      Text(
+                                                        'Contact: ${patient.contactNumberDisplay}',
                                                         style: theme.textTheme.bodySmall?.copyWith(
                                                           color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
                                                         ),

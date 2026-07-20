@@ -2,7 +2,7 @@ class TermsAndConditionsContent {
   static const String termsText = '''
 KlinikAid Mobile — Terms and Conditions
 
-Last updated: [DEPLOYMENT DATE]
+Last updated: July 14, 2026
 
 Please read these Terms and Conditions carefully before using the
 KlinikAid Mobile application operated by Bloodcare Medical Laboratory.
@@ -13,10 +13,8 @@ these terms. If you do not agree, please do not use the application.
 1. ACCEPTANCE OF TERMS
 
 By registering for and using KlinikAid Mobile, you confirm that you
-are at least 13 years old and that you have the legal capacity to
-enter into these terms. If you are between 13 and 18 years old, you
-represent that a parent or guardian is aware of your use of this
-application for laboratory services.
+are at least 18 years old and that you have the legal capacity to
+enter into these terms.
 
 
 2. DESCRIPTION OF SERVICE

@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../providers/admin_provider.dart';
+import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../../core/models/system_log.dart';
 import '../../../../core/models/chatbot_log.dart';
+import '../../../../core/permissions/permission_constants.dart';
 import '../../../../core/utils/date_formatter.dart';
 import '../../../../core/utils/csv_export.dart';
-import 'package:media_store_plus/media_store_plus.dart';
 
 class AdminLogsScreen extends StatefulWidget {
   const AdminLogsScreen({super.key});
@@ -15,8 +16,18 @@ class AdminLogsScreen extends StatefulWidget {
   State<AdminLogsScreen> createState() => _AdminLogsScreenState();
 }
 
+enum _AdminLogTabType { systemEvents, chatbotAudit, apiCost }
+
+class _AdminLogTab {
+  final String label;
+  final _AdminLogTabType type;
+
+  const _AdminLogTab(this.label, this.type);
+}
+
 class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  late final List<_AdminLogTab> _tabs;
 
   // System Event filters state
   String _eventTypeFilter = 'All';
@@ -28,7 +39,23 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    var canSystemLogs = true;
+    var canChatbotLogs = true;
+    try {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      final legacyFallback = auth.usesLegacyPermissionFallback;
+      canSystemLogs = legacyFallback || auth.hasPermission(PermissionConstants.systemLogsRead);
+      canChatbotLogs = legacyFallback || auth.hasPermission(PermissionConstants.chatbotLogsRead);
+    } catch (_) {
+      canSystemLogs = true;
+      canChatbotLogs = true;
+    }
+    _tabs = [
+      if (canSystemLogs) const _AdminLogTab('System Events', _AdminLogTabType.systemEvents),
+      if (canChatbotLogs) const _AdminLogTab('Chatbot Audit', _AdminLogTabType.chatbotAudit),
+      if (canChatbotLogs) const _AdminLogTab('API Cost Tracker', _AdminLogTabType.apiCost),
+    ];
+    _tabController = TabController(length: _tabs.isEmpty ? 1 : _tabs.length, vsync: this);
     
 
 
@@ -67,7 +94,9 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
 
   void _loadTab(BuildContext context, int index) {
     final provider = Provider.of<AdminProvider>(context, listen: false);
-    if (index == 0) {
+    if (_tabs.isEmpty) return;
+    final tab = _tabs[index].type;
+    if (tab == _AdminLogTabType.systemEvents) {
       provider.loadSystemEvents(
         eventType: _eventTypeFilter,
         userSearch: _userSearchController.text,
@@ -75,9 +104,9 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
         startDate: _startDate,
         endDate: _endDate,
       );
-    } else if (index == 1) {
+    } else if (tab == _AdminLogTabType.chatbotAudit) {
       provider.loadChatbotAudit();
-    } else if (index == 2) {
+    } else if (tab == _AdminLogTabType.apiCost) {
       provider.loadApiCost();
     }
   }
@@ -194,21 +223,25 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
             labelColor: theme.colorScheme.primary,
             unselectedLabelColor: theme.colorScheme.onSurface.withValues(alpha: 0.6),
             indicatorColor: theme.colorScheme.primary,
-            tabs: const [
-              Tab(text: 'System Events'),
-              Tab(text: 'Chatbot Audit'),
-              Tab(text: 'API Cost Tracker'),
-            ],
+            tabs: _tabs.isEmpty
+                ? const [Tab(text: 'No Access')]
+                : _tabs.map((tab) => Tab(text: tab.label)).toList(),
           ),
         ),
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [
-          _buildSystemEventsTab(context),
-          _buildChatbotAuditTab(context),
-          _buildApiCostTrackerTab(context),
-        ],
+        children: _tabs.isEmpty
+            ? const [Center(child: Text('You do not have access to audit logs.'))]
+            : _tabs.map((tab) {
+                if (tab.type == _AdminLogTabType.systemEvents) {
+                  return _buildSystemEventsTab(context);
+                }
+                if (tab.type == _AdminLogTabType.chatbotAudit) {
+                  return _buildChatbotAuditTab(context);
+                }
+                return _buildApiCostTrackerTab(context);
+              }).toList(),
       ),
     );
   }

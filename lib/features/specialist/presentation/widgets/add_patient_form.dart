@@ -10,6 +10,8 @@ class AddPatientForm extends StatefulWidget {
 }
 
 class AddPatientFormState extends State<AddPatientForm> {
+  static const int _minimumPatientAge = 18;
+
   final _formKey = GlobalKey<FormState>();
   final _firstNameController = TextEditingController();
   final _lastNameController = TextEditingController();
@@ -43,7 +45,8 @@ class AddPatientFormState extends State<AddPatientForm> {
 
   Future<void> _selectDob(BuildContext context) async {
     final now = DateTime.now();
-    final initialDate = selectedDob ?? now.subtract(const Duration(days: 365 * 13)); // 13y/o default
+    final initialDate =
+        selectedDob ?? now.subtract(const Duration(days: 365 * _minimumPatientAge));
     final picked = await showDatePicker(
       context: context,
       initialDate: initialDate,
@@ -89,9 +92,9 @@ class AddPatientFormState extends State<AddPatientForm> {
           (now.month == selectedDob!.month && now.day < selectedDob!.day)) {
         age--;
       }
-      if (age < 13) {
+      if (age < _minimumPatientAge) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Patient must be 13 years or older.')),
+          const SnackBar(content: Text('Patient must be 18 years or older.')),
         );
         setState(() {
           _isSubmitting = false;
@@ -245,11 +248,11 @@ class AddPatientFormState extends State<AddPatientForm> {
                           (now.month == selectedDob!.month && now.day < selectedDob!.day)) {
                         age--;
                       }
-                      if (age < 13) {
+                      if (age < _minimumPatientAge) {
                         return Padding(
                           padding: const EdgeInsets.only(left: 12.0),
                           child: Text(
-                            'Patient must be 13 years or older.',
+                            'Patient must be 18 years or older.',
                             style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
                           ),
                         );
@@ -262,7 +265,7 @@ class AddPatientFormState extends State<AddPatientForm> {
 
                 // Gender Dropdown
                 DropdownButtonFormField<String>(
-                  value: _gender,
+                  initialValue: _gender,
                   decoration: const InputDecoration(
                     labelText: 'Gender*',
                     border: OutlineInputBorder(),
