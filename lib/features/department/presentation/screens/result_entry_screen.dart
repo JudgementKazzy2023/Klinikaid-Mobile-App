@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/queue_completion_banner.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
@@ -677,12 +678,21 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
     }
 
     if (success) {
-      scaffoldMessenger.showSnackBar(
+      final warning = provider.queueCompletionWarning;
+      if (warning != null) {
+        scaffoldMessenger.hideCurrentSnackBar();
+        scaffoldMessenger.removeCurrentMaterialBanner();
+        scaffoldMessenger.showMaterialBanner(queueCompletionBanner(
+          warning, scaffoldMessenger.hideCurrentMaterialBanner,
+        ));
+      } else {
+        scaffoldMessenger.showSnackBar(
         const SnackBar(
           content: Text('Test results submitted successfully.'),
           backgroundColor: Color(0xFF047857),
         ),
       );
+      }
       goRouter.pop();
     }
   }

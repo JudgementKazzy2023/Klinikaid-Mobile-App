@@ -445,7 +445,7 @@ class _DepartmentQueueScreenState extends State<DepartmentQueueScreen> {
                 const SizedBox(height: 16),
                 Text(
                   _searchController.text.isEmpty
-                      ? "No patients queued. Today's queue is empty."
+                      ? 'No active patients queued.'
                       : 'No patients found matching your search.',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyLarge?.copyWith(

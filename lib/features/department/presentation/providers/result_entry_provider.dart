@@ -11,6 +11,8 @@ class ResultEntryProvider extends ChangeNotifier {
 
   bool _isLoading = false;
   String? _errorMessage;
+  String? _queueCompletionWarning;
+  String? get queueCompletionWarning => _queueCompletionWarning;
 
   // Form State
   String _selectedLabGroup = 'Complete Blood Count (CBC)';
@@ -99,6 +101,7 @@ class ResultEntryProvider extends ChangeNotifier {
   }
 
   void reset() {
+    _queueCompletionWarning = null;
     _isLoading = false;
     _errorMessage = null;
     _parameterValues.clear();
@@ -115,6 +118,7 @@ class ResultEntryProvider extends ChangeNotifier {
     required String patientId,
     required String? gender,
   }) async {
+    _queueCompletionWarning = null;
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -189,6 +193,11 @@ class ResultEntryProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
       return true;
+    } on QueueCompletionFailure {
+      _queueCompletionWarning = QueueCompletionFailure.message;
+      _isLoading = false;
+      notifyListeners();
+      return true;
     } catch (e) {
       _isLoading = false;
       _errorMessage = FailureMapper.fromException(e).message;
@@ -202,6 +211,7 @@ class ResultEntryProvider extends ChangeNotifier {
     required String patientId,
     required String testName,
   }) async {
+    _queueCompletionWarning = null;
     final nameTrimmed = testName.trim();
     final findingsTrimmed = _findings.trim();
     final impressionTrimmed = _impression.trim();
@@ -224,6 +234,11 @@ class ResultEntryProvider extends ChangeNotifier {
         impression: impressionTrimmed,
         notes: _notes,
       );
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } on QueueCompletionFailure {
+      _queueCompletionWarning = QueueCompletionFailure.message;
       _isLoading = false;
       notifyListeners();
       return true;

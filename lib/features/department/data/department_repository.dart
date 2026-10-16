@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/models/patient_queue.dart';
 import '../../../core/models/department_record.dart';
@@ -12,6 +11,11 @@ class DepartmentUnassignedException implements Exception {
   
   @override
   String toString() => message;
+}
+
+class QueueCompletionFailure implements Exception {
+  const QueueCompletionFailure();
+  static const message = 'Results saved, but queue completion could not be confirmed. Refresh the queue before taking further action. Do not resubmit these results.';
 }
 
 /// Compute the start of today in PHT (UTC+8), expressed as a UTC DateTime.
@@ -67,7 +71,9 @@ class LabResultRow {
 }
 
 class DepartmentRepository {
-  SupabaseClient get _client => SupabaseService.client;
+  DepartmentRepository({SupabaseClient? client}) : _injectedClient = client;
+  final SupabaseClient? _injectedClient;
+  SupabaseClient get _client => _injectedClient ?? SupabaseService.client;
 
   String? adminDepartmentOverride;
 
@@ -98,21 +104,17 @@ class DepartmentRepository {
     return dept;
   }
 
-  /// Fetches today's queue entries for the user's department.
+  /// Fetches all active queue entries for the user's department.
   /// No parameters to enforce server-side scoping.
-  Future<List<PatientQueue>> getDailyQueue() async {
+  Future<List<PatientQueue>> getActiveQueue() async {
     try {
       final department = await _getCurrentUserDept();
-      
-      final now = DateTime.now();
-      final startOfToday = DateTime(now.year, now.month, now.day).toUtc().toIso8601String();
       
       final response = await _client
           .from('patient_queue')
           .select('*, patient:patients(*)')
           .eq('department', department)
           .inFilter('status', ['waiting', 'in_progress'])
-          .gte('created_at', startOfToday)
           .order('created_at', ascending: true);
           
       return (response as List)
@@ -175,20 +177,18 @@ class DepartmentRepository {
           .insert(rows.map((row) => row.toJson()).toList());
 
       // 2. Sequential queue update with no transaction/RPC fallback
-      final startOfToday = phtStartOfTodayUtc();
       try {
         await _client
             .from('patient_queue')
             .update({'status': 'completed'})
             .eq('patient_id', patientId)
             .eq('department', department)
-            .inFilter('status', ['waiting', 'in_progress'])
-            .gte('created_at', startOfToday.toIso8601String());
+            .inFilter('status', ['waiting', 'in_progress']);
       } catch (e) {
-        // Log warning and proceed (web parity)
-        debugPrint('Warning: Failed to update queue status in D2: $e');
+        throw const QueueCompletionFailure();
       }
     } catch (e) {
+      if (e is QueueCompletionFailure) rethrow;
       throw FailureMapper.fromException(e);
     }
   }
@@ -245,20 +245,18 @@ class DepartmentRepository {
       await _client.from('department_records').insert(rowsJson);
 
       // 2. Sequential queue update with no transaction/RPC fallback
-      final startOfToday = phtStartOfTodayUtc();
       try {
         await _client
             .from('patient_queue')
             .update({'status': 'completed'})
             .eq('patient_id', patientId)
             .eq('department', department)
-            .inFilter('status', ['waiting', 'in_progress'])
-            .gte('created_at', startOfToday.toIso8601String());
+            .inFilter('status', ['waiting', 'in_progress']);
       } catch (e) {
-        // Log warning and proceed (web parity)
-        debugPrint('Warning: Failed to update queue status in D2: $e');
+        throw const QueueCompletionFailure();
       }
     } catch (e) {
+      if (e is QueueCompletionFailure) rethrow;
       throw FailureMapper.fromException(e);
     }
   }

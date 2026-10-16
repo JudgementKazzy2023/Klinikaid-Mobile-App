@@ -31,19 +31,24 @@ class _SpecialistDirectoryScreenState extends State<SpecialistDirectoryScreen> {
     );
   }
 
-  void _confirmDelete(BuildContext context, String patientId, String name) {
+  void _confirmArchive(BuildContext context, String patientId, String name) {
     final theme = Theme.of(context);
     final provider = Provider.of<SpecialistProvider>(context, listen: false);
     showDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete Private Patient'),
+      barrierDismissible: false,
+      builder: (dialogContext) => ListenableBuilder(
+        listenable: provider,
+        builder: (_, _) => PopScope(
+        canPop: !provider.isArchiving,
+        child: AlertDialog(
+        title: const Text('Archive Private Patient'),
         content: Text(
-          'Are you sure you want to delete $name and all associated records? This action is permanent and cannot be undone.',
+          'Archive $name? The patient and associated records will be retained but hidden from active views. They cannot be restored through this app.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
+            onPressed: provider.isArchiving ? null : () => Navigator.of(dialogContext).pop(),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
@@ -51,25 +56,26 @@ class _SpecialistDirectoryScreenState extends State<SpecialistDirectoryScreen> {
               backgroundColor: theme.colorScheme.error,
               foregroundColor: theme.colorScheme.onError,
             ),
-            onPressed: () async {
-              final success = await provider.deletePatient(patientId);
+            onPressed: provider.isArchiving ? null : () async {
+              final messenger = ScaffoldMessenger.of(context);
+              final success = await provider.archivePatient(patientId);
               if (dialogContext.mounted) {
                 Navigator.of(dialogContext).pop();
                 if (success) {
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                    const SnackBar(content: Text('Patient deleted successfully.')),
+                  messenger.showSnackBar(
+                    SnackBar(content: Text(provider.errorMessage ?? 'Patient archived successfully.')),
                   );
                 } else {
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                    SnackBar(content: Text(provider.errorMessage ?? 'Failed to delete patient.')),
+                  messenger.showSnackBar(
+                    SnackBar(content: Text(provider.errorMessage ?? 'Patient could not be archived, refresh and try again.')),
                   );
                 }
               }
             },
-            child: const Text('Delete'),
+            child: Text(provider.isArchiving ? 'Archiving...' : 'Archive'),
           ),
         ],
-      ),
+      ))),
     );
   }
 
@@ -241,9 +247,9 @@ class _SpecialistDirectoryScreenState extends State<SpecialistDirectoryScreen> {
                                                   ),
                                                 ),
                                                 IconButton(
-                                                  icon: Icon(Icons.delete_outline_rounded, color: theme.colorScheme.error),
-                                                  tooltip: 'Delete Patient',
-                                                  onPressed: () => _confirmDelete(context, patient.id, patient.fullName),
+                                                  icon: Icon(Icons.archive_outlined, color: theme.colorScheme.error),
+                                                  tooltip: 'Archive Patient',
+                                                  onPressed: provider.isArchiving ? null : () => _confirmArchive(context, patient.id, patient.fullName),
                                                 ),
                                               ],
                                             ),

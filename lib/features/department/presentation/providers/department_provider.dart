@@ -26,14 +26,14 @@ class DepartmentProvider extends ChangeNotifier {
 
   DepartmentProvider(this.department);
 
-  /// Loads today's department-scoped queue and recent records.
+  /// Loads the active department-scoped queue and recent records.
   Future<void> loadDashboard() async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      final queueFuture = _repo.getDailyQueue();
+      final queueFuture = _repo.getActiveQueue();
       final recordsFuture = _repo.getRecordsHistory();
 
       final results = await Future.wait([queueFuture, recordsFuture]);
@@ -56,7 +56,7 @@ class DepartmentProvider extends ChangeNotifier {
   /// Silently refreshes the department's queue.
   Future<void> quietFetchQueue() async {
     try {
-      final queue = await _repo.getDailyQueue();
+      final queue = await _repo.getActiveQueue();
       _queueEntries = queue;
       notifyListeners();
     } catch (e) {
@@ -65,7 +65,7 @@ class DepartmentProvider extends ChangeNotifier {
     }
   }
 
-  /// Subscribes to realtime events for today's queue scoped strictly to this department.
+  /// Subscribes to active queue updates scoped strictly to this department.
   void subscribeQueue() {
     if (_queueChannel != null) return;
 

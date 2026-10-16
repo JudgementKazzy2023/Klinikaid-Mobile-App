@@ -168,7 +168,7 @@ class _AdminRecordsScreenState extends State<AdminRecordsScreen> {
                 unselectedLabelColor: theme.colorScheme.onSurface.withValues(alpha: 0.6),
                 indicatorColor: theme.colorScheme.primary,
                 tabs: const [
-                  Tab(text: 'Daily Queue'),
+                  Tab(text: 'Active Queue'),
                   Tab(text: 'Records History'),
                 ],
               ),
@@ -177,7 +177,7 @@ class _AdminRecordsScreenState extends State<AdminRecordsScreen> {
               Expanded(
                 child: TabBarView(
                   children: [
-                    // Daily Queue Tab
+                    // Active Queue Tab
                     provider.isDeptQueueLoading
                         ? const Center(child: CircularProgressIndicator())
                         : RefreshIndicator(
@@ -421,7 +421,7 @@ class _AdminRecordsScreenState extends State<AdminRecordsScreen> {
                 const SizedBox(height: 16),
                 Text(
                   _searchController.text.isEmpty
-                      ? "No patients queued. Today's queue is empty."
+                      ? 'No active patients queued.'
                       : 'No patients found matching your search.',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyLarge?.copyWith(

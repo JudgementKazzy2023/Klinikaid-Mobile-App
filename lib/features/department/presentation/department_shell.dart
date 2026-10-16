@@ -50,7 +50,7 @@ class _DepartmentBottomNavBar extends StatelessWidget {
           path: '/department/queue',
           icon: Icons.playlist_play_rounded,
           activeIcon: Icons.playlist_play_rounded,
-          label: 'Daily Queue',
+          label: 'Active Queue',
         ),
       if (canRecords)
         const _DepartmentNavItem(

@@ -5,7 +5,9 @@ import '../../../../core/models/specialist_patient.dart';
 import '../../../../core/models/specialist_record.dart';
 
 class SpecialistRepository {
-  SupabaseClient get _client => SupabaseService.client;
+  SpecialistRepository({SupabaseClient? client}) : _injectedClient = client;
+  final SupabaseClient? _injectedClient;
+  SupabaseClient get _client => _injectedClient ?? SupabaseService.client;
 
   /// Fetch all private patients of the logged-in specialist.
   /// RLS auto-scopes query to auth.uid().
@@ -62,13 +64,12 @@ class SpecialistRepository {
     }
   }
 
-  /// Delete a private patient.
-  Future<void> deletePatient(String patientId) async {
+  /// Archive the patient and records atomically through the ownership-checked RPC.
+  Future<bool> archivePatient(String patientId) async {
     try {
-      await _client
-          .from('specialist_patients')
-          .delete()
-          .eq('id', patientId);
+      final result = await _client.rpc('archive_specialist_patient',
+          params: {'p_patient_id': patientId});
+      return result == true;
     } catch (e) {
       throw FailureMapper.fromException(e);
     }

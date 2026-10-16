@@ -190,25 +190,46 @@ class SpecialistProvider extends ChangeNotifier {
     }
   }
 
-  /// Deletes a private patient and refreshes dashboard + directory.
-  Future<bool> deletePatient(String patientId) async {
+  bool _isArchiving = false;
+  bool get isArchiving => _isArchiving;
+
+  /// A confirmed archive remains successful even if a subsequent read fails.
+  Future<bool> archivePatient(String patientId) async {
+    if (_isArchiving) return false;
+    _isArchiving = true;
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      await _repo.deletePatient(patientId);
-      await loadDirectory();
-      final dashboardData = await _repo.getDashboardRawData();
-      _computeDashboardAggregates(dashboardData);
-      _isLoading = false;
-      notifyListeners();
+      final archived = await _repo.archivePatient(patientId);
+      if (!archived) {
+        await loadDirectory();
+        _errorMessage = 'Patient could not be archived, refresh and try again.';
+        return false;
+      }
+      _directoryPatients.removeWhere((p) => p.id == patientId);
+      _searchResults.removeWhere((p) => p.id == patientId);
+      _recentlyUpdatedPatients.removeWhere((p) => p.id == patientId);
+      _criticalFlaggedResults = [];
+      _totalPatients = _directoryPatients.length;
+      _flaggedResults7Days = 0;
+      _activeModalities = 0;
+      try {
+        _directoryPatients = await _repo.getMyPatients();
+        search(_currentQuery);
+        _computeDashboardAggregates(await _repo.getDashboardRawData());
+      } catch (_) {
+        _errorMessage = 'Patient archived, but the latest data could not be loaded. Refresh to update the view.';
+      }
       return true;
     } catch (e) {
-      _isLoading = false;
-      _errorMessage = FailureMapper.fromException(e).message;
-      notifyListeners();
+      _errorMessage = 'Archive could not be confirmed. Refresh to check the patient before trying again.';
       return false;
+    } finally {
+      _isArchiving = false;
+      _isLoading = false;
+      notifyListeners();
     }
   }
 
