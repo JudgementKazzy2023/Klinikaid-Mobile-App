@@ -50,8 +50,8 @@ The application also embeds three specialized staff portals tailored to differen
 
 ## Acknowledgments
 - **Capstone Team**: Healthioneers
-  - Mobile Developer: `[Team Member Name / GitHub Handle]`
-  - Web Developers: `[Team Member Name]`, `[Team Member Name]`, `[Team Member Name]`
+  - Mobile Developer: Ralph Andre Garcia
+  - Web Developers: Jonrick Gabriel Simpao
 - **Institution**: FEU Diliman
 - **Project Sponsors**: Bloodcare Medical Laboratory & Web-Team Partners
 
