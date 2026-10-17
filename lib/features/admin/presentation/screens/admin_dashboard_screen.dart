@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/admin_read_error.dart';
 import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../providers/admin_provider.dart';
@@ -21,7 +22,10 @@ class AdminDashboardScreen extends StatelessWidget {
       return _buildErrorState(context, provider.dashboardError!, () => provider.loadDashboard());
     }
 
-    final data = provider.dashboardData ?? {};
+    if (provider.dashboardState == AdminReadState.notLoaded || provider.dashboardData == null) {
+      return AdminReadError(message: 'Dashboard has not been loaded.', onRetry: provider.loadDashboard);
+    }
+    final data = provider.dashboardData!;
     final int todayPatients = data['todayPatients'] as int? ?? 0;
     final int pendingReviews = data['pendingReviews'] as int? ?? 0;
     final int activeStaff = data['activeStaff'] as int? ?? 0;
@@ -142,7 +146,9 @@ class AdminDashboardScreen extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 16),
-                    if (recentEvents.isEmpty)
+                    if (data['recentEventsError'] != null)
+                      AdminReadError(message: data['recentEventsError'] as String, onRetry: provider.retryRecentEvents)
+                    else if (recentEvents.isEmpty)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 20.0),
                         child: Center(child: Text('No recent system events.')),

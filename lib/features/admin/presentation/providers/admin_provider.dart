@@ -10,6 +10,8 @@ import '../../../department/data/department_repository.dart';
 import '../../data/admin_repository.dart';
 import '../../domain/admin_rbac.dart';
 
+enum AdminReadState { notLoaded, loading, loaded, failed }
+
 class AdminProvider extends ChangeNotifier {
   final AdminRepository _repository;
   final RagDocumentsRepository _ragRepository;
@@ -118,19 +120,62 @@ class AdminProvider extends ChangeNotifier {
   String? get ragError => _ragError;
   List<RagDocument> get ragDocuments => _ragDocuments;
 
+  AdminReadState dashboardState = AdminReadState.notLoaded;
+  int _dashboardRequest = 0;
+  bool _dashboardHadSuccess = false;
+
+  AdminReadState logsState = AdminReadState.notLoaded;
+  int _logsRequest = 0;
+  bool _logsHadSuccess = false;
+
+  AdminReadState chatbotState = AdminReadState.notLoaded;
+  int _chatbotRequest = 0;
+  bool _chatbotHadSuccess = false;
+
+  AdminReadState costState = AdminReadState.notLoaded;
+  int _costRequest = 0;
+  bool _costHadSuccess = false;
+
+  Future<void> retryRecentEvents() async {
+    final data = _dashboardData;
+    if (data == null) return;
+    final request = _dashboardRequest;
+    try {
+      final events = await _repository.getSystemEvents(limit: 5);
+      if (request != _dashboardRequest) return;
+      _dashboardData = {...data, 'recentEvents': events, 'recentEventsError': null};
+    } catch (_) {
+      if (request != _dashboardRequest) return;
+      _dashboardData = {...data, 'recentEvents': <SystemLog>[], 'recentEventsError': 'Recent system events could not be loaded.'};
+    }
+    notifyListeners();
+  }
+
   // Actions
   Future<void> loadDashboard() async {
+    final request = ++_dashboardRequest;
+    final isRefresh = _dashboardHadSuccess;
     _isDashboardLoading = true;
     _dashboardError = null;
+    dashboardState = AdminReadState.loading;
     notifyListeners();
-
     try {
-      _dashboardData = await _repository.getDashboardData();
+      final data = await _repository.getDashboardData();
+      if (request != _dashboardRequest) return;
+      _dashboardData = data;
+      _dashboardHadSuccess = true;
+      dashboardState = AdminReadState.loaded;
     } catch (e) {
-      _dashboardError = e.toString();
+      if (request != _dashboardRequest) return;
+      // Initial failures have no prior payload; refresh failures must discard it.
+      if (isRefresh) { _dashboardData = null; }
+      _dashboardError = 'Could not load dashboard. Check your connection or access and retry.';
+      dashboardState = AdminReadState.failed;
     } finally {
-      _isDashboardLoading = false;
-      notifyListeners();
+      if (request == _dashboardRequest) {
+        _isDashboardLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -199,66 +244,90 @@ class AdminProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> loadSystemEvents({
-    String? eventType,
-    String? userSearch,
-    DateTime? startDate,
-    DateTime? endDate,
-    String? textSearch,
-  }) async {
+  Future<void> loadSystemEvents({String? eventType, String? userSearch, DateTime? startDate, DateTime? endDate, String? textSearch,}) async {
+    final request = ++_logsRequest;
+    final isRefresh = _logsHadSuccess;
     _isLogsLoading = true;
     _logsError = null;
+    logsState = AdminReadState.loading;
     notifyListeners();
-
     try {
-      _systemEvents = await _repository.getSystemEvents(
-        eventType: eventType,
-        userSearch: userSearch,
-        startDate: startDate,
-        endDate: endDate,
-        textSearch: textSearch,
-      );
+      final events = await _repository.getSystemEvents(eventType: eventType, userSearch: userSearch, startDate: startDate, endDate: endDate, textSearch: textSearch);
+      if (request != _logsRequest) return;
+      _systemEvents = events;
+      _logsHadSuccess = true;
+      logsState = AdminReadState.loaded;
     } catch (e) {
-      _logsError = e.toString();
+      if (request != _logsRequest) return;
+      // Initial failures have no prior payload; refresh failures must discard it.
+      if (isRefresh) { _systemEvents = []; }
+      _logsError = 'Could not load system events. Check your connection or access and retry.';
+      logsState = AdminReadState.failed;
     } finally {
-      _isLogsLoading = false;
-      notifyListeners();
+      if (request == _logsRequest) {
+        _isLogsLoading = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<void> loadChatbotAudit() async {
+    final request = ++_chatbotRequest;
+    final isRefresh = _chatbotHadSuccess;
     _isChatbotLoading = true;
     _chatbotError = null;
+    chatbotState = AdminReadState.loading;
     notifyListeners();
-
     try {
       final data = await _repository.getChatbotAudit();
-      _chatbotLogs = data['logs'] as List<ChatbotLog>;
-      _todayQueries = data['todayQueries'] as int;
-      _todayTokens = data['todayTokens'] as int;
-      _todayCost = data['todayCost'] as double;
+      if (request != _chatbotRequest) return;
+      final logs = data['logs'] as List<ChatbotLog>;
+      final queries = data['todayQueries'] as int;
+      final tokens = data['todayTokens'] as int;
+      final cost = data['todayCost'] as double;
+      _chatbotLogs = logs; _todayQueries = queries; _todayTokens = tokens; _todayCost = cost;
+      _chatbotHadSuccess = true;
+      chatbotState = AdminReadState.loaded;
     } catch (e) {
-      _chatbotError = e.toString();
+      if (request != _chatbotRequest) return;
+      // Initial failures have no prior payload; refresh failures must discard it.
+      if (isRefresh) { _chatbotLogs = []; _todayQueries = 0; _todayTokens = 0; _todayCost = 0; }
+      _chatbotError = 'Could not load chatbot audit. Check your connection or access and retry.';
+      chatbotState = AdminReadState.failed;
     } finally {
-      _isChatbotLoading = false;
-      notifyListeners();
+      if (request == _chatbotRequest) {
+        _isChatbotLoading = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<void> loadApiCost() async {
+    final request = ++_costRequest;
+    final isRefresh = _costHadSuccess;
     _isCostLoading = true;
     _costError = null;
+    costState = AdminReadState.loading;
     notifyListeners();
-
     try {
       final data = await _repository.getApiCostData();
-      _costChartData = List<Map<String, dynamic>>.from(data['chartData'] as List);
-      _weeklyBreakdown = List<Map<String, dynamic>>.from(data['weeklyBreakdown'] as List);
+      if (request != _costRequest) return;
+      final chart = List<Map<String, dynamic>>.from(data['chartData'] as List);
+      final weeks = List<Map<String, dynamic>>.from(data['weeklyBreakdown'] as List);
+      _costChartData = chart; _weeklyBreakdown = weeks;
+      _costHadSuccess = true;
+      costState = AdminReadState.loaded;
     } catch (e) {
-      _costError = e.toString();
+      if (request != _costRequest) return;
+      // Initial failures have no prior payload; refresh failures must discard it.
+      if (isRefresh) { _costChartData = []; _weeklyBreakdown = []; }
+      _costError = 'Could not load API usage. Check your connection or access and retry.';
+      costState = AdminReadState.failed;
     } finally {
-      _isCostLoading = false;
-      notifyListeners();
+      if (request == _costRequest) {
+        _isCostLoading = false;
+        notifyListeners();
+      }
     }
   }
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/admin_read_error.dart';
 import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../providers/admin_provider.dart';
@@ -354,14 +355,14 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '${provider.systemEvents.length} logs found',
+                provider.isLogsLoading ? 'Loading events...' : provider.logsError != null ? 'Events unavailable' : '${provider.systemEvents.length} logs found',
                 style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
               ),
               ElevatedButton.icon(
                 key: const Key('btn_export_csv'),
                 icon: const Icon(Icons.download_rounded, size: 16),
                 label: const Text('Export CSV', style: TextStyle(fontSize: 12)),
-                onPressed: provider.systemEvents.isEmpty ? null : () => _triggerCsvExport(provider.systemEvents),
+                onPressed: provider.isLogsLoading || provider.logsError != null || provider.logsState != AdminReadState.loaded || provider.systemEvents.isEmpty ? null : () => _triggerCsvExport(provider.systemEvents),
               ),
             ],
           ),
@@ -372,7 +373,11 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
         Expanded(
           child: provider.isLogsLoading
               ? const Center(child: CircularProgressIndicator())
-              : provider.systemEvents.isEmpty
+              : provider.logsError != null
+                  ? AdminReadError(message: provider.logsError!, onRetry: _onFilterChanged)
+                  : provider.logsState == AdminReadState.notLoaded
+                  ? AdminReadError(message: 'System events have not been loaded.', onRetry: _onFilterChanged)
+                  : provider.systemEvents.isEmpty
                   ? const Center(child: Text('No events matching filters.'))
                   : ListView.builder(
                       padding: const EdgeInsets.symmetric(horizontal: 16.0),
@@ -443,6 +448,9 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
 
     if (provider.isChatbotLoading) {
       return const Center(child: CircularProgressIndicator());
+    }
+    if (provider.chatbotError != null || provider.chatbotState == AdminReadState.notLoaded) {
+      return AdminReadError(message: provider.chatbotError ?? 'Chatbot audit has not been loaded.', onRetry: provider.loadChatbotAudit);
     }
 
     return Column(
@@ -569,6 +577,9 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
 
     if (provider.isCostLoading) {
       return const Center(child: CircularProgressIndicator());
+    }
+    if (provider.costError != null || provider.costState == AdminReadState.notLoaded) {
+      return AdminReadError(message: provider.costError ?? 'API usage has not been loaded.', onRetry: provider.loadApiCost);
     }
 
     return SingleChildScrollView(
