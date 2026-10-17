@@ -184,7 +184,13 @@ class AdminRepository {
     try {
       // API cost tracker: Blended rate ($0.63 per 1,000,000 tokens) computed app-side.
       // 30-day token consumption series + weekly cost breakdown.
-      final result = await _client.rpc('get_daily_token_usage');
+      // The RPC requires a UTC cutoff for the 30-day Philippine calendar window.
+      final phtNow = DateTime.now().toUtc().add(const Duration(hours: 8));
+      final now = DateTime.utc(phtNow.year, phtNow.month, phtNow.day);
+      final startDate = now.subtract(const Duration(days: 29, hours: 8));
+      final result = await _client.rpc('get_daily_token_usage', params: {
+        'start_date': startDate.toIso8601String(),
+      });
       if (result is! List) throw const FormatException('Invalid usage response');
       final rpcRows = result;
       for (final row in rpcRows) {
@@ -198,7 +204,6 @@ class AdminRepository {
         }
       }
 
-      final now = DateTime.now();
       final Map<String, int> dailyTokens = {};
       
       // Initialize last 30 days
@@ -209,7 +214,7 @@ class AdminRepository {
       }
 
       if (rpcRows.isNotEmpty) {
-        // Parse from daily token usage RPC (chatbot_logs + system_logs)
+        // Parse daily token usage aggregated from chatbot_logs.
         for (final row in rpcRows) {
           final dateStr = (row['usage_date'] ?? row['date']) as String?;
           final tokens = (row['tokens_used'] ?? row['total_tokens'] ?? row['tokens'] ?? 0) as num;
@@ -232,14 +237,14 @@ class AdminRepository {
       // Weekly cost breakdown rows
       final List<Map<String, dynamic>> weeklyBreakdown = [];
       for (int i = 0; i < 4; i++) {
-        final weekStart = now.subtract(Duration(days: (i + 1) * 7));
-        final weekEnd = now.subtract(Duration(days: i * 7));
+        final weekStart = phtNow.subtract(Duration(days: (i + 1) * 7));
+        final weekEnd = phtNow.subtract(Duration(days: i * 7));
         
         int tokens = 0;
         if (rpcRows.isNotEmpty) {
           dailyTokens.forEach((dateStr, t) {
             try {
-              final date = DateTime.parse(dateStr);
+              final date = DateTime.parse('${dateStr}T00:00:00Z');
               if (date.isAfter(weekStart) && date.isBefore(weekEnd)) {
                 tokens += t;
               }

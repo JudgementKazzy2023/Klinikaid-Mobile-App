@@ -29,17 +29,19 @@ void main() {
   Object usage = <Object>[];
   bool populated = false;
   final paths = <String>[];
+  final requests = <http.Request>[];
   final blockers = <String, Completer<http.Response>>{};
   http.Response response(http.Request r, Object body, [int status = 200]) =>
     http.Response(jsonEncode(body), status, request: r, headers: {
       'content-type': 'application/json', 'content-range': '0-0/1',
     });
   setUp(() {
-    failPath = null; usage = <Object>[]; populated = false; paths.clear(); blockers.clear();
+    failPath = null; usage = <Object>[]; populated = false; paths.clear(); blockers.clear(); requests.clear();
     client = SupabaseClient('https://example.invalid', 'fake-key',
       authOptions: const AuthClientOptions(autoRefreshToken: false),
       httpClient: MockClient((r) async {
         paths.add(r.url.path);
+        requests.add(r);
         final filter = r.url.queryParameters['event_type'];
         if (blockers.containsKey(filter)) return blockers[filter]!.future;
         if (failPath == '*' || r.url.path.endsWith(failPath ?? '!')) {
@@ -113,6 +115,22 @@ void main() {
     usage = <Object>[];
     final data = await repo.getApiCostData();
     expect((data['chartData'] as List).every((r) => r['tokens'] == 0), isTrue);
+  });
+  test('cost RPC sends required PHT cutoff and consumes web response contract', () async {
+    final pht = DateTime.now().toUtc().add(const Duration(hours: 8));
+    final today = DateTime.utc(pht.year, pht.month, pht.day);
+    final date = today.toIso8601String().substring(0, 10);
+    usage = [{'date': date, 'total_tokens': 1000000, 'query_count': 2}];
+    final data = await repo.getApiCostData();
+    expect(requests, hasLength(1));
+    expect(jsonDecode(requests.single.body), {
+      'start_date': today.subtract(const Duration(days: 29, hours: 8)).toIso8601String(),
+    });
+    final chart = data['chartData'] as List;
+    expect(chart, hasLength(30));
+    expect(chart.last['date'], date);
+    expect(chart.last['tokens'], 1000000);
+    expect(chart.last['cost'], closeTo(0.63, 0.00001));
   });
   test('old filter response cannot replace new results', () async {
     blockers['eq.old'] = Completer<http.Response>();
