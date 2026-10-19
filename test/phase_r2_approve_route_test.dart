@@ -26,7 +26,6 @@ class MockReceptionRepository extends ReceptionRepository {
   num? lastApprovedWeightKg;
   num? lastApprovedTemperatureC;
   String? lastApprovedTriageNotes;
-  String? lastGeneratedQueueNumber;
 
   bool shouldFailInsert = false;
 
@@ -47,12 +46,6 @@ class MockReceptionRepository extends ReceptionRepository {
   @override
   Future<String> getOriginalDocumentUrl(String id) async {
     return 'https://example.com/doc/$id';
-  }
-
-  @override
-  Future<String> generateQueueNumber(String department) async {
-    lastGeneratedQueueNumber = department;
-    return 'LAB-001';
   }
 
   @override
@@ -419,30 +412,6 @@ void main() {
       expect(RoutingPriority.routine.toDbValue(), 'routine');
       expect(RoutingPriority.urgent.toDbValue(), 'urgent');
       expect(RoutingPriority.emergency.toDbValue(), 'emergency');
-    });
-
-    // 14 & 15. Queue number format tests
-    test('14 & 15. generateQueueNumber format: count+1, dept prefix, 3-digit pad',
-        () {
-      // Replicate the format logic (unit test without DB)
-      String formatQueueNumber(String dept, int existingCount) {
-        const codes = {
-          'laboratory': 'LAB',
-          'imaging': 'IMG',
-          'ultrasound': 'ULT',
-          'ecg': 'ECG',
-        };
-        final dailyCount = existingCount + 1;
-        return '${codes[dept]!}-${dailyCount.toString().padLeft(3, '0')}';
-      }
-
-      // count 0 → XXX-001
-      expect(formatQueueNumber('laboratory', 0), 'LAB-001');
-      // count 5 → XXX-006
-      expect(formatQueueNumber('laboratory', 5), 'LAB-006');
-      expect(formatQueueNumber('imaging', 2), 'IMG-003');
-      expect(formatQueueNumber('ultrasound', 11), 'ULT-012');
-      expect(formatQueueNumber('ecg', 99), 'ECG-100');
     });
 
     // 16. phtStartOfTodayUtc produces correct UTC instant
