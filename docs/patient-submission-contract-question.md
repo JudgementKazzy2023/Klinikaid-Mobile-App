@@ -2,8 +2,21 @@
 
 Date: 2026-10-18
 
-Status: awaiting web team confirmation. This is a question for coordination,
-not a Phase 2 specification or approval to implement/deploy.
+Status (updated 2026-10-20): web guidance received; documentation drafts ready
+for review. Ownership acceptance, contract finalization and implementation/release
+approval remain pending. The original questions below are historical context.
+
+## Review documents
+
+- [Phase 2 spec draft](../Phase2/phase2_spec_draft.md)
+- [Proposed ownership matrix](../Phase2/phase2_ownership_matrix.md)
+- [Interim containment plan](../Phase2/phase2_interim_containment.md)
+- [Separate shipped test-detection drift tracker](../Phase2/patient_test_detection_drift.md)
+
+Read-only Storage confirmation on 2026-10-20 found the PR #116 pending-only
+INSERT/DELETE restriction live with Storage RLS enabled. Current mobile upload
+paths fail before the independently restricted document insert. See the spec
+for evidence and limits; no production submission test was run.
 
 ## The question
 
@@ -30,11 +43,12 @@ not assume create-patient-record itself handles document submissions.
 - Web moved its upload-confirmation and template submission inserts into
   privileged server actions. That does not automatically expose a supported
   mobile endpoint.
-- In this mobile checkout, both submission calls are in
-  lib/features/documents/presentation/providers/document_submission_provider.dart
-  and delegate to insertDocument in
-  lib/core/repositories/documents_repository.dart. The repository directly
-  inserts into documents with the current user's client.
+- Corrected call-site map: templates directly insert through
+  lib/features/patient/templates/data/templates_repository.dart; online uploads
+  and offline replay call DocumentsRepository.insertDocument through
+  lib/features/documents/presentation/providers/document_submission_provider.dart.
+  There are three active insert paths. An unused pending UPDATE helper exists;
+  no patient-side remote document DELETE caller was found in the audited source.
 - The deployed Edge Function inventory did not show a dedicated document
   submission function. No submission was invoked during these checks.
 
