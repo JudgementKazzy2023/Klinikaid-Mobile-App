@@ -12,12 +12,14 @@ Preserved checkouts: mobile main `d749c50`, web `06ccce1`; web remote master ref
 | #25 deterministic default tests | `f65fd9d` |205 pass/1 existing skip/0 failures; analyzer142 |
 | #26 queue/cache snapshots | `7b4fabd` |22 focused checks |
 | #27 deferred draft ownership | `3270ad4` |19 ownership checks |
-| #28 narrative laboratory results | `511bae2` |36 narrative/94 combined focused checks; full237 pass/1 skip/2 baseline failures |
+| #28 narrative laboratory results | `ca69849` |36 narrative/94 combined focused checks; full237 pass/1 skip/2 baseline failures |
 | #29 immediate ownership, stacked on #27 | `0c9f7b0` |45 combined focused checks; full236 pass/1 skip/2 baseline failures |
 
 Covered local acceptance passes for those revisions; none is a claim of merged/shipped parity or deployed authorization. Most implementation branches retain the two default-test failures repaired separately by #25. Full analyzer remains red (typically152 baseline findings); #28/#29 have no changed-file findings. #24 retains23 pre-existing infos. Earlier #5/#6 evidence used Flutter3.47.7; later native gates use pinned3.44.0/Dart3.12.0 and unchanged lockfile.
 
-One Pi MiMo high worker is active: combined-source readiness in a scratch worktree, including #25. It will check PR interactions and return minimal conflict/regression patches without changing existing PR branches, pushing or merging main. #5/#6 still contain inherited audit-document commits in their histories; cleanup is a separate reviewability item. Task IDs and private receipts are in the durable host handoff under `refresh-6`.
+Combined scratch `d552ca1` passes374 tests/1 existing skip/0 failures with #25 included; full analyzer retains141 existing findings. [VERIFICATION.md](VERIFICATION.md) records scope, merge order and limitations. Its single test-only interaction fix has been propagated to #28 (`ca69849`) and rerun. No main merge or production change occurred.
+
+Two Pi MiMo high workers are active: #5/#6 inherited-doc history cleanup with byte-identical implementation, and mobile chat row-identity/request-lifecycle fixes under #20. No other implementation workers remain active. Task IDs and exact receipts are retained in the durable host handoff under `refresh-7`.
 
 Remaining priorities: issue #15 clinical numeric/reference criteria, session/permission and live Auth evidence under #11/#17/#18, shared backend submission contract under #16, read/cache honesty, chat identity/concurrency and language transport alignment, pagination, configuration and release provenance. Web opt-in dark mode is a platform/product decision; its new chat-language behavior needs shared-transport review.
 
