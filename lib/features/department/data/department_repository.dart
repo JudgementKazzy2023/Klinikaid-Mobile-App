@@ -161,6 +161,23 @@ class DepartmentRepository {
     }
   }
 
+  // A successful HTTP response can still update zero rows (including RLS
+  // filtering). Keep the saved-results outcome separate from queue completion.
+  Future<void> _completeQueue(String patientId, String department) async {
+    try {
+      final updated = await _client
+          .from('patient_queue')
+          .update({'status': 'completed'})
+          .eq('patient_id', patientId)
+          .eq('department', department)
+          .inFilter('status', ['waiting', 'in_progress'])
+          .select('id');
+      if (updated.isEmpty) throw const QueueCompletionFailure();
+    } catch (_) {
+      throw const QueueCompletionFailure();
+    }
+  }
+
   /// Submits laboratory result rows to Supabase and updates patient queue.
   /// Implements sequential non-atomic write logic matching web route.ts.
   Future<void> submitLabResults({
@@ -176,17 +193,7 @@ class DepartmentRepository {
           .from('department_records')
           .insert(rows.map((row) => row.toJson()).toList());
 
-      // 2. Sequential queue update with no transaction/RPC fallback
-      try {
-        await _client
-            .from('patient_queue')
-            .update({'status': 'completed'})
-            .eq('patient_id', patientId)
-            .eq('department', department)
-            .inFilter('status', ['waiting', 'in_progress']);
-      } catch (e) {
-        throw const QueueCompletionFailure();
-      }
+      await _completeQueue(patientId, department);
     } catch (e) {
       if (e is QueueCompletionFailure) rethrow;
       throw FailureMapper.fromException(e);
@@ -244,17 +251,7 @@ class DepartmentRepository {
       // 1. Insert records rows to public.department_records
       await _client.from('department_records').insert(rowsJson);
 
-      // 2. Sequential queue update with no transaction/RPC fallback
-      try {
-        await _client
-            .from('patient_queue')
-            .update({'status': 'completed'})
-            .eq('patient_id', patientId)
-            .eq('department', department)
-            .inFilter('status', ['waiting', 'in_progress']);
-      } catch (e) {
-        throw const QueueCompletionFailure();
-      }
+      await _completeQueue(patientId, department);
     } catch (e) {
       if (e is QueueCompletionFailure) rethrow;
       throw FailureMapper.fromException(e);

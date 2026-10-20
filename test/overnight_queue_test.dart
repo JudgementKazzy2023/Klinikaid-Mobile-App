@@ -55,7 +55,7 @@ void main() {
   });
 
   for (final lab in [true, false]) {
-    for (final outcome in ['success', 'insert-failed', 'queue-failed']) {
+    for (final outcome in ['success', 'insert-failed', 'queue-failed', 'queue-empty']) {
       test('${lab ? 'lab' : 'free text'} $outcome preserves write filters and save outcome', () async {
         final requests = <http.Request>[];
         final dept = lab ? 'laboratory' : 'imaging';
@@ -67,11 +67,13 @@ void main() {
             expect(request.url.queryParameters, {
               'patient_id': 'eq.patient', 'department': 'eq.$dept',
               'status': 'in.("waiting","in_progress")',
+              'select': 'id',
             });
             expect(jsonDecode(request.body), {'status': 'completed'});
           }
           final failed = insert ? outcome == 'insert-failed' : outcome == 'queue-failed';
-          return http.Response(failed ? '{"message":"denied","code":"42501"}' : '',
+          final body = insert ? '' : outcome == 'queue-empty' ? '[]' : '[{"id":1}]';
+          return http.Response(failed ? '{"message":"denied","code":"42501"}' : body,
             failed ? 403 : 201, request: request, headers: {'content-type': 'application/json'});
         }));
         final repo = DepartmentRepository(client: client)..adminDepartmentOverride = dept;
@@ -85,7 +87,8 @@ void main() {
         expect(saved, outcome != 'insert-failed');
         expect(requests.length, outcome == 'insert-failed' ? 1 : 2);
         expect(provider.queueCompletionWarning,
-          outcome == 'queue-failed' ? QueueCompletionFailure.message : isNull);
+          outcome == 'queue-failed' || outcome == 'queue-empty'
+              ? QueueCompletionFailure.message : isNull);
         if (outcome == 'insert-failed') expect(provider.errorMessage, isNotNull);
         await client.dispose();
         client.fakeAuth.dispose();
