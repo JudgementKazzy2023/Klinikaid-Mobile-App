@@ -170,6 +170,35 @@ class LocalDatabase extends _$LocalDatabase {
     });
   }
 
+  /// Replaces the cached records of [patientId] with [records].
+  ///
+  /// Rows the server no longer returns are dropped, and an empty [records] list
+  /// clears the patient's cache entirely. A successful read that returns nothing
+  /// means the patient has no results, not that the old ones are still valid.
+  /// Other patients' cached records are left untouched.
+  Future<void> replaceDepartmentRecords(
+    String patientId,
+    List<CachedDepartmentRecord> records,
+  ) async {
+    await transaction(() async {
+      final ids = records.map((r) => r.id).toList();
+      if (ids.isEmpty) {
+        await (delete(cachedDepartmentRecords)
+              ..where((t) => t.patientId.equals(patientId)))
+            .go();
+      } else {
+        await (delete(cachedDepartmentRecords)
+              ..where((t) => t.patientId.equals(patientId) & t.id.isNotIn(ids)))
+            .go();
+      }
+      if (records.isNotEmpty) {
+        await batch((batch) {
+          batch.insertAllOnConflictUpdate(cachedDepartmentRecords, records);
+        });
+      }
+    });
+  }
+
   Future<List<CachedDepartmentRecord>> getRecordsForPatient(
     String patientId,
   ) async {

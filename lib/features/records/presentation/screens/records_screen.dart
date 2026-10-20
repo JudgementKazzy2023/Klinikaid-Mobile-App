@@ -53,98 +53,213 @@ class _RecordsScreenState extends State<RecordsScreen> {
             );
           }
 
-          if (provider.errorMessage != null && provider.groupedRecords.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.error_outline_rounded, color: Theme.of(context).colorScheme.error, size: 48),
-                    const SizedBox(height: 16),
-                    Text(
-                      provider.errorMessage!,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7)),
-                    ),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: _loadRecords,
-                      child: const Text('Try Again'),
-                    ),
-                  ],
-                ),
-              ),
-            );
+          if (provider.dataState == RecordsDataState.failed) {
+            return _buildErrorState(provider);
           }
 
           if (provider.groupedRecords.isEmpty) {
-            return RefreshIndicator(
-              onRefresh: () async => _loadRecords(),
-              color: Theme.of(context).colorScheme.primary,
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                children: [
-                  SizedBox(height: MediaQuery.of(context).size.height * 0.25),
-                  Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24.0),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(24),
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              Icons.assignment_turned_in_outlined,
-                              size: 64,
-                              color: Theme.of(context).colorScheme.primary,
+            return Column(
+              children: [
+                _buildDataStateBanner(provider),
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: () async => _loadRecords(),
+                    color: Theme.of(context).colorScheme.primary,
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      children: [
+                        SizedBox(height: MediaQuery.of(context).size.height * 0.25),
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24.0),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(24),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    Icons.assignment_turned_in_outlined,
+                                    size: 64,
+                                    color: Theme.of(context).colorScheme.primary,
+                                  ),
+                                ),
+                                const SizedBox(height: 24),
+                                Text(
+                                  'No Records Found',
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.onSurface,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Your completed lab tests and diagnostic reports will appear here.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          const SizedBox(height: 24),
-                          Text(
-                            'No Records Found',
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.onSurface,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Your completed lab tests and diagnostic reports will appear here.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             );
           }
 
-          return RefreshIndicator(
-            onRefresh: () async => _loadRecords(),
-            color: Theme.of(context).colorScheme.primary,
-            child: ListView.builder(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(16),
-              itemCount: provider.groupedRecords.length,
-              itemBuilder: (context, index) {
-                final record = provider.groupedRecords[index];
-                return _buildRecordCard(record);
-              },
-            ),
+          return Column(
+            children: [
+              _buildDataStateBanner(provider),
+              Expanded(
+                child: RefreshIndicator(
+                  onRefresh: () async => _loadRecords(),
+                  color: Theme.of(context).colorScheme.primary,
+                  child: ListView.builder(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(16),
+                    itemCount: provider.groupedRecords.length,
+                    itemBuilder: (context, index) {
+                      final record = provider.groupedRecords[index];
+                      return _buildRecordCard(record);
+                    },
+                  ),
+                ),
+              ),
+            ],
           );
         },
+      ),
+    );
+  }
+
+  /// Tells the patient where the records on screen came from.
+  ///
+  /// A cached copy shown without this notice reads exactly like a live answer,
+  /// which is how a failed read ends up looking like "these are your results".
+  /// The notice is never shown as a live one.
+  Widget _buildDataStateBanner(RecordsProvider provider) {
+    if (!provider.isStale) {
+      return Container(
+        margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Online',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.primary,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.3), width: 1.5),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_rounded, color: Colors.orange, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Showing cached results',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  provider.errorMessage ?? 'The server could not be reached.',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: _loadRecords,
+            child: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Shown when the records could not be read and nothing was cached to fall
+  /// back on. The screen says the data is unknown instead of showing an empty
+  /// list, which would read as "you have no results".
+  Widget _buildErrorState(RecordsProvider provider) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline_rounded, color: Theme.of(context).colorScheme.error, size: 48),
+            const SizedBox(height: 16),
+            Text(
+              'Could not load your records',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              provider.errorMessage ?? 'Unknown error',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7)),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _loadRecords,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
       ),
     );
   }
