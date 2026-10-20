@@ -1,155 +1,189 @@
-import 'dart:async';
-import 'dart:io';
-import 'dart:math';
-import 'package:flutter/services.dart';
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+// ignore: depend_on_referenced_packages
+import 'package:http/http.dart' as http;
+// ignore: depend_on_referenced_packages
+import 'package:http/testing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:klinikaid_mobile/core/supabase/supabase_client.dart';
+import 'package:klinikaid_mobile/core/errors/failures.dart';
+import 'package:klinikaid_mobile/core/models/department_record.dart';
 import 'package:klinikaid_mobile/core/models/patient.dart';
 import 'package:klinikaid_mobile/core/models/profile.dart';
-import 'package:klinikaid_mobile/core/models/department_record.dart';
+import 'package:klinikaid_mobile/core/supabase/supabase_client.dart';
 import 'package:klinikaid_mobile/features/staff/data/repositories/staff_queue_repository.dart';
 
-String generateUuid() {
-  final random = Random();
-  String hexDigit(int value) => value.toRadixString(16);
-  final buffer = StringBuffer();
-  for (var i = 0; i < 36; i++) {
-    if (i == 8 || i == 13 || i == 18 || i == 23) {
-      buffer.write('-');
-    } else if (i == 14) {
-      buffer.write('4');
-    } else if (i == 19) {
-      buffer.write(hexDigit((random.nextInt(4) + 8)));
-    } else {
-      buffer.write(hexDigit(random.nextInt(16)));
-    }
-  }
-  return buffer.toString();
-}
-
+/// Verification note — integration acceptance gap (not RLS proof).
+///
+/// The original live test in this file signed up throwaway patient, lab-staff
+/// and specialist accounts against the shared backend, inserted patient and
+/// department-record rows, then asserted that a signed-in specialist could
+/// find the patient by name and retrieve the cross-department timeline. That
+/// flow relied on real signups, `user_metadata` role assignment and uncleaned
+/// fixtures, so it is unsafe in shared environments and is replaced here by
+/// deterministic HTTP-contract and model-mapping tests of the same legacy
+/// [StaffQueueRepository] calls (`searchPatients`, `getDepartmentRecordsForPatient`).
+///
+/// Still unproven (integration acceptance gap): end-to-end role-gated signup,
+/// server-side role assignment, and that RLS actually scopes which patient
+/// rows and department records a specialist session can read on a deployed
+/// backend. These tests intercept every request in-process, make no outbound
+/// calls, and prove no RLS behavior.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  HttpOverrides.global = null;
 
-  // Mock shared_preferences MethodChannel to avoid MissingPluginException in tests
-  const channel = MethodChannel('plugins.flutter.io/shared_preferences');
-  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-      .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
-    if (methodCall.method == 'getAll') {
-      return <String, Object>{};
-    }
-    return true;
+  late SupabaseClient client;
+  late StaffQueueRepository repo;
+  final requests = <http.Request>[];
+  Object responseBody = <dynamic>[];
+  int responseStatus = 200;
+
+  http.Response respond(http.Request request) => http.Response(
+        jsonEncode(responseBody),
+        responseStatus,
+        request: request,
+        headers: {'content-type': 'application/json'},
+      );
+
+  setUp(() {
+    requests.clear();
+    responseBody = <dynamic>[];
+    responseStatus = 200;
+    client = SupabaseClient(
+      'https://example.invalid',
+      'fake-key',
+      authOptions: const AuthClientOptions(autoRefreshToken: false),
+      httpClient: MockClient((request) async {
+        requests.add(request);
+        return respond(request);
+      }),
+    );
+    SupabaseService.mockClient = client;
+    repo = StaffQueueRepository();
   });
 
-  late String rand;
-  late String patientEmail;
-  late String specialistEmail;
-  late String labStaffEmail;
-  late String password;
-  late StaffQueueRepository staffRepo;
-
-  setUpAll(() async {
-    await SupabaseService.initialize(localStorage: const EmptyLocalStorage());
-    staffRepo = StaffQueueRepository();
-
-    rand = Random().nextInt(1000000).toString();
-    patientEmail = 'patient.spec.$rand@gmail.com';
-    specialistEmail = 'specialist.spec.$rand@gmail.com';
-    labStaffEmail = 'lab.staff.spec.$rand@gmail.com';
-    password = 'Password123!';
+  tearDown(() async {
+    SupabaseService.mockClient = null;
+    await client.dispose();
   });
 
-  test('Phase 8: Medical Specialist Portal Integration & Cross-Department Timeline Verification', () async {
-    final client = SupabaseService.client;
+  group('StaffQueueRepository.searchPatients (legacy)', () {
+    test('issues the name-search PostgREST contract and maps rows in server order', () async {
+      responseBody = [
+        {
+          'id': 'patient-row-1',
+          'profile_id': 'profile-1',
+          'first_name': 'SpecTest',
+          'last_name': 'Aldrin',
+          'date_of_birth': '1988-08-08',
+          'gender': 'female',
+          'contact_number': '09776655443',
+          'address': 'Quezon City, PH',
+          'created_at': '2026-01-01T08:00:00Z',
+          'updated_at': '2026-01-01T08:00:00Z',
+        },
+        {
+          'id': 'patient-row-2',
+          'profile_id': 'profile-2',
+          'first_name': 'Ana',
+          'last_name': 'SpecTest-Cruz',
+          'date_of_birth': '1991-02-02',
+          'gender': 'male',
+          'contact_number': '09123456789',
+          'address': 'Manila, PH',
+          'created_at': '2026-01-02T08:00:00Z',
+          'updated_at': '2026-01-02T08:00:00Z',
+        },
+      ];
 
-    print('=== SETUP: Create Test Patient and Records ===');
-    // 1. Patient SignUp & Onboarding
-    final authPatient = await client.auth.signUp(
-      email: patientEmail,
-      password: password,
-      data: {'full_name': 'Specialist Test Patient', 'role': 'patient'},
-    );
-    final patientUid = authPatient.user!.id;
-    await Future.delayed(const Duration(milliseconds: 1500));
+      final results = await repo.searchPatients('SpecTest');
 
-    final patientRecordId = generateUuid();
-    await client.from('patients').insert({
-      'id': patientRecordId,
-      'profile_id': patientUid,
-      'first_name': 'SpecTest',
-      'last_name': 'Patient',
-      'date_of_birth': '1988-08-08',
-      'gender': 'female',
-      'contact_number': '09776655443',
-      'address': 'Quezon City, PH',
+      expect(requests, hasLength(1));
+      final request = requests.single;
+      expect(request.method, 'GET');
+      expect(request.url.path, endsWith('/patients'));
+      expect(request.headers['apikey'], 'fake-key');
+      expect(request.url.queryParameters['select'], '*');
+      expect(
+        request.url.queryParameters['or'],
+        '(first_name.ilike.%SpecTest%,last_name.ilike.%SpecTest%)',
+      );
+      expect(request.url.queryParameters['order'], 'last_name.asc.nullslast');
+
+      expect(results, hasLength(2));
+      // Original flow intent: the created patient is discoverable by name search.
+      expect(results.any((p) => p.id == 'patient-row-1'), isTrue);
+      // Rows are mapped to the Patient model in server (last_name asc) order.
+      expect(results.map((p) => p.id).toList(), ['patient-row-1', 'patient-row-2']);
+      expect(results.first.fullName, 'SpecTest Aldrin');
+      expect(results.first.gender, Gender.female);
+      expect(results.first.dateOfBirth, DateTime(1988, 8, 8));
+      expect(results.last.fullName, 'Ana SpecTest-Cruz');
     });
-    await client.auth.signOut();
 
-    // 2. Lab Staff SignUp & Create Record
-    await client.auth.signUp(
-      email: labStaffEmail,
-      password: password,
-      data: {
-        'full_name': 'Spec Lab Tech',
-        'role': 'department_staff',
-        'department': 'laboratory',
-      },
-    );
-    final labStaffUid = client.auth.currentUser!.id;
-    await Future.delayed(const Duration(milliseconds: 1500));
+    test('surfaces a denied read as a permission failure, not an empty result', () async {
+      responseStatus = 403;
+      responseBody = {'message': 'insufficient privilege', 'code': '42501'};
 
-    final labRecordId = generateUuid();
-    await client.from('department_records').insert({
-      'id': labRecordId,
-      'patient_id': patientRecordId,
-      'recorder_id': labStaffUid,
-      'department': 'laboratory',
-      'test_type': 'Lipid Profile',
-      'test_name': 'Cholesterol',
-      'test_value': '210',
-      'unit': 'mg/dL',
-      'is_flagged': true,
+      await expectLater(
+        repo.searchPatients('SpecTest'),
+        throwsA(
+          isA<DatabaseFailure>().having(
+            (f) => f.message,
+            'message',
+            contains('Access denied'),
+          ),
+        ),
+      );
     });
-    await client.auth.signOut();
+  });
 
-    // 3. Specialist SignUp
-    await client.auth.signUp(
-      email: specialistEmail,
-      password: password,
-      data: {
-        'full_name': 'Dr. House',
-        'role': 'medical_specialist',
-      },
-    );
-    final specialistUid = authPatient.user!.id;
-    await Future.delayed(const Duration(milliseconds: 1500));
+  group('StaffQueueRepository.getDepartmentRecordsForPatient (legacy)', () {
+    test('issues the timeline PostgREST contract and maps laboratory history', () async {
+      responseBody = [
+        {
+          'id': 'lab-record-1',
+          'patient_id': 'patient-record-1',
+          'recorder_id': 'staff-uuid',
+          'department': 'laboratory',
+          'test_type': 'Lipid Profile',
+          // Legacy row shape as inserted by the original flow: flat columns
+          // with is_flagged, plus the joined recorder profile.
+          'test_name': 'Cholesterol',
+          'test_value': '210',
+          'unit': 'mg/dL',
+          'is_flagged': true,
+          'created_at': '2026-01-03T09:00:00Z',
+          'updated_at': '2026-01-03T09:00:00Z',
+          'recorder': {
+            'id': 'staff-uuid',
+            'full_name': 'Spec Lab Tech',
+            'role': 'department_staff',
+            'department': 'laboratory',
+            'created_at': '2026-01-01T00:00:00Z',
+            'updated_at': '2026-01-01T00:00:00Z',
+          },
+        },
+      ];
 
-    await client.auth.signOut();
-    await client.auth.signInWithPassword(email: specialistEmail, password: password);
-    print('Signed in as medical specialist (Dr. House)');
+      final timeline = await repo.getDepartmentRecordsForPatient('patient-record-1');
 
-    print('=== STEP 1: Search Patient by Name ===');
-    final searchResults = await staffRepo.searchPatients('SpecTest');
-    final hasOurPatient = searchResults.any((p) => p.id == patientRecordId);
-    expect(hasOurPatient, isTrue);
-    print('DB Confirmed: Patient found in search.');
+      expect(requests, hasLength(1));
+      final request = requests.single;
+      expect(request.method, 'GET');
+      expect(request.url.path, endsWith('/department_records'));
+      expect(request.url.queryParameters['select'], '*,recorder:profiles(*)');
+      expect(request.url.queryParameters['patient_id'], 'eq.patient-record-1');
+      expect(request.url.queryParameters['order'], 'created_at.desc.nullslast');
 
-    print('=== STEP 2: Retrieve Patient Cross-Department Timeline ===');
-    final timeline = await staffRepo.getDepartmentRecordsForPatient(patientRecordId);
-    
-    // Expect our lab record to be in the timeline
-    final hasLabRecord = timeline.any((r) => r.id == labRecordId);
-    expect(hasLabRecord, isTrue);
-    
-    // Verify it is from the laboratory department
-    final record = timeline.firstWhere((r) => r.id == labRecordId);
-    expect(record.department, Department.laboratory);
-    expect(record.testResults['test_value']?.toString(), '210');
-    expect(record.referenceRangeStatus, ReferenceRangeStatus.flagged);
-    print('DB Confirmed: Specialist successfully retrieved the cross-department timeline containing laboratory records.');
-
-    // Clean up session
-    await client.auth.signOut();
+      // Original flow intent: the specialist timeline contains the lab record,
+      // attributed to the laboratory department with its stored values.
+      final record = timeline.single;
+      expect(record.id, 'lab-record-1');
+      expect(record.department, Department.laboratory);
+      expect(record.testResults['test_value']?.toString(), '210');
+      expect(record.referenceRangeStatus, ReferenceRangeStatus.flagged);
+      expect(record.recorder?.fullName, 'Spec Lab Tech');
+    });
   });
 }
