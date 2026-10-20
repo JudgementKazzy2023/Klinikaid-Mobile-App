@@ -55,9 +55,18 @@ String? validateBloodPressure(String? text) {
   if (trimmed.isEmpty) {
     return null;
   }
-  final regExp = RegExp(r'^\d{1,3}/\d{1,3}$');
-  if (!regExp.hasMatch(trimmed)) {
+  final match = RegExp(r'^(\d{2,3})/(\d{2,3})$').firstMatch(trimmed);
+  if (match == null) {
     return 'BP must be in NNN/NNN format';
+  }
+  // Match the shared web triage contract; these are input bounds, not targets.
+  final systolic = int.parse(match.group(1)!);
+  final diastolic = int.parse(match.group(2)!);
+  if (systolic < 40 || systolic > 300 || diastolic < 20 || diastolic > 200) {
+    return 'Systolic must be 40-300 and diastolic 20-200 mmHg.';
+  }
+  if (systolic <= diastolic) {
+    return 'Systolic must be higher than diastolic.';
   }
   return null;
 }
