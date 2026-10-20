@@ -193,6 +193,7 @@ class _TriageRoutingSheetState extends State<TriageRoutingSheet> {
             _SectionLabel(label: 'VITALS (optional)'),
             const SizedBox(height: 6),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
                   child: TextFormField(
@@ -201,6 +202,7 @@ class _TriageRoutingSheetState extends State<TriageRoutingSheet> {
                     decoration: InputDecoration(
                       labelText: 'Blood Press.',
                       hintText: '120/80',
+                      errorMaxLines: 4,
                       border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8)),
                       contentPadding: const EdgeInsets.symmetric(
