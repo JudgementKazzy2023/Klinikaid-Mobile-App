@@ -106,6 +106,7 @@ void main() {
   bool offline = false;
   bool denied = false;
   Completer<void>? block;
+  Completer<void>? queueRequestStarted;
 
   setUp(() {
     db = LocalDatabase(NativeDatabase.memory());
@@ -114,6 +115,7 @@ void main() {
     offline = false;
     denied = false;
     block = null;
+    queueRequestStarted = null;
     client = SupabaseClient(
       'https://example.invalid',
       'fake-key',
@@ -135,7 +137,10 @@ void main() {
                   )
                   .toList()
             : [];
-        if (isQueue && block != null) await block!.future;
+        if (isQueue && block != null) {
+          queueRequestStarted?.complete();
+          await block!.future;
+        }
         return http.Response(
           jsonEncode(snapshot),
           200,
@@ -376,6 +381,33 @@ void main() {
     await Future.wait([first, second]);
     expect(queue.queueEntries, isEmpty);
     expect(await db.getQueueForPatient('A'), isEmpty);
+  });
+
+  test('account switch drops a delayed A snapshot and old A events', () async {
+    remote = [row(1, 'A')];
+    await queue.fetchQueueAndSubscribe('A');
+    final pending = Completer<void>();
+    block = pending;
+    queueRequestStarted = Completer<void>();
+    remote = [];
+    final aRefresh = queue.fetchQueueAndSubscribe('A');
+    await queueRequestStarted!.future;
+    remote = [row(3, 'B', 'in_progress')];
+    final bRefresh = queue.fetchQueueAndSubscribe('B');
+    expect(queue.queueEntries, isEmpty);
+    block = null;
+    pending.complete();
+    await Future.wait([aRefresh, bRefresh]);
+    expect(queue.queueEntries.single.patientId, 'B');
+    expect(queue.queueEntries.single.id, 3);
+    expect((await db.getQueueForPatient('A')).single.id, 1);
+    expect((await db.getQueueForPatient('B')).single.id, 3);
+    final count = requests.length;
+    await queue.handleQueueChange(
+      'A', event(PostgresChangeEvent.update, next: row(1, 'A')),
+    );
+    expect(requests.length, count);
+    expect(queue.queueEntries.single.id, 3);
   });
 
   testWidgets(
