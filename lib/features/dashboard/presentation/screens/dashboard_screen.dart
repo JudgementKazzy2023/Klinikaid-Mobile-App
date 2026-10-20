@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
+import '../../../../features/auth/domain/patient_record_state.dart';
 import '../../../../features/auth/presentation/providers/auth_provider.dart';
 import '../providers/dashboard_provider.dart';
 import '../../../../core/models/patient_queue.dart';
@@ -35,6 +36,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  /// Re-runs the patient record lookup and loads the dashboard once it
+  /// succeeds. Leaves the surface in its error state when the read fails
+  /// again.
+  Future<void> _retryPatientLookup() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    await authProvider.retryPatientLookup();
+    if (!mounted) return;
+    if (authProvider.patient != null) {
+      await _refreshData();
+    }
+  }
+
   String _getGreeting() {
     final hour = DateTime.now().hour;
     if (hour < 12) return 'Good Morning';
@@ -50,9 +63,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (patient == null) {
       return Scaffold(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        body: Center(
-          child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary),
-        ),
+        body: _buildPatientRecordState(context, authProvider),
       );
     }
 
@@ -399,6 +410,57 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  /// Builds the surface shown when the patient record for the active account
+  /// is not available.
+  ///
+  /// A failed read and a missing row are different problems and get different
+  /// surfaces: the failed read is retryable, the missing row is not, so it
+  /// offers a way out instead of a retry that cannot succeed.
+  Widget _buildPatientRecordState(BuildContext context, AuthProvider authProvider) {
+    switch (authProvider.patientRecordState) {
+      case PatientRecordState.failed:
+        return _PatientRecordNotice(
+          icon: Icons.cloud_off_rounded,
+          iconColor: Theme.of(context).colorScheme.error,
+          title: 'Could not load your patient record',
+          message: authProvider.patientRecordError ??
+              'We could not retrieve your patient record details. Please try again.',
+          actions: [
+            ElevatedButton.icon(
+              onPressed: _retryPatientLookup,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Retry'),
+            ),
+          ],
+        );
+      case PatientRecordState.missing:
+        return _PatientRecordNotice(
+          icon: Icons.person_off_outlined,
+          iconColor: Theme.of(context).colorScheme.primary,
+          title: 'Patient record not found',
+          message: 'We could not retrieve your patient record details. '
+              'Please contact clinic staff to link your authentication account.',
+          actions: [
+            OutlinedButton.icon(
+              onPressed: _retryPatientLookup,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Try Again'),
+            ),
+            TextButton(
+              onPressed: () => authProvider.signOut(),
+              child: const Text('Sign Out'),
+            ),
+          ],
+        );
+      case PatientRecordState.loaded:
+      case PatientRecordState.loading:
+      case PatientRecordState.unknown:
+        return Center(
+          child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary),
+        );
+    }
+  }
+
   Widget _buildStatusCard({
     required BuildContext context,
     required String title,
@@ -475,6 +537,73 @@ class _DashboardScreenState extends State<DashboardScreen> {
           color: color,
           fontSize: 10,
           fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+}
+
+/// Explains why the patient dashboard has no data and offers the way out.
+class _PatientRecordNotice extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String message;
+  final List<Widget> actions;
+
+  const _PatientRecordNotice({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.message,
+    required this.actions,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24.0),
+        child: Container(
+          padding: const EdgeInsets.all(24.0),
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Theme.of(context).colorScheme.outline, width: 1),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Icon(icon, color: iconColor, size: 48),
+              const SizedBox(height: 16),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: actions,
+              ),
+            ],
+          ),
         ),
       ),
     );

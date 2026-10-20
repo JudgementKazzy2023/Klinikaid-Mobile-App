@@ -8,6 +8,7 @@ import '../../../../core/models/profile.dart';
 import '../../../../core/errors/failures.dart';
 import '../../../../core/permissions/permission_service.dart';
 import '../../domain/verification_state.dart';
+import '../../domain/patient_record_state.dart';
 import '../../data/verification_service.dart';
 import '../../data/patient_provisioning_service.dart';
 import '../../data/session_activity_service.dart';
@@ -46,6 +47,8 @@ class AuthProvider extends ChangeNotifier {
       _isOnboarded = false;
       _profile = null;
       _patient = null;
+      _patientRecordState = PatientRecordState.unknown;
+      _patientRecordError = null;
       _permissions = const <String>{};
       _permissionFallbackActive = false;
     }
@@ -54,6 +57,8 @@ class AuthProvider extends ChangeNotifier {
   Session? _session;
   Profile? _profile;
   Patient? _patient;
+  PatientRecordState _patientRecordState = PatientRecordState.unknown;
+  String? _patientRecordError;
   bool _hasConsented = false;
   bool _isOnboarded = false;
   bool _isLoading = true;
@@ -68,6 +73,14 @@ class AuthProvider extends ChangeNotifier {
 
   Profile? get profile => _profile;
   Patient? get patient => _patient;
+
+  /// Outcome of the patient record lookup for the active account.
+  PatientRecordState get patientRecordState => _patientRecordState;
+
+  /// Reason the patient record lookup failed, when [patientRecordState] is
+  /// [PatientRecordState.failed].
+  String? get patientRecordError => _patientRecordError;
+
   VerificationState get verificationState => _verificationState;
   bool get wasLoggedOutForInactivity => _wasLoggedOutForInactivity;
   String? get pendingMfaFactorId => _pendingMfaFactorId;
@@ -171,6 +184,9 @@ class AuthProvider extends ChangeNotifier {
        _hasConsented = false;
        _isOnboarded = false;
        _profile = null;
+       _patient = null;
+       _patientRecordState = PatientRecordState.unknown;
+       _patientRecordError = null;
        _permissions = const <String>{};
        _permissionFallbackActive = false;
        return;
@@ -195,6 +211,8 @@ class AuthProvider extends ChangeNotifier {
       _session = null;
       _profile = null;
       _patient = null;
+      _patientRecordState = PatientRecordState.unknown;
+      _patientRecordError = null;
       _permissions = const <String>{};
       _permissionFallbackActive = false;
       _hasConsented = false;
@@ -211,6 +229,9 @@ class AuthProvider extends ChangeNotifier {
       _hasConsented = true;
       _isOnboarded = true;
       _patient = null;
+      // Staff accounts have no patient record to look up.
+      _patientRecordState = PatientRecordState.unknown;
+      _patientRecordError = null;
 
       if (_profile?.role == UserRole.admin && !isAal2) {
         // IMPORTANT: If we already have a pending factor from enrollment/login,
@@ -249,15 +270,14 @@ class AuthProvider extends ChangeNotifier {
       _hasConsented = _profile?.acceptedPrivacyAt != null;
 
       // 3. Evaluate Onboarding Status (linked patients row)
-      try {
-        final patient = await _patientsRepo.getPatientByProfileId(currentUser.id);
-        if (epoch != _identityEpoch) return;
-        _patient = patient;
-        _isOnboarded = _patient != null;
-      } catch (_) {
-        _patient = null;
-        _isOnboarded = false;
-      }
+      //
+      // A failed read and a missing row are recorded separately: the first is
+      // retryable, the second is not. Collapsing them into a null patient made
+      // every consumer spin forever with no way out.
+      await _loadPatientRecord(currentUser.id);
+      // The identity may have changed while the lookup was in flight; the
+      // newer identity owns the state from here on.
+      if (epoch != _identityEpoch) return;
     }
 
     // Session activity check on resume / startup / login:
@@ -281,6 +301,8 @@ class AuthProvider extends ChangeNotifier {
             _session = null;
             _profile = null;
             _patient = null;
+            _patientRecordState = PatientRecordState.unknown;
+            _patientRecordError = null;
             _permissions = const <String>{};
             _permissionFallbackActive = false;
             _hasConsented = false;
@@ -300,6 +322,50 @@ class AuthProvider extends ChangeNotifier {
         _currentUpdateFuture = null;
       }
     }
+  }
+
+  /// Loads the patient record linked to [profileId] and records the outcome.
+  ///
+  /// The failure is kept, not swallowed: a failed read and a missing row are
+  /// different states, and the consumer has to be able to tell them apart.
+  Future<void> _loadPatientRecord(String profileId) async {
+    try {
+      final patient = await _patientsRepo.getPatientByProfileId(profileId);
+      _patient = patient;
+      _isOnboarded = patient != null;
+      _patientRecordState = patient != null
+          ? PatientRecordState.loaded
+          : PatientRecordState.missing;
+      _patientRecordError = null;
+    } on Failure catch (e) {
+      _patient = null;
+      _isOnboarded = false;
+      _patientRecordState = PatientRecordState.failed;
+      _patientRecordError = e.message;
+    } catch (e) {
+      _patient = null;
+      _isOnboarded = false;
+      _patientRecordState = PatientRecordState.failed;
+      _patientRecordError = e.toString();
+    }
+  }
+
+  /// Re-runs the patient record lookup for the active session.
+  ///
+  /// Used by the surfaces that show a retryable error when the read failed.
+  /// Leaves [patientRecordState] as [PatientRecordState.failed] when the read
+  /// fails again, and as [PatientRecordState.loaded] or
+  /// [PatientRecordState.missing] when it succeeds.
+  Future<void> retryPatientLookup() async {
+    final currentUser = _user;
+    if (currentUser == null) return;
+
+    _patientRecordState = PatientRecordState.loading;
+    _patientRecordError = null;
+    notifyListeners();
+
+    await _loadPatientRecord(currentUser.id);
+    notifyListeners();
   }
 
   void _startInactivityMonitor() {
@@ -827,6 +893,8 @@ class AuthProvider extends ChangeNotifier {
         _session = null;
         _profile = null;
         _patient = null;
+        _patientRecordState = PatientRecordState.unknown;
+        _patientRecordError = null;
         _permissions = const <String>{};
         _permissionFallbackActive = false;
         _hasConsented = false;
