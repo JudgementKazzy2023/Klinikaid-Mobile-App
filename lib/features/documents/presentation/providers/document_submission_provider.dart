@@ -70,6 +70,35 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     }
   }
 
+  /// Owner id used by the simulated-offline test hook in [submitDocument].
+  static const _testOwnerId = 'user-uuid-123';
+
+  /// Newest [submitDocument] call. A superseded operation must never write
+  /// state that a newer operation owns.
+  int _submitGeneration = 0;
+
+  /// True while [owner] is still the signed-in identity. Fails closed with
+  /// [_currentUserId]: an unreadable auth client is a different session.
+  bool _ownerStill(String? owner) => _currentUserId() == owner;
+
+  /// Applies this submit's completion state while it is still the newest
+  /// operation; a superseded one writes nothing, so a newer operation's
+  /// loading flag and message are never overwritten.
+  void _completeSubmit(int generation, {String? errorMessage}) {
+    if (generation != _submitGeneration) return;
+    _isLoading = false;
+    _errorMessage = errorMessage;
+    notifyListeners();
+  }
+
+  /// Abandons a submit whose session no longer owns it: no further write is
+  /// dispatched, no success is reported and no newer state is touched.
+  bool _abandonSubmit(int generation) {
+    _completeSubmit(
+        generation, errorMessage: 'Session changed. Please try again.');
+    return false;
+  }
+
   /// Invalidates queue visibility on every auth change so getters can never
   /// keep showing a previous account's drafts, then reloads for the new
   /// identity.
@@ -257,6 +286,11 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   }
 
   /// Submits a document. Uploads directly online, or queues in local SQLite if offline.
+  ///
+  /// The signed-in owner is captured before the first await and re-checked at
+  /// every awaited boundary, so an account switch mid-flight can never write
+  /// this patient's document under another uploader, report a stale success or
+  /// overwrite the state of a newer operation.
   Future<bool> submitDocument({
     required String localFilePath,
     required String originalFileName,
@@ -266,36 +300,55 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     List<String>? selectedTestIds,
     bool isTest = false,
   }) async {
+    // Capture the operation owner before the first async boundary: everything
+    // below is judged against the identity that started this submit, never
+    // against whichever account happens to be signed in when an await ends.
+    final ownerId = isTest ? _testOwnerId : _currentUserId();
+    final generation = ++_submitGeneration;
+
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
+    if (ownerId == null) {
+      _completeSubmit(
+          generation, errorMessage: 'Session expired. Please log in again.');
+      return false;
+    }
+
+    // A patient object belongs to the profile that loaded it. Submitted under
+    // another session it would be written with that session as uploader, so it
+    // is rejected instead. Test mode has no real profile to compare.
+    if (!isTest && patient.profileId != ownerId) {
+      return _abandonSubmit(generation);
+    }
+
+    // Re-checked at every awaited boundary below. Test mode drives a synthetic
+    // owner with no session that could switch.
+    bool stillOwned() => isTest || _ownerStill(ownerId);
+
     // Check duplicate
     if (!isTest) {
       final duplicateDate = await checkPendingDuplicate(patient.id, documentType);
+      // The lookup was awaited: if the account changed while it waited, this
+      // patient object belongs to a different linked profile than the session
+      // now holding it, so nothing further is read or written on its behalf.
+      if (!stillOwned()) return _abandonSubmit(generation);
       if (duplicateDate != null) {
         final label = getCategoryLabel(documentType);
-        _isLoading = false;
-        _errorMessage = "You already have a pending [$label] submitted on $duplicateDate. You can submit a new one once it's reviewed.";
-        notifyListeners();
+        _completeSubmit(
+            generation,
+            errorMessage:
+                "You already have a pending [$label] submitted on $duplicateDate. You can submit a new one once it's reviewed.");
         return false;
       }
     }
     
-    final currentUser = SupabaseService.client.auth.currentUser;
-    if (currentUser == null && !isTest) {
-      _isLoading = false;
-      _errorMessage = 'Session expired. Please log in again.';
-      notifyListeners();
-      return false;
-    }
-    
-    final currentUserId = isTest ? 'user-uuid-123' : currentUser!.id;
     final uuid = UuidGenerator.generateV4();
     // Use clear test prefix directory in storage paths to support testing cleanup
     final storagePath = isTest 
-        ? '$currentUserId/__test__/${uuid}_$originalFileName'
-        : '$currentUserId/${uuid}_$originalFileName';
+        ? '$ownerId/__test__/${uuid}_$originalFileName'
+        : '$ownerId/${uuid}_$originalFileName';
         
     final ocrText = _extractedOcrText ?? '';
     final Map<String, dynamic> metadata = Map<String, dynamic>.from(
@@ -322,22 +375,21 @@ class DocumentSubmissionProvider extends ChangeNotifier {
 
       // The file check resumed after an await: stop before the dispatched
       // upload rather than writing under a newer session.
-      if (_currentUserId() != currentUserId) {
-        _isLoading = false;
-        _errorMessage = 'Session changed. Please try again.';
-        notifyListeners();
-        return false;
-      }
+      if (!stillOwned()) return _abandonSubmit(generation);
       
       await SupabaseService.client.storage
           .from('patient-documents')
           .upload(storagePath, file);
+
+      // The upload resumed after an await: the dispatched upload itself cannot
+      // be recalled, but no document row is written for a changed session.
+      if (!stillOwned()) return _abandonSubmit(generation);
           
       // 2. Insert metadata document row to Supabase Postgres
       final docPayload = Document(
         id: uuid,
         patientId: patient.id,
-        uploaderId: currentUserId,
+        uploaderId: ownerId,
         fileName: originalFileName,
         filePath: storagePath,
         fileType: fileExtension,
@@ -349,16 +401,22 @@ class DocumentSubmissionProvider extends ChangeNotifier {
       );
       
       await _docsRepo.insertDocument(docPayload);
-      
-      _isLoading = false;
-      notifyListeners();
+
+      // The insert resumed after an await: it cannot be recalled either, but a
+      // changed session must not be told this submit succeeded.
+      if (!stillOwned()) return _abandonSubmit(generation);
+
+      _completeSubmit(generation);
       return true;
     } on SocketException catch (_) {
-      // Offline fallback: Queue submission details locally in SQLite cache
+      // Offline fallback: Queue submission details locally in SQLite cache.
+      // An account that changed while the upload failed must not be told the
+      // submit succeeded, and nothing is queued on its behalf.
+      if (!stillOwned()) return _abandonSubmit(generation);
       final offlineDoc = OfflineDocument(
         id: uuid,
         patientId: patient.id,
-        uploaderId: currentUserId,
+        uploaderId: ownerId,
         fileName: originalFileName,
         localFilePath: localFilePath,
         fileType: fileExtension,
@@ -370,18 +428,19 @@ class DocumentSubmissionProvider extends ChangeNotifier {
       await _localDb.queueOfflineDocument(offlineDoc);
       await _loadQueuedSubmissions();
       
-      _isLoading = false;
-      _errorMessage = 'You are currently offline. Document queued for sync.';
-      notifyListeners();
+      _completeSubmit(
+          generation,
+          errorMessage: 'You are currently offline. Document queued for sync.');
       return true;
     } catch (e) {
       final Failure failure = FailureMapper.fromException(e);
       // Map other network failures to offline queueing as well
       if (failure is NetworkFailure) {
+        if (!stillOwned()) return _abandonSubmit(generation);
         final offlineDoc = OfflineDocument(
           id: uuid,
           patientId: patient.id,
-          uploaderId: currentUserId,
+          uploaderId: ownerId,
           fileName: originalFileName,
           localFilePath: localFilePath,
           fileType: fileExtension,
@@ -392,15 +451,14 @@ class DocumentSubmissionProvider extends ChangeNotifier {
         
         await _localDb.queueOfflineDocument(offlineDoc);
         await _loadQueuedSubmissions();
-        _isLoading = false;
-        _errorMessage = 'Network connection failed. Document queued for sync.';
-        notifyListeners();
+        _completeSubmit(
+            generation,
+            errorMessage:
+                'Network connection failed. Document queued for sync.');
         return true;
       }
       
-      _isLoading = false;
-      _errorMessage = failure.message;
-      notifyListeners();
+      _completeSubmit(generation, errorMessage: failure.message);
       return false;
     }
   }
