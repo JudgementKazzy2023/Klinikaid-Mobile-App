@@ -1,6 +1,6 @@
 # Mobile / web alignment ledger
 
-Source baseline: mobile `d749c50`, web `940a2f6`. Refresh on 2026-10-20: mobile main remains `d749c50`; web is `06ccce1` (PR #144 merged); submission coordination PR #3 is `3db90ac`. This is an implementation backlog, not a claim of full parity or a released build. Private audit evidence and verification receipts are retained on the audit host; sensitive findings are tracked there rather than published.
+Source baseline: mobile `d749c50`, web `940a2f6`. Refresh on 2026-10-20: mobile main remains `d749c50`; web checkout is `06ccce1`; refreshed remote master is `9aedf87` (PRs #145/#146/#147/#151 merged); submission coordination PR #3 is `3db90ac`. This is an implementation backlog, not a claim of full parity or a released build. Private audit evidence and verification receipts are retained on the audit host; sensitive findings are tracked there rather than published.
 
 ## Coverage and shared intent
 
@@ -93,3 +93,11 @@ Draft #28 initial gates:71 focused pass,222 full pass/1 existing skip/2 baseline
 [PR #3 planning response](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/pull/3#issuecomment-6292453439) distinguishes uncommitted persistence work from a delivery promise, assigns proposed extraction/report responsibilities, and defines proposed reconciliation states and support escalation. No interim deployment approval or production cleanup is granted.
 
 Draft [PR #29](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/pull/29), `470e4d7`, is stacked on #27:39 initial focused checks pass; full suite230 pass/1 existing skip/2 baseline failures; analyzer152 unchanged, no changed-file findings. Lead acceptance remains pending an offline-completion/lifecycle regression round. Repository-wide gates remain red; no submission-contract, deployment or shipped-behavior acceptance is implied.
+
+## Remote freshness follow-up
+
+On the next fetch, web remote master advanced from `06ccce1` to `9aedf87`; the user checkout stays at `06ccce1`. The diff changes dev dependencies, registration presentation, chat query-language handling and opt-in dark mode. Pinned historical issue evidence is retained. Laboratory constants/validation, template submission checks and backend persistence files are unchanged in that range.
+
+- Web chat now separates English retrieval from language-matched replies with analysis-failure fallback. Compare this shared behavior with the mobile Edge transport and verify the deployed version through the backend owner before any change; no live parity claim. Acceptance includes English/Filipino questions, failed analysis fallback and original-language history.
+- Mobile `lib/main.dart:73` selects `ThemeMode.light`; web opt-in dark mode is an additional platform/product capability, not an established required mobile workflow. Record an agreed preference/accessibility acceptance before treating presentation differences as defects.
+- Registration changes in this range concern presentation; existing domain validation fixes retain their pinned acceptance. Web dev-tool versions do not imply corresponding native dependency updates.
