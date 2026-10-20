@@ -18,3 +18,5 @@
 - 14 · P2 · [#23: Establish Android release configuration and shipped-build provenance](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/23)
 
 Backend-blocked tasks remain explicit. PR #3 retains its submission execution/release hold. Focused passing checks do not waive native gates, live-contract evidence or release ownership.
+
+Delivery updates: draft #24 covers the MFA/transient portion of #11; draft #25 repairs the two default-test failures under #10; draft #26 covers the locally verified queue/cache portion of #12. Deferred-draft ownership under #11 is the next bounded implementation. These are draft changes, not shipped parity or closed acceptance issues.
