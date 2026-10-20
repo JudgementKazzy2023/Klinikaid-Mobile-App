@@ -1,5 +1,7 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
+
 import '../../../../core/cache/local_database.dart';
 import '../../../../core/errors/failures.dart';
 import '../../../../core/models/department_record.dart';
@@ -54,20 +56,24 @@ class DashboardProvider extends ChangeNotifier {
       _isOffline = false;
 
       // Calculate stats
-      _pendingDocumentsCount = documents.where((d) => d.status == DocumentStatus.pending).length;
-      
+      _pendingDocumentsCount = documents
+          .where((d) => d.status == DocumentStatus.pending)
+          .length;
+
       // Active queue entry is the first non-completed/non-cancelled one, or just the most recent
       final activeIndex = queueEntries.indexWhere(
-          (q) => q.status == QueueStatus.waiting || q.status == QueueStatus.inProgress);
-      _activeQueueEntry = activeIndex != -1 
+        (q) =>
+            q.status == QueueStatus.waiting ||
+            q.status == QueueStatus.inProgress,
+      );
+      _activeQueueEntry = activeIndex != -1
           ? queueEntries[activeIndex]
           : (queueEntries.isEmpty ? null : queueEntries.first);
 
       _latestRecord = records.isEmpty ? null : records.first;
 
       // 2. Cache the fetched data locally in Drift
-      await _cacheDataLocally(documents, queueEntries, records);
-
+      await _cacheDataLocally(patientId, documents, queueEntries, records);
     } on NetworkFailure catch (_) {
       // Handle network drop, fallback to Drift local cache
       _isOffline = true;
@@ -83,55 +89,70 @@ class DashboardProvider extends ChangeNotifier {
   }
 
   Future<void> _cacheDataLocally(
+    String patientId,
     List<Document> docs,
     List<PatientQueue> queueEntries,
     List<DepartmentRecord> records,
   ) async {
     try {
       // Map domain models to Drift cached models
-      final cachedDocs = docs.map((doc) => CachedDocument(
-        id: doc.id,
-        patientId: doc.patientId,
-        uploaderId: doc.uploaderId,
-        fileName: doc.fileName,
-        filePath: doc.filePath,
-        fileType: doc.fileType,
-        status: doc.status.name,
-        ocrText: doc.ocrText,
-        extractedMetadata: doc.extractedMetadata != null ? jsonEncode(doc.extractedMetadata) : null,
-        rejectionReason: doc.rejectionReason,
-        createdAt: doc.createdAt,
-        updatedAt: doc.updatedAt,
-      )).toList();
+      final cachedDocs = docs
+          .map(
+            (doc) => CachedDocument(
+              id: doc.id,
+              patientId: doc.patientId,
+              uploaderId: doc.uploaderId,
+              fileName: doc.fileName,
+              filePath: doc.filePath,
+              fileType: doc.fileType,
+              status: doc.status.name,
+              ocrText: doc.ocrText,
+              extractedMetadata: doc.extractedMetadata != null
+                  ? jsonEncode(doc.extractedMetadata)
+                  : null,
+              rejectionReason: doc.rejectionReason,
+              createdAt: doc.createdAt,
+              updatedAt: doc.updatedAt,
+            ),
+          )
+          .toList();
 
-      final cachedQueue = queueEntries.map((q) => CachedPatientQueue(
-        id: q.id,
-        patientId: q.patientId,
-        status: q.status.name,
-        department: q.department.name,
-        triageNotes: q.triageNotes,
-        priorityLevel: q.priorityLevel.name,
-        estimatedWaitMinutes: q.estimatedWaitMinutes,
-        createdAt: q.createdAt,
-        updatedAt: q.updatedAt,
-      )).toList();
+      final cachedQueue = queueEntries
+          .map(
+            (q) => CachedPatientQueue(
+              id: q.id,
+              patientId: q.patientId,
+              status: q.status.toJsonValue(),
+              department: q.department.name,
+              triageNotes: q.triageNotes,
+              priorityLevel: q.priorityLevel.name,
+              estimatedWaitMinutes: q.estimatedWaitMinutes,
+              createdAt: q.createdAt,
+              updatedAt: q.updatedAt,
+            ),
+          )
+          .toList();
 
-      final cachedRecords = records.map((r) => CachedDepartmentRecord(
-        id: r.id,
-        patientId: r.patientId,
-        recorderId: r.recorderId,
-        department: r.department.name,
-        testType: r.testType,
-        testResults: jsonEncode(r.testResults),
-        referenceRangeStatus: r.referenceRangeStatus.name,
-        notes: r.notes,
-        createdAt: r.createdAt,
-        updatedAt: r.updatedAt,
-      )).toList();
+      final cachedRecords = records
+          .map(
+            (r) => CachedDepartmentRecord(
+              id: r.id,
+              patientId: r.patientId,
+              recorderId: r.recorderId,
+              department: r.department.name,
+              testType: r.testType,
+              testResults: jsonEncode(r.testResults),
+              referenceRangeStatus: r.referenceRangeStatus.name,
+              notes: r.notes,
+              createdAt: r.createdAt,
+              updatedAt: r.updatedAt,
+            ),
+          )
+          .toList();
 
       // Write to Drift
       await _localDb.cacheDocuments(cachedDocs);
-      await _localDb.cacheQueueEntries(cachedQueue);
+      await _localDb.replaceQueueForPatient(patientId, cachedQueue);
       await _localDb.cacheDepartmentRecords(cachedRecords);
     } catch (e) {
       debugPrint('Error caching dashboard data: $e');
@@ -144,21 +165,31 @@ class DashboardProvider extends ChangeNotifier {
       final cachedQueue = await _localDb.getQueueForPatient(patientId);
       final cachedRecords = await _localDb.getRecordsForPatient(patientId);
 
-      _pendingDocumentsCount = cachedDocs.where((d) => d.status == 'pending').length;
+      _pendingDocumentsCount = cachedDocs
+          .where((d) => d.status == 'pending')
+          .length;
 
       if (cachedQueue.isNotEmpty) {
         final activeIndex = cachedQueue.indexWhere(
-          (q) => q.status == 'waiting' || q.status == 'in_progress',
+          (q) =>
+              QueueStatus.fromString(q.status) == QueueStatus.waiting ||
+              QueueStatus.fromString(q.status) == QueueStatus.inProgress,
         );
-        final activeDriftQueue = activeIndex != -1 ? cachedQueue[activeIndex] : cachedQueue.first;
-        
+        final activeDriftQueue = activeIndex != -1
+            ? cachedQueue[activeIndex]
+            : cachedQueue.first;
+
         _activeQueueEntry = PatientQueue(
           id: activeDriftQueue.id,
           patientId: activeDriftQueue.patientId,
           status: QueueStatus.fromString(activeDriftQueue.status),
-          department: Department.fromString(activeDriftQueue.department) ?? Department.laboratory,
+          department:
+              Department.fromString(activeDriftQueue.department) ??
+              Department.laboratory,
           triageNotes: activeDriftQueue.triageNotes,
-          priorityLevel: PriorityLevel.fromString(activeDriftQueue.priorityLevel),
+          priorityLevel: PriorityLevel.fromString(
+            activeDriftQueue.priorityLevel,
+          ),
           estimatedWaitMinutes: activeDriftQueue.estimatedWaitMinutes,
           createdAt: activeDriftQueue.createdAt,
           updatedAt: activeDriftQueue.updatedAt,
@@ -173,10 +204,15 @@ class DashboardProvider extends ChangeNotifier {
           id: latestDriftRec.id,
           patientId: latestDriftRec.patientId,
           recorderId: latestDriftRec.recorderId,
-          department: Department.fromString(latestDriftRec.department) ?? Department.laboratory,
+          department:
+              Department.fromString(latestDriftRec.department) ??
+              Department.laboratory,
           testType: latestDriftRec.testType,
-          testResults: jsonDecode(latestDriftRec.testResults) as Map<String, dynamic>,
-          referenceRangeStatus: ReferenceRangeStatus.fromString(latestDriftRec.referenceRangeStatus),
+          testResults:
+              jsonDecode(latestDriftRec.testResults) as Map<String, dynamic>,
+          referenceRangeStatus: ReferenceRangeStatus.fromString(
+            latestDriftRec.referenceRangeStatus,
+          ),
           notes: latestDriftRec.notes,
           createdAt: latestDriftRec.createdAt,
           updatedAt: latestDriftRec.updatedAt,
