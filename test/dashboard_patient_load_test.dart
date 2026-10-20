@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:drift/native.dart';
@@ -38,6 +39,41 @@ class FakePatientsRepository extends PatientsRepository {
     final error = failure;
     if (error != null) throw error;
     return row;
+  }
+}
+
+/// Patients repository whose lookup for a given profile id can be held open
+/// until the test releases it.
+class ControllablePatientsRepository extends PatientsRepository {
+  /// Rows returned by a lookup that is not held open.
+  final Map<String, Patient?> rows = <String, Patient?>{};
+
+  /// Number of lookups started, per profile id.
+  final Map<String, int> calls = <String, int>{};
+
+  final Map<String, Completer<Patient?>> _held = <String, Completer<Patient?>>{};
+
+  /// Holds the next lookup for [profileId] open.
+  void hold(String profileId) {
+    _held[profileId] = Completer<Patient?>();
+  }
+
+  /// Releases the held lookup for [profileId] with [row].
+  void release(String profileId, {Patient? row}) {
+    _held.remove(profileId)!.complete(row);
+  }
+
+  /// Releases the held lookup for [profileId] with a failure.
+  void releaseWithFailure(String profileId, Object error) {
+    _held.remove(profileId)!.completeError(error);
+  }
+
+  @override
+  Future<Patient?> getPatientByProfileId(String profileId) async {
+    calls[profileId] = (calls[profileId] ?? 0) + 1;
+    final held = _held[profileId];
+    if (held != null) return held.future;
+    return rows[profileId];
   }
 }
 
@@ -101,9 +137,9 @@ class MockSupabaseClient extends SupabaseClient {
   GoTrueClient get auth => mockAuth;
 }
 
-User testUser() {
+User testUser({String id = 'auth-user-1'}) {
   return User(
-    id: 'auth-user-1',
+    id: id,
     appMetadata: const {},
     userMetadata: const {},
     aud: 'authenticated',
@@ -112,10 +148,13 @@ User testUser() {
   );
 }
 
-Patient testPatient() {
+Patient testPatient({
+  String id = 'patient-row-1',
+  String profileId = 'auth-user-1',
+}) {
   return Patient(
-    id: 'patient-row-1',
-    profileId: 'auth-user-1',
+    id: id,
+    profileId: profileId,
     firstName: 'Jane',
     lastName: 'Patient',
     dateOfBirth: DateTime(1990, 1, 1),
@@ -129,7 +168,7 @@ Patient testPatient() {
 }
 
 AuthProvider buildAuthProvider(
-  FakePatientsRepository patientsRepo, {
+  PatientsRepository patientsRepo, {
   MockGoTrueClient? goTrue,
 }) {
   return AuthProvider(
@@ -252,6 +291,80 @@ void main() {
       expect(provider.patientRecordError, contains('Connection failed'));
       expect(provider.patient, isNull);
       provider.dispose();
+    });
+  });
+
+  group('AuthProvider patient record lookup isolation', () {
+    test('a lookup that completes after the session ended is discarded',
+        () async {
+      final repo = ControllablePatientsRepository();
+      repo.hold('auth-user-1');
+      final provider = buildAuthProvider(repo);
+      provider.setMockState(user: testUser());
+
+      final pending = provider.retryPatientLookup();
+      expect(provider.patientRecordState, PatientRecordState.loading);
+
+      // The account signs out while its lookup is still in flight.
+      await provider.signOut();
+
+      // The late result of the ended session arrives.
+      repo.release('auth-user-1', row: testPatient());
+      await pending;
+
+      expect(provider.patient, isNull);
+      expect(provider.isOnboarded, isFalse);
+      expect(provider.patientRecordState, isNot(PatientRecordState.loaded));
+      expect(provider.patientRecordError, isNull);
+    });
+
+    test('a late result does not overwrite the patient of the new account',
+        () async {
+      final repo = ControllablePatientsRepository();
+      repo.hold('auth-user-1');
+      final provider = buildAuthProvider(repo);
+      provider.setMockState(user: testUser());
+
+      final pending = provider.retryPatientLookup();
+
+      // Another account takes over the session and loads its own patient row.
+      provider.setMockState(user: testUser(id: 'auth-user-2'));
+      repo.rows['auth-user-2'] =
+          testPatient(id: 'patient-row-2', profileId: 'auth-user-2');
+      await provider.retryPatientLookup();
+      expect(provider.patient?.id, 'patient-row-2');
+
+      // The late result of the previous account arrives.
+      repo.release('auth-user-1', row: testPatient());
+      await pending;
+
+      expect(provider.patient?.id, 'patient-row-2');
+      expect(provider.patientRecordState, PatientRecordState.loaded);
+    });
+
+    test('a late failure does not mark the new session as failed', () async {
+      final repo = ControllablePatientsRepository();
+      repo.hold('auth-user-1');
+      final provider = buildAuthProvider(repo);
+      provider.setMockState(user: testUser());
+
+      final pending = provider.retryPatientLookup();
+
+      // The account signs out while its lookup is still in flight.
+      await provider.signOut();
+
+      // The late failure of the ended session arrives.
+      repo.releaseWithFailure(
+        'auth-user-1',
+        const NetworkFailure(
+          'Connection failed: Please check your internet connection.',
+        ),
+      );
+      await pending;
+
+      expect(provider.patientRecordState, isNot(PatientRecordState.failed));
+      expect(provider.patientRecordError, isNull);
+      expect(provider.patient, isNull);
     });
   });
 

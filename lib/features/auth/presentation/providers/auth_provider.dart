@@ -324,13 +324,29 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  /// Whether [profileId] still identifies the account this provider is
+  /// signed in as.
+  ///
+  /// A patient lookup can finish after the account was signed out or replaced
+  /// by another one. Its outcome belongs to the session that started it and
+  /// must never be written into a different session.
+  bool _isActiveAccount(String profileId) {
+    if (_isDisposed) return false;
+    return _user?.id == profileId;
+  }
+
   /// Loads the patient record linked to [profileId] and records the outcome.
   ///
   /// The failure is kept, not swallowed: a failed read and a missing row are
   /// different states, and the consumer has to be able to tell them apart.
+  ///
+  /// The outcome is only applied while [profileId] is still the active
+  /// account; a result that arrives after a sign-out or an account switch is
+  /// discarded instead of leaking into the new session.
   Future<void> _loadPatientRecord(String profileId) async {
     try {
       final patient = await _patientsRepo.getPatientByProfileId(profileId);
+      if (!_isActiveAccount(profileId)) return;
       _patient = patient;
       _isOnboarded = patient != null;
       _patientRecordState = patient != null
@@ -338,11 +354,13 @@ class AuthProvider extends ChangeNotifier {
           : PatientRecordState.missing;
       _patientRecordError = null;
     } on Failure catch (e) {
+      if (!_isActiveAccount(profileId)) return;
       _patient = null;
       _isOnboarded = false;
       _patientRecordState = PatientRecordState.failed;
       _patientRecordError = e.message;
     } catch (e) {
+      if (!_isActiveAccount(profileId)) return;
       _patient = null;
       _isOnboarded = false;
       _patientRecordState = PatientRecordState.failed;
@@ -357,6 +375,7 @@ class AuthProvider extends ChangeNotifier {
   /// fails again, and as [PatientRecordState.loaded] or
   /// [PatientRecordState.missing] when it succeeds.
   Future<void> retryPatientLookup() async {
+    if (_isDisposed) return;
     final currentUser = _user;
     if (currentUser == null) return;
 
@@ -365,6 +384,7 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     await _loadPatientRecord(currentUser.id);
+    if (_isDisposed) return;
     notifyListeners();
   }
 
