@@ -42,6 +42,8 @@ class MockGoTrueClient extends GoTrueClient {
 
   final Map<String, User> usersByEmail = {};
   User? activeUser;
+  final credentialGates = <String, Completer<void>>{};
+  final credentialStarted = <String, Completer<void>>{};
   int signOutCalls = 0;
   Completer<void>? signOutGate;
 
@@ -55,6 +57,9 @@ class MockGoTrueClient extends GoTrueClient {
     required String password,
     String? captchaToken,
   }) async {
+    credentialStarted[email]?.complete();
+    final gate = credentialGates[email];
+    if (gate != null) await gate.future;
     final user = usersByEmail[email]!;
     activeUser = user;
     final session = Session(
@@ -94,10 +99,13 @@ class MockSupabaseClient extends SupabaseClient {
 class MockProfilesRepository extends ProfilesRepository {
   final Map<String, Profile> profilesById = {};
   Completer<Profile>? profileGate;
+  final gatesById = <String, Completer<Profile>>{};
+  final startedById = <String, Completer<void>>{};
 
   @override
   Future<Profile> getProfile(String id) async {
-    final gate = profileGate;
+    startedById[id]?.complete();
+    final gate = gatesById[id] ?? profileGate;
     if (gate != null) return gate.future;
     return profilesById[id]!;
   }
@@ -721,6 +729,69 @@ void main() {
       expect(provider.user?.id, 'user-b');
       expect(provider.patient?.profileId, 'user-b');
       expect(provider.isOnboarded, isTrue);
+    });
+  });
+
+  group('interrupted login preserves the newer request', () {
+    for (final failCredentials in [false, true]) {
+      test(
+        'late credentials (failure=$failCredentials) preserve B loading',
+        () async {
+          final aGate = Completer<void>();
+          final aStarted = Completer<void>();
+          final bGate = Completer<Profile>();
+          final bStarted = Completer<void>();
+          mockAuth.usersByEmail['a@clinic.test'] = userA;
+          mockAuth.usersByEmail['b@clinic.test'] = userB;
+          mockAuth.credentialGates['a@clinic.test'] = aGate;
+          mockAuth.credentialStarted['a@clinic.test'] = aStarted;
+          profilesRepo.gatesById['user-b'] = bGate;
+          profilesRepo.startedById['user-b'] = bStarted;
+          final aLogin = provider.signIn('a@clinic.test', 'password');
+          await aStarted.future;
+          await provider.signOut();
+          final bLogin = provider.signIn('b@clinic.test', 'password');
+          await bStarted.future;
+          expect(provider.isLoading, isTrue);
+          if (failCredentials) {
+            aGate.completeError(const AuthException('old login failure'));
+          } else {
+            aGate.complete();
+          }
+          expect(await aLogin, LoginOutcome.invalidCredentials);
+          expect(provider.isLoading, isTrue);
+          expect(provider.errorMessage, isNull);
+          bGate.complete(staffProfile(id: 'user-b'));
+          expect(await bLogin, LoginOutcome.success);
+          expect(provider.user?.id, 'user-b');
+          expect(provider.isLoading, isFalse);
+        },
+      );
+    }
+
+    test('late profile completion preserves B loading', () async {
+      final aGate = Completer<Profile>();
+      final aStarted = Completer<void>();
+      final bGate = Completer<Profile>();
+      final bStarted = Completer<void>();
+      mockAuth.usersByEmail['a@clinic.test'] = userA;
+      mockAuth.usersByEmail['b@clinic.test'] = userB;
+      profilesRepo.gatesById['user-a'] = aGate;
+      profilesRepo.startedById['user-a'] = aStarted;
+      profilesRepo.gatesById['user-b'] = bGate;
+      profilesRepo.startedById['user-b'] = bStarted;
+      final aLogin = provider.signIn('a@clinic.test', 'password');
+      await aStarted.future;
+      await provider.signOut();
+      final bLogin = provider.signIn('b@clinic.test', 'password');
+      aGate.complete(staffProfile());
+      expect(await aLogin, LoginOutcome.invalidCredentials);
+      await bStarted.future;
+      expect(provider.isLoading, isTrue);
+      bGate.complete(staffProfile(id: 'user-b'));
+      expect(await bLogin, LoginOutcome.success);
+      expect(provider.user?.id, 'user-b');
+      expect(provider.isLoading, isFalse);
     });
   });
 

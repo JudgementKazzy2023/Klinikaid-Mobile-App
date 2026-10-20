@@ -365,14 +365,13 @@ class AuthProvider extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
     final signOutGeneration = _signOutGeneration;
+    var loginEpoch = _identityEpoch;
 
     try {
       final response = await _client.auth.signInWithPassword(email: email, password: password);
-      if (signOutGeneration != _signOutGeneration) {
+      if (signOutGeneration != _signOutGeneration || loginEpoch != _identityEpoch) {
         // A sign-out was requested while this login was in flight; the newer
         // intent wins — never install this identity or report success.
-        _isLoading = false;
-        notifyListeners();
         return LoginOutcome.invalidCredentials;
       }
       _session = response.session;
@@ -382,13 +381,12 @@ class AuthProvider extends ChangeNotifier {
       // load or MFA factor listing below must not be mistaken for a
       // still-valid login.
       final epoch = _identityEpoch;
+      loginEpoch = epoch;
       await _updateLocalStates();
 
       if (epoch != _identityEpoch) {
         // Identity changed while signing in — never report success or arm a
         // pending MFA factor for a session that is no longer active.
-        _isLoading = false;
-        notifyListeners();
         return LoginOutcome.invalidCredentials;
       }
 
@@ -414,9 +412,11 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return LoginOutcome.success;
     } catch (e) {
-      _errorMessage = e is AuthException ? e.message : e.toString();
-      _isLoading = false;
-      notifyListeners();
+      if (loginEpoch == _identityEpoch && signOutGeneration == _signOutGeneration) {
+        _errorMessage = e is AuthException ? e.message : e.toString();
+        _isLoading = false;
+        notifyListeners();
+      }
       return LoginOutcome.invalidCredentials;
     }
   }
