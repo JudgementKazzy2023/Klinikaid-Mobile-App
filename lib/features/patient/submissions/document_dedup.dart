@@ -20,7 +20,58 @@ String getCategoryLabel(String category) {
   return category;
 }
 
-Future<String?> checkPendingDuplicate(String patientId, String category) async {
+/// The three outcomes of a pending-duplicate check.
+///
+/// There is deliberately no outcome meaning "the read failed but treat it as
+/// clear": a read that never completed is not evidence that the patient has no
+/// pending document in the category.
+enum DuplicateCheckState {
+  /// A pending document in the same category already exists.
+  duplicate,
+
+  /// The read succeeded and no pending document in the category exists.
+  clear,
+
+  /// The read failed, so the duplicate status is unknown.
+  failed,
+}
+
+/// The result of [checkPendingDuplicate].
+class DuplicateCheckResult {
+  /// Which of the three outcomes the check produced.
+  final DuplicateCheckState state;
+
+  /// Formatted submission date of the matching pending document.
+  /// Only set when [state] is [DuplicateCheckState.duplicate].
+  final String? duplicateDate;
+
+  /// The error that stopped the check.
+  /// Only set when [state] is [DuplicateCheckState.failed].
+  final Object? error;
+
+  const DuplicateCheckResult._(this.state, this.duplicateDate, this.error);
+
+  /// A pending document in the same category exists, submitted on [date].
+  const DuplicateCheckResult.duplicate(String date)
+      : this._(DuplicateCheckState.duplicate, date, null);
+
+  /// The read succeeded and no pending document in the category exists.
+  const DuplicateCheckResult.clear()
+      : this._(DuplicateCheckState.clear, null, null);
+
+  /// The read failed with [error]; the duplicate status is unknown.
+  const DuplicateCheckResult.failed(Object error)
+      : this._(DuplicateCheckState.failed, null, error);
+}
+
+/// Checks whether the patient already has a pending document in [category].
+///
+/// Returns [DuplicateCheckState.duplicate] with the submission date when one
+/// exists, [DuplicateCheckState.clear] when the read succeeded and none
+/// exists, and [DuplicateCheckState.failed] when the read could not be
+/// completed. A failed read is never reported as "no duplicate": callers must
+/// not submit a document as unique while the check is unverified.
+Future<DuplicateCheckResult> checkPendingDuplicate(String patientId, String category) async {
   try {
     final response = await SupabaseService.client
         .from('documents')
@@ -32,18 +83,19 @@ Future<String?> checkPendingDuplicate(String patientId, String category) async {
       final fileType = doc['file_type'] as String? ?? '';
       final metadata = doc['extracted_metadata'] as Map<String, dynamic>?;
       final resolvedCategory = resolveDocumentCategory(fileType, metadata);
-      
+
       final status = doc['status'] as String? ?? '';
       if (status == 'pending' && resolvedCategory == category) {
         final createdAtStr = doc['created_at'] as String;
         final date = DateTime.parse(createdAtStr).toLocal();
         final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         final formattedDate = "${months[date.month - 1]} ${date.day.toString().padLeft(2, '0')}, ${date.year}";
-        return formattedDate;
+        return DuplicateCheckResult.duplicate(formattedDate);
       }
     }
+    return const DuplicateCheckResult.clear();
   } catch (e, stack) {
     print("checkPendingDuplicate error: $e\n$stack");
+    return DuplicateCheckResult.failed(e);
   }
-  return null;
 }

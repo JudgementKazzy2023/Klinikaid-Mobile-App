@@ -121,10 +121,10 @@ class MockDocumentSubmissionProvider extends DocumentSubmissionProvider {
     List<String>? selectedTestIds,
     bool isTest = false,
   }) async {
-    final duplicateDate = await checkPendingDuplicate(patient.id, documentType);
-    if (duplicateDate != null) {
+    final duplicateCheck = await checkPendingDuplicate(patient.id, documentType);
+    if (duplicateCheck.state == DuplicateCheckState.duplicate) {
       final label = getCategoryLabel(documentType);
-      mockErrorMessage = "You already have a pending [$label] submitted on $duplicateDate. You can submit a new one once it's reviewed.";
+      mockErrorMessage = "You already have a pending [$label] submitted on ${duplicateCheck.duplicateDate}. You can submit a new one once it's reviewed.";
       return false;
     }
     return true;
@@ -223,10 +223,11 @@ void main() {
       ];
 
       final blockedDate = await checkPendingDuplicate(testPatient.id, 'lab-request');
-      expect(blockedDate, isNotNull); // Blocked!
+      expect(blockedDate.state, DuplicateCheckState.duplicate); // Blocked!
+      expect(blockedDate.duplicateDate, isNotNull);
 
       final allowedDate = await checkPendingDuplicate(testPatient.id, 'referral-form');
-      expect(allowedDate, isNull); // Allowed (different type)!
+      expect(allowedDate.state, DuplicateCheckState.clear); // Allowed (different type)!
 
       // A pending 'other' blocks a second 'other'
       fakeClient.mockDocuments = [
@@ -238,7 +239,7 @@ void main() {
         }
       ];
       final otherBlockedDate = await checkPendingDuplicate(testPatient.id, 'other');
-      expect(otherBlockedDate, isNotNull); // Blocked!
+      expect(otherBlockedDate.state, DuplicateCheckState.duplicate); // Blocked!
 
       // 2. Approved same-type document does not block
       fakeClient.mockDocuments = [
@@ -250,7 +251,7 @@ void main() {
         }
       ];
       final approvedCheck = await checkPendingDuplicate(testPatient.id, 'lab-request');
-      expect(approvedCheck, isNull); // Allowed (no longer pending)!
+      expect(approvedCheck.state, DuplicateCheckState.clear); // Allowed (no longer pending)!
 
       // Approved 'other' does not block
       fakeClient.mockDocuments = [
@@ -262,7 +263,7 @@ void main() {
         }
       ];
       final otherApprovedCheck = await checkPendingDuplicate(testPatient.id, 'other');
-      expect(otherApprovedCheck, isNull);
+      expect(otherApprovedCheck.state, DuplicateCheckState.clear);
 
       // 3. Rejected same-type document does not block
       fakeClient.mockDocuments = [
@@ -274,7 +275,7 @@ void main() {
         }
       ];
       final rejectedCheck = await checkPendingDuplicate(testPatient.id, 'lab-request');
-      expect(rejectedCheck, isNull); // Allowed (no longer pending)!
+      expect(rejectedCheck.state, DuplicateCheckState.clear); // Allowed (no longer pending)!
 
       // Rejected 'other' does not block
       fakeClient.mockDocuments = [
@@ -286,7 +287,7 @@ void main() {
         }
       ];
       final otherRejectedCheck = await checkPendingDuplicate(testPatient.id, 'other');
-      expect(otherRejectedCheck, isNull);
+      expect(otherRejectedCheck.state, DuplicateCheckState.clear);
     });
   });
 

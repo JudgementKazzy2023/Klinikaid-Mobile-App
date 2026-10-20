@@ -36,10 +36,15 @@ class TemplatesProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final duplicateDate = await checkPendingDuplicate(patientId, templateId);
-      if (duplicateDate != null) {
-        final label = getCategoryLabel(templateId);
-        throw Exception("You already have a pending [$label] submitted on $duplicateDate. You can submit a new one once it's reviewed.");
+      final duplicateCheck = await checkPendingDuplicate(patientId, templateId);
+      final label = getCategoryLabel(templateId);
+      if (duplicateCheck.state == DuplicateCheckState.duplicate) {
+        throw Exception("You already have a pending [$label] submitted on ${duplicateCheck.duplicateDate}. You can submit a new one once it's reviewed.");
+      }
+      if (duplicateCheck.state == DuplicateCheckState.failed) {
+        // The existing documents could not be read, so the duplicate status is
+        // unknown. Do not submit as if it were unique: ask the patient to retry.
+        throw Exception("Could not check for a pending [$label] submission. Please check your connection and try again.");
       }
       final Map<String, dynamic> extractedMetadata = {
         'template_id': templateId,
