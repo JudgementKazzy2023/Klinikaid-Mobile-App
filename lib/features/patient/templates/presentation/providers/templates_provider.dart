@@ -43,7 +43,13 @@ class TemplatesProvider extends ChangeNotifier {
       }
       if (duplicateCheck.state == DuplicateCheckState.failed) {
         // The existing documents could not be read, so the duplicate status is
-        // unknown. Do not submit as if it were unique: ask the patient to retry.
+        // unknown. Do not submit as if it were unique: ask the patient to
+        // retry.
+        //
+        // Unlike the document upload path, template submissions have no
+        // offline queue to fall back on (TemplatesRepository only inserts the
+        // row in Postgres), so a failed check blocks the submission whatever
+        // the cause of the failure is.
         throw Exception("Could not check for a pending [$label] submission. Please check your connection and try again.");
       }
       final Map<String, dynamic> extractedMetadata = {

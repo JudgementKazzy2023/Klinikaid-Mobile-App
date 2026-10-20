@@ -357,6 +357,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     bool stillOwned() => isTest || _ownerStill(ownerId);
 
     // Check duplicate
+    Object? offlineCheckFailure;
     if (!isTest) {
       final duplicateCheck = await checkPendingDuplicate(patient.id, documentType);
       // The lookup was awaited: if the account changed while it waited, this
@@ -372,14 +373,23 @@ class DocumentSubmissionProvider extends ChangeNotifier {
         return false;
       }
       if (duplicateCheck.state == DuplicateCheckState.failed) {
-        // The existing documents could not be read, so the duplicate status is
-        // unknown. Do not upload as if it were unique: ask the patient to
-        // retry.
-        _completeSubmit(
-            generation,
-            errorMessage:
-                "Could not check for a pending [$label] submission. Please check your connection and try again.");
-        return false;
+        final checkError = duplicateCheck.error;
+        if (duplicateCheck.isNetworkFailure && checkError != null) {
+          // The device is offline: the server was never reached, so the check
+          // says nothing about duplicates. Keep the document on the device and
+          // queue it for sync, exactly like a failed upload does. The upload
+          // is not attempted, because the network is known to be down.
+          offlineCheckFailure = checkError;
+        } else {
+          // The existing documents could not be read, so the duplicate status
+          // is unknown. Do not upload as if it were unique: ask the patient to
+          // retry.
+          _completeSubmit(
+              generation,
+              errorMessage:
+                  "Could not check for a pending [$label] submission. Please check your connection and try again.");
+          return false;
+        }
       }
     }
     
@@ -399,6 +409,24 @@ class DocumentSubmissionProvider extends ChangeNotifier {
         detectedTests: _detectedTests,
         selectedTestIds: selectedTestIds ?? _detectedTests.map((test) => test.id).toList(),
       ));
+    }
+
+    if (offlineCheckFailure != null) {
+      // The duplicate check could not reach the server, so the document is
+      // queued locally instead of being uploaded.
+      return _queueOfflineSubmission(
+        generation: generation,
+        uuid: uuid,
+        patient: patient,
+        ownerId: ownerId,
+        localFilePath: localFilePath,
+        originalFileName: originalFileName,
+        fileExtension: fileExtension,
+        ocrText: ocrText,
+        metadata: metadata,
+        error: offlineCheckFailure,
+        stillOwned: stillOwned,
+      );
     }
 
     try {
@@ -447,53 +475,91 @@ class DocumentSubmissionProvider extends ChangeNotifier {
 
       _completeSubmit(generation);
       return true;
-    } on SocketException catch (_) {
+    } on SocketException catch (e) {
       // Offline fallback: Queue submission details locally in SQLite cache.
       // An account that changed while the upload failed must not be told the
       // submit succeeded, and nothing new is done on its behalf.
       if (!stillOwned()) return _abandonSubmit(generation);
-      return _completeOfflineFallback(
+      return _queueOfflineSubmission(
         generation: generation,
-        doc: OfflineDocument(
-          id: uuid,
-          patientId: patient.id,
-          uploaderId: ownerId,
-          fileName: originalFileName,
-          localFilePath: localFilePath,
-          fileType: fileExtension,
-          ocrText: ocrText,
-          extractedMetadata: jsonEncode(metadata),
-          createdAt: DateTime.now(),
-        ),
+        uuid: uuid,
+        patient: patient,
+        ownerId: ownerId,
+        localFilePath: localFilePath,
+        originalFileName: originalFileName,
+        fileExtension: fileExtension,
+        ocrText: ocrText,
+        metadata: metadata,
+        error: e,
         stillOwned: stillOwned,
-        message: 'You are currently offline. Document queued for sync.',
       );
     } catch (e) {
       final Failure failure = FailureMapper.fromException(e);
       // Map other network failures to offline queueing as well
       if (failure is NetworkFailure) {
         if (!stillOwned()) return _abandonSubmit(generation);
-        return _completeOfflineFallback(
+        return _queueOfflineSubmission(
           generation: generation,
-          doc: OfflineDocument(
-            id: uuid,
-            patientId: patient.id,
-            uploaderId: ownerId,
-            fileName: originalFileName,
-            localFilePath: localFilePath,
-            fileType: fileExtension,
-            ocrText: ocrText,
-            extractedMetadata: jsonEncode(metadata),
-            createdAt: DateTime.now(),
-          ),
+          uuid: uuid,
+          patient: patient,
+          ownerId: ownerId,
+          localFilePath: localFilePath,
+          originalFileName: originalFileName,
+          fileExtension: fileExtension,
+          ocrText: ocrText,
+          metadata: metadata,
+          error: e,
           stillOwned: stillOwned,
-          message: 'Network connection failed. Document queued for sync.',
         );
       }
       
       _completeSubmit(generation, errorMessage: failure.message);
       return false;
     }
+  }
+
+  /// Keeps the submission on the device and queues it for a later sync.
+  ///
+  /// This is the single offline path of [submitDocument]: a socket error means
+  /// the device is offline, any other connectivity error means the connection
+  /// failed. Both keep the document in the local queue; only the message
+  /// differs.
+  ///
+  /// The queued row is attributed to the account that started the submit
+  /// ([ownerId]) and the ownership is re-checked after every local await, so an
+  /// account switch while the row is written never reports success for the
+  /// newer session and never rewrites the row for it.
+  Future<bool> _queueOfflineSubmission({
+    required int generation,
+    required String uuid,
+    required Patient patient,
+    required String ownerId,
+    required String localFilePath,
+    required String originalFileName,
+    required String fileExtension,
+    required String ocrText,
+    required Map<String, dynamic> metadata,
+    required Object error,
+    required bool Function() stillOwned,
+  }) async {
+    return _completeOfflineFallback(
+      generation: generation,
+      doc: OfflineDocument(
+        id: uuid,
+        patientId: patient.id,
+        uploaderId: ownerId,
+        fileName: originalFileName,
+        localFilePath: localFilePath,
+        fileType: fileExtension,
+        ocrText: ocrText,
+        extractedMetadata: jsonEncode(metadata),
+        createdAt: DateTime.now(),
+      ),
+      stillOwned: stillOwned,
+      message: error is SocketException
+          ? 'You are currently offline. Document queued for sync.'
+          : 'Network connection failed. Document queued for sync.',
+    );
   }
 
   /// Triggers background queue uploads syncing when online.

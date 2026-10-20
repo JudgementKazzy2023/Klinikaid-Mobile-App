@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -40,10 +41,13 @@ class FakeSupabaseClient extends Fake implements SupabaseClient {
   SupabaseQueryBuilder from(String table) => _FakeQueryBuilder(this);
 }
 
+/// Id of the account that is signed in while these tests run.
+const _signedInUserId = 'user-uuid-123';
+
 class _FakeGoTrueClient extends Fake implements GoTrueClient {
   @override
   User? get currentUser => const User(
-        id: 'user-uuid-123',
+        id: _signedInUserId,
         appMetadata: {},
         userMetadata: {},
         aud: 'authenticated',
@@ -181,7 +185,7 @@ void main() {
       id: 'patient-row-id-123',
       // The signed-in account owns this patient record: the provider refuses a
       // document submitted for a patient that belongs to another profile.
-      profileId: 'user-uuid-123',
+      profileId: _signedInUserId,
       firstName: 'Alice',
       lastName: 'Smith',
       dateOfBirth: DateTime(1995, 8, 10),
@@ -248,6 +252,29 @@ void main() {
       }
     });
 
+    test('only a connectivity failure is reported as a network failure',
+        () async {
+      client.readError = const SocketException('Network is unreachable');
+      final networkFailure =
+          await checkPendingDuplicate(patient.id, 'lab-request');
+      expect(networkFailure.state, DuplicateCheckState.failed);
+      expect(networkFailure.isNetworkFailure, isTrue);
+
+      client.readError = const PostgrestException(
+        message: 'permission denied for table documents',
+        code: '42501',
+      );
+      final permissionFailure =
+          await checkPendingDuplicate(patient.id, 'lab-request');
+      expect(permissionFailure.state, DuplicateCheckState.failed);
+      expect(permissionFailure.isNetworkFailure, isFalse);
+
+      client.readError = const FormatException('Unexpected character at 0');
+      final parseFailure = await checkPendingDuplicate(patient.id, 'lab-request');
+      expect(parseFailure.state, DuplicateCheckState.failed);
+      expect(parseFailure.isNetworkFailure, isFalse);
+    });
+
     test('a malformed row fails the check instead of reporting no duplicate',
         () async {
       final malformedRows = <Map<String, dynamic>>[
@@ -280,6 +307,7 @@ void main() {
 
         expect(result.state, DuplicateCheckState.failed, reason: '$row');
         expect(result.duplicateDate, isNull, reason: '$row');
+        expect(result.isNetworkFailure, isFalse, reason: '$row');
       }
     });
 
@@ -288,18 +316,98 @@ void main() {
       final duplicate = await checkPendingDuplicate(patient.id, 'lab-request');
       expect(duplicate.state, DuplicateCheckState.duplicate);
       expect(duplicate.duplicateDate, isNotNull);
+      expect(duplicate.isNetworkFailure, isFalse);
 
       client.documents = [_pendingTemplateRow('referral-form')];
       final other = await checkPendingDuplicate(patient.id, 'lab-request');
       expect(other.state, DuplicateCheckState.clear);
       expect(other.duplicateDate, isNull);
+      expect(other.isNetworkFailure, isFalse);
+    });
+  });
+
+  group('Immediate upload — an offline device queues the document locally', () {
+    test('a network failure in the duplicate check queues the document offline',
+        () async {
+      client.readError = const SocketException('Network is unreachable');
+      final localDb = LocalDatabase(NativeDatabase.memory());
+      final provider = DocumentSubmissionProvider(localDb);
+
+      final submitted = await submitScan(provider);
+
+      // The document stays on the device, queued for a later sync.
+      expect(submitted, isTrue);
+      final queued = await localDb.getQueuedDocuments(_signedInUserId);
+      expect(queued, hasLength(1));
+      expect(queued.single.fileName, 'scan.jpg');
+      expect(queued.single.localFilePath, scanFile.path);
+      expect(queued.single.patientId, patient.id);
+      expect(queued.single.uploaderId, _signedInUserId);
+      expect(provider.queuedSubmissions, hasLength(1));
+
+      // Nothing was sent to the server.
+      expect(client.uploads, isEmpty);
+      expect(client.inserts, isEmpty);
+      expect(
+        provider.errorMessage,
+        'You are currently offline. Document queued for sync.',
+      );
+    });
+
+    test('a permission failure in the duplicate check still blocks', () async {
+      client.readError = const PostgrestException(
+        message: 'permission denied for table documents',
+        code: '42501',
+      );
+      final localDb = LocalDatabase(NativeDatabase.memory());
+      final provider = DocumentSubmissionProvider(localDb);
+
+      final submitted = await submitScan(provider);
+
+      expect(submitted, isFalse);
+      expect(
+        provider.errorMessage,
+        contains(
+            'Could not check for a pending [Laboratory Request] submission.'),
+      );
+      expect(provider.errorMessage, contains('try again'));
+      expect(client.uploads, isEmpty);
+      expect(client.inserts, isEmpty);
+      expect(await localDb.getQueuedDocuments(_signedInUserId), isEmpty);
+    });
+
+    test('a malformed row in the duplicate check still blocks', () async {
+      client.documents = [
+        {
+          'file_type': 'template',
+          'status': 'pending',
+          'extracted_metadata': {'template_id': 'lab-request'},
+          'created_at': 'not-a-date',
+        }
+      ];
+      final localDb = LocalDatabase(NativeDatabase.memory());
+      final provider = DocumentSubmissionProvider(localDb);
+
+      final submitted = await submitScan(provider);
+
+      expect(submitted, isFalse);
+      expect(
+        provider.errorMessage,
+        contains(
+            'Could not check for a pending [Laboratory Request] submission.'),
+      );
+      expect(client.uploads, isEmpty);
+      expect(client.inserts, isEmpty);
+      expect(await localDb.getQueuedDocuments(_signedInUserId), isEmpty);
     });
   });
 
   group('Immediate upload — a failed duplicate check blocks the submission', () {
     test('no upload or insert is attempted and the patient is asked to retry',
         () async {
-      client.readError = const SocketException('Network is unreachable');
+      // A failure that is not a connectivity problem: the duplicate status is
+      // unknown, so the submission must not go through.
+      client.readError = const FormatException('Unexpected character at 0');
       final provider = DocumentSubmissionProvider(LocalDatabase());
 
       final submitted = await submitScan(provider);
@@ -378,6 +486,24 @@ void main() {
             'Could not check for a pending [Laboratory Request] submission.'),
       );
       expect(provider.errorMessage, contains('try again'));
+      expect(client.inserts, isEmpty);
+    });
+
+    test('a permission failure is surfaced the same way', () async {
+      client.readError = const PostgrestException(
+        message: 'permission denied for table documents',
+        code: '42501',
+      );
+      final provider = TemplatesProvider();
+
+      final submitted = await submitTemplateForm(provider);
+
+      expect(submitted, isFalse);
+      expect(
+        provider.errorMessage,
+        contains(
+            'Could not check for a pending [Laboratory Request] submission.'),
+      );
       expect(client.inserts, isEmpty);
     });
 

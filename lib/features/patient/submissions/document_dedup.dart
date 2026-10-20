@@ -1,3 +1,4 @@
+import '../../../../core/errors/failures.dart';
 import '../../../../core/supabase/supabase_client.dart';
 import '../templates/document_templates.dart';
 
@@ -49,19 +50,41 @@ class DuplicateCheckResult {
   /// Only set when [state] is [DuplicateCheckState.failed].
   final Object? error;
 
-  const DuplicateCheckResult._(this.state, this.duplicateDate, this.error);
+  /// Whether the failed read was a connectivity failure, i.e. the device
+  /// could not reach the server at all.
+  ///
+  /// Only meaningful when [state] is [DuplicateCheckState.failed]. A
+  /// connectivity failure means the check says nothing about duplicates (the
+  /// server was never reached), while any other failure means the server was
+  /// reached but the read was refused or could not be parsed.
+  final bool isNetworkFailure;
+
+  const DuplicateCheckResult._(
+    this.state,
+    this.duplicateDate,
+    this.error,
+    this.isNetworkFailure,
+  );
 
   /// A pending document in the same category exists, submitted on [date].
   const DuplicateCheckResult.duplicate(String date)
-      : this._(DuplicateCheckState.duplicate, date, null);
+      : this._(DuplicateCheckState.duplicate, date, null, false);
 
   /// The read succeeded and no pending document in the category exists.
   const DuplicateCheckResult.clear()
-      : this._(DuplicateCheckState.clear, null, null);
+      : this._(DuplicateCheckState.clear, null, null, false);
 
   /// The read failed with [error]; the duplicate status is unknown.
-  const DuplicateCheckResult.failed(Object error)
-      : this._(DuplicateCheckState.failed, null, error);
+  ///
+  /// [isNetworkFailure] reports whether the read failed because the device was
+  /// offline rather than because the server refused or returned bad data.
+  DuplicateCheckResult.failed(Object error)
+      : this._(
+          DuplicateCheckState.failed,
+          null,
+          error,
+          FailureMapper.isNetworkFailure(error),
+        );
 }
 
 /// Checks whether the patient already has a pending document in [category].
@@ -71,6 +94,11 @@ class DuplicateCheckResult {
 /// exists, and [DuplicateCheckState.failed] when the read could not be
 /// completed. A failed read is never reported as "no duplicate": callers must
 /// not submit a document as unique while the check is unverified.
+///
+/// When the read failed because the device was offline, the result reports
+/// [DuplicateCheckResult.isNetworkFailure] so the caller can take the same
+/// offline branch it takes for a failed upload instead of blocking the
+/// submission.
 Future<DuplicateCheckResult> checkPendingDuplicate(String patientId, String category) async {
   try {
     final response = await SupabaseService.client
