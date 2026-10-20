@@ -1,6 +1,6 @@
 # Mobile / web alignment ledger
 
-Source baseline: mobile `d749c50`, web `940a2f6`. Refresh on 2026-10-20: mobile main remains `d749c50`; web is `63a4f01`; submission coordination PR #3 is `3db90ac`. This is an implementation backlog, not a claim of full parity or a released build. Private audit evidence and verification receipts are retained on the audit host; sensitive findings are tracked there rather than published.
+Source baseline: mobile `d749c50`, web `940a2f6`. Refresh on 2026-10-20: mobile main remains `d749c50`; web is `06ccce1` (PR #144 merged); submission coordination PR #3 is `3db90ac`. This is an implementation backlog, not a claim of full parity or a released build. Private audit evidence and verification receipts are retained on the audit host; sensitive findings are tracked there rather than published.
 
 ## Coverage and shared intent
 
@@ -72,3 +72,8 @@ The checked-out web configuration's public API key returned HTTP 401 `Invalid AP
 Read-only schema refresh: 40 paths; the previous three relevant RPCs remain visible and `trim_role_name` is newly visible. This confirms surface evolution, not migration-history replay or policy implementation. The configured public key still returns 401.
 
 Native receipts for new fixes use documented Flutter 3.44.0 with the committed lockfile. PR #7: 203 pass / 1 skip / 2 existing failures, 152 analyzer diagnostics. PR #8: 203 pass / 1 skip / 2 existing failures, 151 diagnostics. APK builds were attempted and blocked by missing Android SDK. Focused acceptance is separate from those red repository-wide gates.
+
+
+## Ordered team work
+
+[Roadmap #9](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/9) and [14 scoped issues](ISSUES.md) now track the acceptance backlog in priority order. Source references for issue creation are pinned to web `06ccce1` and mobile `d749c50`. Existing draft PRs are cross-referenced; none of these issues is closed merely because a draft exists. Independent mobile work can proceed while shared-backend decisions remain blocked.
