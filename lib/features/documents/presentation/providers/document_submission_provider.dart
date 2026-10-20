@@ -37,6 +37,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   List<OfflineDocument> _queuedSubmissions = [];
   final Map<String, int> _retryCounts = {};
   StreamSubscription<AuthState>? _authSubscription;
+  bool _disposed = false;
 
   DocumentSubmissionProvider(this._localDb) {
     _loadQueuedSubmissions();
@@ -76,6 +77,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     try {
       _authSubscription =
           SupabaseService.client.auth.onAuthStateChange.listen((_) {
+        if (_disposed) return;
         _queuedSubmissions = [];
         notifyListeners();
         _loadQueuedSubmissions();
@@ -87,6 +89,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _authSubscription?.cancel();
     super.dispose();
   }
@@ -103,11 +106,12 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     }
     try {
       final owned = await _localDb.getQueuedDocuments(ownerId);
+      if (_disposed) return;
       if (_currentUserId() != ownerId) {
-        // Identity changed while the read was in flight: drop the stale result
-        // rather than applying it under the newer identity.
-        _queuedSubmissions = [];
-        notifyListeners();
+        // Identity changed while the read was in flight: discard the stale
+        // result without touching current state, so a list already loaded
+        // for the newer identity is never erased by an older read.
+        debugPrint('Discarding queue read for $ownerId: identity changed.');
         return;
       }
       _queuedSubmissions = owned;
@@ -315,6 +319,15 @@ class DocumentSubmissionProvider extends ChangeNotifier {
       if (!await file.exists()) {
         throw Exception('Captured image file does not exist locally.');
       }
+
+      // The file check resumed after an await: stop before the dispatched
+      // upload rather than writing under a newer session.
+      if (_currentUserId() != currentUserId) {
+        _isLoading = false;
+        _errorMessage = 'Session changed. Please try again.';
+        notifyListeners();
+        return false;
+      }
       
       await SupabaseService.client.storage
           .from('patient-documents')
@@ -431,7 +444,15 @@ class DocumentSubmissionProvider extends ChangeNotifier {
           await _localDb.removeQueuedDocument(doc.id, ownerId);
           continue;
         }
-        
+
+        // The file check resumed after an await: re-check identity before
+        // dispatching the write. A dispatched upload cannot be recalled
+        // from the client, so nothing new may be sent under a new session.
+        if (_currentUserId() != ownerId) {
+          debugPrint('Sync stopped before uploading ${doc.id}: identity changed.');
+          return;
+        }
+
         // 1. Upload file
         final storagePath = '$ownerId/${doc.id}_${doc.fileName}';
         await SupabaseService.client.storage
@@ -465,7 +486,15 @@ class DocumentSubmissionProvider extends ChangeNotifier {
         );
         
         await _docsRepo.insertDocument(docPayload);
-        
+
+        // The insert await resumed after an identity change: the dispatched
+        // insert itself cannot be recalled or reconciled from the client,
+        // but no queued row is deleted under the newer identity.
+        if (_currentUserId() != ownerId) {
+          debugPrint('Sync stopped before deleting ${doc.id}: identity changed.');
+          return;
+        }
+
         // Success: remove from local SQLite queue
         await _localDb.removeQueuedDocument(doc.id, ownerId);
         _retryCounts.remove(doc.id);
