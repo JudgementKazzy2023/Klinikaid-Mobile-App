@@ -271,7 +271,14 @@ void main() {
       final client = MockClient((request) async {
         requests.add(request);
         if (request.method == 'PATCH') {
-          return http.Response('', 204, request: request);
+          // PostgREST returns the updated rows when the request selects
+          // columns. Queue completion requires at least one matching row.
+          return http.Response(
+            '[{"id": "queue-row-1"}]',
+            200,
+            request: request,
+            headers: {'content-type': 'application/json'},
+          );
         }
         return http.Response(
           '[]',
