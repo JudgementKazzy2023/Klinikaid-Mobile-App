@@ -77,3 +77,9 @@ Native receipts for new fixes use documented Flutter 3.44.0 with the committed l
 ## Ordered team work
 
 [Roadmap #9](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/9) and [14 scoped issues](ISSUES.md) now track the acceptance backlog in priority order. Source references for issue creation are pinned to web `06ccce1` and mobile `d749c50`. Existing draft PRs are cross-referenced; none of these issues is closed merely because a draft exists. Independent mobile work can proceed while shared-backend decisions remain blocked.
+
+Draft [PR #24](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/pull/24), `cff57a7`, addresses the MFA portion of AUTH-03:11 focused regressions pass; delayed-response acceptance review continues. Deferred-document ownership and remaining #11 criteria are separate. Its changed provider retains23 existing informational analyzer findings, rather than a clean analyzer claim.
+
+Draft [PR #25](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/pull/25) replaces the live-signup default test with mocked request/model checks and repairs the department empty-state assertion. Worker revision `9c6da49`:205 pass,1 existing skip,0 failures;142 analyzer findings, no new diagnostics. The live role-assignment/RLS integration gap remains explicit. Final tests-only revision `f65fd9d` reproduces205 pass/1 skip/0 failures, clean changed-file analysis and142 full analyzer findings; Android build, CI and other #10 acceptance remain pending.
+
+[PR #3 follow-up](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/pull/3#issuecomment-6289444454) answers the mobile contributor's retention proposal and six outstanding questions against web `06ccce1`. Seven-day retention is a proposed design target; category/legacy-data policy and backend acceptance remain open. Shared atomic persistence and production verification are not implemented by that discussion.
