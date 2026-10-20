@@ -60,6 +60,7 @@ class AdminProvider extends ChangeNotifier {
   bool _isChatbotLoading = false;
   String? _chatbotError;
   List<ChatbotLog> _chatbotLogs = [];
+  int _chatbotTotal = 0;
   int _todayQueries = 0;
   int _todayTokens = 0;
   double _todayCost = 0.0;
@@ -81,6 +82,9 @@ class AdminProvider extends ChangeNotifier {
   bool get isStaffLoading => _isStaffLoading;
   String? get staffError => _staffError;
   List<Profile> get staffList => _staffList;
+
+  /// The exact number of staff the server counted.
+  int get staffTotal => _staffList.length;
 
   bool get isRbacLoading => _isRbacLoading;
   String? get rbacError => _rbacError;
@@ -107,6 +111,9 @@ class AdminProvider extends ChangeNotifier {
   bool get isChatbotLoading => _isChatbotLoading;
   String? get chatbotError => _chatbotError;
   List<ChatbotLog> get chatbotLogs => _chatbotLogs;
+
+  /// The exact number of chatbot logs the server counted.
+  int get chatbotTotal => _chatbotTotal;
   int get todayQueries => _todayQueries;
   int get todayTokens => _todayTokens;
   double get todayCost => _todayCost;
@@ -285,13 +292,14 @@ class AdminProvider extends ChangeNotifier {
       final queries = data['todayQueries'] as int;
       final tokens = data['todayTokens'] as int;
       final cost = data['todayCost'] as double;
-      _chatbotLogs = logs; _todayQueries = queries; _todayTokens = tokens; _todayCost = cost;
+      _chatbotLogs = logs; _chatbotTotal = data['total'] as int? ?? logs.length;
+      _todayQueries = queries; _todayTokens = tokens; _todayCost = cost;
       _chatbotHadSuccess = true;
       chatbotState = AdminReadState.loaded;
     } catch (e) {
       if (request != _chatbotRequest) return;
       // Initial failures have no prior payload; refresh failures must discard it.
-      if (isRefresh) { _chatbotLogs = []; _todayQueries = 0; _todayTokens = 0; _todayCost = 0; }
+      if (isRefresh) { _chatbotLogs = []; _chatbotTotal = 0; _todayQueries = 0; _todayTokens = 0; _todayCost = 0; }
       _chatbotError = 'Could not load chatbot audit. Check your connection or access and retry.';
       chatbotState = AdminReadState.failed;
     } finally {

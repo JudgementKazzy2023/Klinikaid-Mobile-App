@@ -123,6 +123,21 @@ class _AdminStaffScreenState extends State<AdminStaffScreen> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  // Personnel count: the exact number of staff the server holds,
+                  // and how many of them the current filters keep.
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      filteredStaff.length == provider.staffTotal
+                          ? '${provider.staffTotal} personnel'
+                          : '${filteredStaff.length} of ${provider.staffTotal} personnel match',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),

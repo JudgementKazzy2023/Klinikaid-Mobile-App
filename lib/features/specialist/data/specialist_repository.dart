@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/errors/failures.dart';
+import '../../../../core/supabase/paged_read.dart';
 import '../../../../core/supabase/supabase_client.dart';
 import '../../../../core/models/specialist_patient.dart';
 import '../../../../core/models/specialist_record.dart';
@@ -11,15 +12,21 @@ class SpecialistRepository {
 
   /// Fetch all private patients of the logged-in specialist.
   /// RLS auto-scopes query to auth.uid().
+  ///
+  /// The read is paged: PostgREST caps one response at its max-rows (1,000) and
+  /// reports no error when it drops the rest, so an unpaginated select would
+  /// hide every patient past the cap.
   Future<List<SpecialistPatient>> getMyPatients() async {
     try {
-      final response = await _client
-          .from('specialist_patients')
-          .select()
-          .order('created_at', ascending: false);
+      final read = await readAllPages(
+        _client
+            .from('specialist_patients')
+            .select()
+            .order('created_at', ascending: false),
+      );
 
-      return (response as List)
-          .map((json) => SpecialistPatient.fromJson(json as Map<String, dynamic>))
+      return read.rows
+          .map((json) => SpecialistPatient.fromJson(json))
           .toList();
     } catch (e) {
       throw FailureMapper.fromException(e);
@@ -95,30 +102,39 @@ class SpecialistRepository {
   /// - 'patients': List<SpecialistPatient>
   /// - 'records': List<SpecialistRecord>
   /// - 'recordsWithPatient': List<Map<String, dynamic>> (raw JSON to resolve joined patient info)
+  /// - 'total_patients': int (the server's exact patient count)
+  ///
+  /// Both reads are paged so the aggregates cover every row and not just the
+  /// first page the server was willing to return.
   Future<Map<String, dynamic>> getDashboardRawData() async {
     try {
-      final patientsResponse = await _client
-          .from('specialist_patients')
-          .select()
-          .order('created_at', ascending: false);
+      final patientsRead = await readAllPages(
+        _client
+            .from('specialist_patients')
+            .select()
+            .order('created_at', ascending: false),
+      );
 
-      final recordsResponse = await _client
-          .from('specialist_records')
-          .select('*, patient:specialist_patients(*)')
-          .order('created_at', ascending: false);
+      final recordsRead = await readAllPages(
+        _client
+            .from('specialist_records')
+            .select('*, patient:specialist_patients(*)')
+            .order('created_at', ascending: false),
+      );
 
-      final patients = (patientsResponse as List)
-          .map((json) => SpecialistPatient.fromJson(json as Map<String, dynamic>))
+      final patients = patientsRead.rows
+          .map((json) => SpecialistPatient.fromJson(json))
           .toList();
 
-      final records = (recordsResponse as List)
-          .map((json) => SpecialistRecord.fromJson(json as Map<String, dynamic>))
+      final records = recordsRead.rows
+          .map((json) => SpecialistRecord.fromJson(json))
           .toList();
 
       return {
         'patients': patients,
         'records': records,
-        'raw_records': recordsResponse,
+        'raw_records': recordsRead.rows,
+        'total_patients': patientsRead.total,
       };
     } catch (e) {
       throw FailureMapper.fromException(e);
@@ -159,16 +175,21 @@ class SpecialistRepository {
   }
 
   /// Retrieve the records for a specific private patient.
+  ///
+  /// Paged, so a patient with more records than the server's row cap still
+  /// shows all of them.
   Future<List<SpecialistRecord>> getPatientRecords(String specialistPatientId) async {
     try {
-      final response = await _client
-          .from('specialist_records')
-          .select()
-          .eq('specialist_patient_id', specialistPatientId)
-          .order('created_at', ascending: true);
+      final read = await readAllPages(
+        _client
+            .from('specialist_records')
+            .select()
+            .eq('specialist_patient_id', specialistPatientId)
+            .order('created_at', ascending: true),
+      );
 
-      return (response as List)
-          .map((json) => SpecialistRecord.fromJson(json as Map<String, dynamic>))
+      return read.rows
+          .map((json) => SpecialistRecord.fromJson(json))
           .toList();
     } catch (e) {
       throw FailureMapper.fromException(e);

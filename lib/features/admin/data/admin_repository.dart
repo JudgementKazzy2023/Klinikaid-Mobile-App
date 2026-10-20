@@ -4,6 +4,7 @@ import '../../../../core/models/profile.dart';
 import '../../../../core/models/chatbot_log.dart';
 import '../../../../core/models/system_log.dart';
 import '../../../../core/models/department_record.dart';
+import '../../../../core/supabase/paged_read.dart';
 import '../../../../core/supabase/supabase_client.dart';
 import '../domain/admin_rbac.dart';
 
@@ -73,11 +74,15 @@ class AdminRepository {
         'ultrasound': 0,
         'ecg': 0,
       };
-        final res5 = await _client
-            .from('patient_queue')
-            .select('department')
-            .gte('created_at', startOfToday.toIso8601String());
-        for (final row in res5 as List) {
+        // Paged, so the workload counts every queue entry of the day and not
+        // only the ones that fit in the first response.
+        final res5 = await readAllPages(
+          _client
+              .from('patient_queue')
+              .select('department')
+              .gte('created_at', startOfToday.toIso8601String()),
+        );
+        for (final row in res5.rows) {
           final dept = row['department'] as String?;
           if (dept != null && workload.containsKey(dept.toLowerCase())) {
             workload[dept.toLowerCase()] = workload[dept.toLowerCase()]! + 1;
@@ -108,13 +113,20 @@ class AdminRepository {
     }
   }
 
+  /// Fetches system events, newest first.
+  ///
+  /// The read is paged so every matching event is reachable instead of only
+  /// the ones the server's row cap allowed in one response, and the search
+  /// terms are applied by the server so a match past the first page is found.
+  /// [limit] caps the rows returned (the dashboard's "recent events"); null
+  /// returns every matching event.
   Future<List<SystemLog>> getSystemEvents({
     String? eventType,
     String? userSearch,
     DateTime? startDate,
     DateTime? endDate,
     String? textSearch,
-    int limit = 50,
+    int? limit,
   }) async {
     try {
         var query = _client.from('system_logs').select('*, user:profiles(full_name, role)');
@@ -130,19 +142,47 @@ class AdminRepository {
           query = query.lte('created_at', endDate.toIso8601String());
         }
 
-        final response = await query.order('created_at', ascending: false).limit(limit);
-        
-        List<SystemLog> logs = (response as List)
-            .map((json) => SystemLog.fromJson(json as Map<String, dynamic>))
+        // The description search is applied by the server: filtering the rows
+        // that were read back would only ever see the newest page of events.
+        final text = textSearch?.trim() ?? '';
+        if (text.isNotEmpty) {
+          query = query.ilike('description', _containsPattern(text));
+        }
+
+        // The event list carries the user's name and role through a join, so
+        // the term is resolved against `profiles` first and the events are
+        // then filtered by that id.
+        final user = userSearch?.trim() ?? '';
+        if (user.isNotEmpty) {
+          final userIds = await _matchingProfileIds(user);
+          if (userIds.isEmpty) return [];
+          query = query.inFilter('user_id', userIds);
+        }
+
+        final List<Map<String, dynamic>> rows;
+        if (limit != null) {
+          final response = await query
+              .order('created_at', ascending: false)
+              .limit(limit)
+              .count(CountOption.exact);
+          rows = response.data;
+        } else {
+          rows = (await readAllPages(
+            query.order('created_at', ascending: false),
+          )).rows;
+        }
+
+        List<SystemLog> logs = rows
+            .map((json) => SystemLog.fromJson(json))
             .toList();
 
         // Perform client-side userSearch and textSearch filtering if needed
         if (userSearch != null && userSearch.isNotEmpty) {
-          final search = userSearch.toLowerCase();
+          final search = userSearch.trim().toLowerCase();
           logs = logs.where((l) => l.userName.toLowerCase().contains(search) || l.userRole.toLowerCase().contains(search)).toList();
         }
         if (textSearch != null && textSearch.isNotEmpty) {
-          final search = textSearch.toLowerCase();
+          final search = textSearch.trim().toLowerCase();
           logs = logs.where((l) => l.description.toLowerCase().contains(search) || l.eventType.toLowerCase().contains(search)).toList();
         }
 
@@ -153,13 +193,48 @@ class AdminRepository {
     }
   }
 
+  /// The ids of the profiles whose name or role match [term].
+  ///
+  /// Two reads instead of one `or` filter: a term that contains a comma
+  /// would otherwise break the `or` list syntax and fail the whole query.
+  Future<List<String>> _matchingProfileIds(String term) async {
+    final pattern = _containsPattern(term);
+    final byName = await readAllPages(
+      _client.from('profiles').select('id').ilike('full_name', pattern),
+    );
+    final byRole = await readAllPages(
+      _client.from('profiles').select('id').ilike('role', pattern),
+    );
+    final ids = <String>{
+      for (final row in byName.rows) row['id'] as String,
+      for (final row in byRole.rows) row['id'] as String,
+    };
+    return ids.toList();
+  }
+
+  /// Builds an ILIKE pattern that matches [term] literally anywhere in a column.
+  ///
+  /// `%` and `_` are LIKE wildcards and `\` is the escape character, so a
+  /// search for "100%" must not match every row containing "100".
+  String _containsPattern(String term) {
+    final escaped = term.replaceAllMapped(
+      RegExp(r'[\\%_]'),
+      (match) => '\\${match[0]}',
+    );
+    return '%$escaped%';
+  }
+
   Future<Map<String, dynamic>> getChatbotAudit() async {
     try {
       final startOfToday = phtStartOfTodayUtc();
       
-      final res = await _client.from('chatbot_logs').select().order('created_at', ascending: false);
-      final logs = (res as List)
-          .map((json) => ChatbotLog.fromJson(json as Map<String, dynamic>)).toList();
+      // Paged, so the audit list and the statistics below cover every log and
+      // not only the rows the server's row cap allowed in one response.
+      final res = await readAllPages(
+        _client.from('chatbot_logs').select().order('created_at', ascending: false),
+      );
+      final logs = res.rows
+          .map((json) => ChatbotLog.fromJson(json)).toList();
 
       // Compute statistics for today
       final todayLogs = logs.where((log) => log.createdAt.isAfter(startOfToday)).toList();
@@ -171,6 +246,7 @@ class AdminRepository {
 
       return {
         'logs': logs,
+        'total': res.total,
         'todayQueries': todayQueries,
         'todayTokens': todayTokens,
         'todayCost': todayCost,
@@ -277,13 +353,16 @@ class AdminRepository {
 
   Future<List<Map<String, dynamic>>> getAllQueueSubmissions() async {
     try {
-      final response = await _client
-          .from('documents')
-          .select('*, patient:patients(*), uploader:profiles(*)')
-          .order('created_at', ascending: false);
+      // Paged, so a submission past the server's row cap is still listed.
+      final response = await readAllPages(
+        _client
+            .from('documents')
+            .select('*, patient:patients(*), uploader:profiles(*)')
+            .order('created_at', ascending: false),
+      );
 
       final List<Map<String, dynamic>> result = [];
-      for (final doc in response as List) {
+      for (final doc in response.rows) {
         final patient = doc['patient'] as Map<String, dynamic>?;
         final uploader = doc['uploader'] as Map<String, dynamic>?;
 
@@ -311,14 +390,18 @@ class AdminRepository {
   Future<List<DepartmentRecord>> getDepartmentRecords(String department) async {
     try {
       // Query cross-department records; Admin can read ANY department.
-      final response = await _client
-          .from('department_records')
-          .select('*, patient:patients(*), recorder:profiles(*)')
-          .eq('department', department.toLowerCase())
-          .order('created_at', ascending: false);
+      // Paged, so a department with more records than the server's row cap
+      // still shows all of them.
+      final response = await readAllPages(
+        _client
+            .from('department_records')
+            .select('*, patient:patients(*), recorder:profiles(*)')
+            .eq('department', department.toLowerCase())
+            .order('created_at', ascending: false),
+      );
 
-      return (response as List).map((json) {
-        final recordJson = Map<String, dynamic>.from(json as Map);
+      return response.rows.map((json) {
+        final recordJson = Map<String, dynamic>.from(json);
         // Ensure nesting is preserved or parsed safely in DepartmentRecord
         return DepartmentRecord.fromJson(recordJson);
       }).toList();
@@ -329,15 +412,18 @@ class AdminRepository {
 
   Future<List<Profile>> getStaffPersonnel() async {
     try {
-      final response = await _client
-          .from('profiles')
-          .select()
-          .neq('role', 'patient')
-          .neq('role', 'admin')
-          .order('full_name', ascending: true);
+      // Paged, so a staff member past the server's row cap is still listed.
+      final response = await readAllPages(
+        _client
+            .from('profiles')
+            .select()
+            .neq('role', 'patient')
+            .neq('role', 'admin')
+            .order('full_name', ascending: true),
+      );
 
-      return (response as List)
-          .map((json) => Profile.fromJson(json as Map<String, dynamic>))
+      return response.rows
+          .map((json) => Profile.fromJson(json))
           .toList();
     } catch (e) {
       throw FailureMapper.fromException(e);
