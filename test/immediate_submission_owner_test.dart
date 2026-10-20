@@ -47,6 +47,7 @@ class StorageApi extends Fake implements StorageFileApi {
   Completer<void>? uploadStarted;
   Completer<void>? uploadGate;
   bool failWithSocketException = false;
+  bool failWithHandshake = false;
 
   @override
   dynamic noSuchMethod(Invocation invocation) {
@@ -66,6 +67,9 @@ class StorageApi extends Fake implements StorageFileApi {
     uploads.add(path);
     if (failWithSocketException) {
       throw const SocketException('Simulated offline drop');
+    }
+    if (failWithHandshake) {
+      throw FakeHandshakeException();
     }
     return path;
   }
@@ -276,6 +280,44 @@ class GatedExistsFile extends Fake implements File {
   }
 }
 
+/// A non-socket network failure. [FailureMapper] maps it to NetworkFailure
+/// only via its message, so it reaches the generic offline branch that the
+/// earlier `on SocketException` clause can never cover.
+class FakeHandshakeException implements Exception {
+  @override
+  String toString() => 'HandshakeException: simulated TLS drop';
+}
+
+/// Real local database whose offline-queue write and owner-scoped read can be
+/// stalled, so an identity change can be injected while either local await
+/// waits instead of racing it.
+class GatedLocalDatabase extends LocalDatabase {
+  GatedLocalDatabase([super.executor]);
+
+  Completer<void>? queueStarted;
+  Completer<void>? queueGate;
+  Completer<void>? readStarted;
+  Completer<void>? readGate;
+
+  @override
+  Future<void> queueOfflineDocument(OfflineDocument doc) async {
+    final begin = queueStarted;
+    if (begin != null && !begin.isCompleted) begin.complete();
+    final gate = queueGate;
+    if (gate != null) await gate.future;
+    await super.queueOfflineDocument(doc);
+  }
+
+  @override
+  Future<List<OfflineDocument>> getQueuedDocuments(String uploaderId) async {
+    final begin = readStarted;
+    if (begin != null && !begin.isCompleted) begin.complete();
+    final gate = readGate;
+    if (gate != null) await gate.future;
+    return super.getQueuedDocuments(uploaderId);
+  }
+}
+
 Patient _patient({String? profileId, String id = 'patient-uuid-1'}) => Patient(
       id: id,
       profileId: profileId,
@@ -298,14 +340,14 @@ void main() {
 
   late MockSupabaseClient client;
   late MockAuthIdentity auth;
-  late LocalDatabase db;
+  late GatedLocalDatabase db;
   late Directory tempDir;
 
   setUp(() async {
     auth = MockAuthIdentity();
     client = MockSupabaseClient(auth);
     SupabaseService.mockClient = client;
-    db = LocalDatabase(NativeDatabase.memory());
+    db = GatedLocalDatabase(NativeDatabase.memory());
     tempDir = await Directory.systemTemp.createTemp('immediate_owner');
   });
 
@@ -592,5 +634,174 @@ void main() {
     expect(client.storageApi.uploads, isEmpty);
     expect(client.docsApi.inserted, isEmpty);
     expect(await queuedIds(), isEmpty);
+  });
+
+  // -------------------------------------------------------------------------
+  // Round 2: the offline fallback used to check ownership only before the
+  // local queue write, then unconditionally reported the fallback success
+  // after two local awaits.
+  // -------------------------------------------------------------------------
+  test(
+      'N11: session switch while the offline draft write awaits is not told the fallback succeeded',
+      () async {
+    auth.switchTo(userA);
+    writeUpload('submit-a');
+    client.storageApi.failWithSocketException = true;
+    final provider = DocumentSubmissionProvider(db);
+    await pumpEventQueue();
+
+    db.queueStarted = Completer<void>();
+    db.queueGate = Completer<void>();
+    final submitted = submit(provider, patient: _patient(profileId: userA));
+    await db.queueStarted!.future; // the local draft write is pending now
+    auth.switchTo(userB);
+    db.queueGate!.complete();
+
+    expect(await submitted, isFalse,
+        reason: 'a session that changed while the draft was being written '
+            'must be abandoned, not told the submit succeeded');
+    expect(provider.errorMessage, 'Session changed. Please try again.');
+    expect(provider.isLoading, isFalse);
+    final queued = await db.select(db.offlineDocumentsQueue).get();
+    expect(queued, hasLength(1),
+        reason: 'the already-written local draft is preserved');
+    expect(queued.single.uploaderId, userA,
+        reason: 'it stays attributed to its owner and is never rewritten for B');
+  });
+
+  test(
+      'N12: session switch while the offline queue reload awaits is not told the fallback succeeded',
+      () async {
+    auth.switchTo(userA);
+    writeUpload('submit-a');
+    client.storageApi.failWithSocketException = true;
+    final provider = DocumentSubmissionProvider(db);
+    await pumpEventQueue();
+
+    db.readStarted = Completer<void>();
+    db.readGate = Completer<void>();
+    final submitted = submit(provider, patient: _patient(profileId: userA));
+    await db.readStarted!.future; // the post-write queue reload is pending now
+    auth.switchTo(userB);
+    db.readGate!.complete();
+
+    expect(await submitted, isFalse);
+    expect(provider.errorMessage, 'Session changed. Please try again.');
+    expect(provider.isLoading, isFalse);
+    final queued = await db.select(db.offlineDocumentsQueue).get();
+    expect(queued.single.uploaderId, userA,
+        reason: 'the draft already written stays owned by A, never rewritten');
+  });
+
+  test(
+      'N13: session switch while the network-failure draft write awaits is not told the fallback succeeded',
+      () async {
+    auth.switchTo(userA);
+    writeUpload('submit-a');
+    client.storageApi.failWithHandshake = true;
+    final provider = DocumentSubmissionProvider(db);
+    await pumpEventQueue();
+
+    db.queueStarted = Completer<void>();
+    db.queueGate = Completer<void>();
+    final submitted = submit(provider, patient: _patient(profileId: userA));
+    await db.queueStarted!.future;
+    auth.switchTo(userB);
+    db.queueGate!.complete();
+
+    expect(await submitted, isFalse,
+        reason: 'the generic NetworkFailure branch gets the same owner rule');
+    expect(provider.errorMessage, 'Session changed. Please try again.');
+    final queued = await db.select(db.offlineDocumentsQueue).get();
+    expect(queued.single.uploaderId, userA);
+  });
+
+  test(
+      'N14: session switch while the network-failure queue reload awaits is not told the fallback succeeded',
+      () async {
+    auth.switchTo(userA);
+    writeUpload('submit-a');
+    client.storageApi.failWithHandshake = true;
+    final provider = DocumentSubmissionProvider(db);
+    await pumpEventQueue();
+
+    db.readStarted = Completer<void>();
+    db.readGate = Completer<void>();
+    final submitted = submit(provider, patient: _patient(profileId: userA));
+    await db.readStarted!.future;
+    auth.switchTo(userB);
+    db.readGate!.complete();
+
+    expect(await submitted, isFalse);
+    expect(provider.errorMessage, 'Session changed. Please try again.');
+    final queued = await db.select(db.offlineDocumentsQueue).get();
+    expect(queued.single.uploaderId, userA);
+  });
+
+  // -------------------------------------------------------------------------
+  // Round 2: a completion that finishes after dispose must not mutate the
+  // provider or notify. Actual scope: disposal suppresses state application;
+  // an upload/insert dispatched before dispose is unchanged and unrecalled.
+  // -------------------------------------------------------------------------
+  test('N15: a submit completion after dispose mutates nothing and notifies nothing',
+      () async {
+    auth.switchTo(userA);
+    writeUpload('submit-a');
+    final provider = DocumentSubmissionProvider(db);
+    await pumpEventQueue();
+    var notifications = 0;
+    provider.addListener(() => notifications++);
+
+    client.docsApi.duplicateState.gateNextRead();
+    final submitted = submit(provider, patient: _patient(profileId: userA));
+    await client.docsApi.duplicateState.started!.future; // the lookup waits now
+    provider.dispose();
+    final seenBeforeRelease = notifications;
+    client.docsApi.duplicateState.gate!.complete();
+
+    expect(await submitted, isTrue,
+        reason: 'the writes were dispatched while the provider was alive');
+    expect(notifications, seenBeforeRelease,
+        reason: 'a disposed provider is never notified');
+    expect(provider.isLoading, isTrue,
+        reason: 'visible state is frozen at dispose, not mutated late');
+    expect(provider.errorMessage, isNull);
+    expect(client.storageApi.uploads, hasLength(1));
+    expect(client.docsApi.inserted, hasLength(1));
+  });
+
+  // Round 2 wording pin: same-owner generation supersession guards the visible
+  // state only. The superseded call keeps its own result and its own writes;
+  // it is a cross-session change, not a same-owner supersession, that abandons
+  // a submit.
+  test('N16: same-owner supersession guards visible state only, the superseded call still returns true',
+      () async {
+    auth.switchTo(userA);
+    writeUpload('submit-a');
+    final provider = DocumentSubmissionProvider(db);
+    await pumpEventQueue();
+
+    client.docsApi.duplicateState.gateNextRead();
+    final superseded =
+        submit(provider, patient: _patient(profileId: userA), name: 'submit-a');
+    await client.docsApi.duplicateState.started!.future; // the first call waits
+
+    final newer = submit(provider,
+        patient: _patient(profileId: userA, id: 'patient-uuid-2'),
+        name: 'missing-b'); // its file does not exist: it fails on its own
+    expect(await newer, isFalse);
+    expect(provider.errorMessage,
+        contains('Captured image file does not exist locally'));
+
+    client.docsApi.duplicateState.gate!.complete();
+    expect(await superseded, isTrue,
+        reason: 'same-owner supersession is UI-state only: the older call '
+            'completes its own writes and keeps its own return value');
+    expect(provider.errorMessage,
+        contains('Captured image file does not exist locally'),
+        reason: 'the newer operation keeps the visible state');
+    expect(client.storageApi.uploads, hasLength(1));
+    expect(client.docsApi.inserted, hasLength(1));
+    expect(client.docsApi.inserted.single['uploader_id'], userA);
   });
 }

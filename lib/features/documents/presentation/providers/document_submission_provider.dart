@@ -83,8 +83,11 @@ class DocumentSubmissionProvider extends ChangeNotifier {
 
   /// Applies this submit's completion state while it is still the newest
   /// operation; a superseded one writes nothing, so a newer operation's
-  /// loading flag and message are never overwritten.
+  /// loading flag and message are never overwritten. A disposed provider is
+  /// never mutated or notified either, even by a completion that finishes
+  /// after its provider is gone.
   void _completeSubmit(int generation, {String? errorMessage}) {
+    if (_disposed) return;
     if (generation != _submitGeneration) return;
     _isLoading = false;
     _errorMessage = errorMessage;
@@ -97,6 +100,32 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     _completeSubmit(
         generation, errorMessage: 'Session changed. Please try again.');
     return false;
+  }
+
+  /// Completes the offline fallback shared by both network-failure branches:
+  /// queues the owner-attributed draft, then re-checks ownership after each
+  /// local await. A session that changed while the write or the reload waited
+  /// is abandoned — never told the submit succeeded — and the draft already
+  /// written stays attributed to its owner, never rewritten or deleted for
+  /// the newer identity.
+  Future<bool> _completeOfflineFallback({
+    required int generation,
+    required OfflineDocument doc,
+    required bool Function() stillOwned,
+    required String message,
+  }) async {
+    await _localDb.queueOfflineDocument(doc);
+    // The local write resumed after an await: a session that changed while it
+    // waited is abandoned. The row just written stays owned by the account
+    // that started the submit and is never rewritten for the newer identity.
+    if (!stillOwned()) return _abandonSubmit(generation);
+
+    await _loadQueuedSubmissions();
+    // The reload resumed after an await: the same switch during that read.
+    if (!stillOwned()) return _abandonSubmit(generation);
+
+    _completeSubmit(generation, errorMessage: message);
+    return true;
   }
 
   /// Invalidates queue visibility on every auth change so getters can never
@@ -411,33 +440,11 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     } on SocketException catch (_) {
       // Offline fallback: Queue submission details locally in SQLite cache.
       // An account that changed while the upload failed must not be told the
-      // submit succeeded, and nothing is queued on its behalf.
+      // submit succeeded, and nothing new is done on its behalf.
       if (!stillOwned()) return _abandonSubmit(generation);
-      final offlineDoc = OfflineDocument(
-        id: uuid,
-        patientId: patient.id,
-        uploaderId: ownerId,
-        fileName: originalFileName,
-        localFilePath: localFilePath,
-        fileType: fileExtension,
-        ocrText: ocrText,
-        extractedMetadata: jsonEncode(metadata),
-        createdAt: DateTime.now(),
-      );
-      
-      await _localDb.queueOfflineDocument(offlineDoc);
-      await _loadQueuedSubmissions();
-      
-      _completeSubmit(
-          generation,
-          errorMessage: 'You are currently offline. Document queued for sync.');
-      return true;
-    } catch (e) {
-      final Failure failure = FailureMapper.fromException(e);
-      // Map other network failures to offline queueing as well
-      if (failure is NetworkFailure) {
-        if (!stillOwned()) return _abandonSubmit(generation);
-        final offlineDoc = OfflineDocument(
+      return _completeOfflineFallback(
+        generation: generation,
+        doc: OfflineDocument(
           id: uuid,
           patientId: patient.id,
           uploaderId: ownerId,
@@ -447,15 +454,31 @@ class DocumentSubmissionProvider extends ChangeNotifier {
           ocrText: ocrText,
           extractedMetadata: jsonEncode(metadata),
           createdAt: DateTime.now(),
+        ),
+        stillOwned: stillOwned,
+        message: 'You are currently offline. Document queued for sync.',
+      );
+    } catch (e) {
+      final Failure failure = FailureMapper.fromException(e);
+      // Map other network failures to offline queueing as well
+      if (failure is NetworkFailure) {
+        if (!stillOwned()) return _abandonSubmit(generation);
+        return _completeOfflineFallback(
+          generation: generation,
+          doc: OfflineDocument(
+            id: uuid,
+            patientId: patient.id,
+            uploaderId: ownerId,
+            fileName: originalFileName,
+            localFilePath: localFilePath,
+            fileType: fileExtension,
+            ocrText: ocrText,
+            extractedMetadata: jsonEncode(metadata),
+            createdAt: DateTime.now(),
+          ),
+          stillOwned: stillOwned,
+          message: 'Network connection failed. Document queued for sync.',
         );
-        
-        await _localDb.queueOfflineDocument(offlineDoc);
-        await _loadQueuedSubmissions();
-        _completeSubmit(
-            generation,
-            errorMessage:
-                'Network connection failed. Document queued for sync.');
-        return true;
       }
       
       _completeSubmit(generation, errorMessage: failure.message);
