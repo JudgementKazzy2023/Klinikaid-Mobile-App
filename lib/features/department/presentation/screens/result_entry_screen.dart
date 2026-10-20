@@ -450,42 +450,54 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
           ),
         ),
         if (isNarrative) ...[
-          const SizedBox(height: 20),
-          Text(
-            'Findings (Required)',
-            style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            key: const Key('narrative_findings_input'),
-            maxLines: 5,
-            maxLength: kLabNarrativeMaxLength,
-            onChanged: provider.setFindings,
-            decoration: InputDecoration(
-              hintText: 'Enter narrative findings...',
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8.0),
-              ),
-              contentPadding: const EdgeInsets.all(12.0),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Impression (Optional)',
-            style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            key: const Key('narrative_impression_input'),
-            maxLines: 3,
-            maxLength: kLabNarrativeMaxLength,
-            onChanged: provider.setImpression,
-            decoration: InputDecoration(
-              hintText: 'Enter clinical impression / summary...',
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8.0),
-              ),
-              contentPadding: const EdgeInsets.all(12.0),
+          // Keyed per selected test: a changed test recreates the fields
+          // blank, so visible state always agrees with the provider, which
+          // clears Findings/Impression on a test change. Reselecting the same
+          // test keeps the subtree (and unfinished input).
+          KeyedSubtree(
+            key: ValueKey<String>('narrative_${provider.narrativeTest}'),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 20),
+                Text(
+                  'Findings (Required)',
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  key: const Key('narrative_findings_input'),
+                  maxLines: 5,
+                  maxLength: kLabNarrativeMaxLength,
+                  onChanged: provider.setFindings,
+                  decoration: InputDecoration(
+                    hintText: 'Enter narrative findings...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8.0),
+                    ),
+                    contentPadding: const EdgeInsets.all(12.0),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Impression (Optional)',
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  key: const Key('narrative_impression_input'),
+                  maxLines: 3,
+                  maxLength: kLabNarrativeMaxLength,
+                  onChanged: provider.setImpression,
+                  decoration: InputDecoration(
+                    hintText: 'Enter clinical impression / summary...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8.0),
+                    ),
+                    contentPadding: const EdgeInsets.all(12.0),
+                  ),
+                ),
+              ],
             ),
           ),
         ] else ...[

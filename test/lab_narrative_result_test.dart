@@ -4,6 +4,7 @@
 // LAB_NARRATIVE_FIELDS / LAB_NARRATIVE_MAX_LENGTH and
 // src/lib/records/validateLabResult.ts validateLabNarrative. All HTTP here is
 // mocked; no live network or fixtures.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -23,7 +24,9 @@ import 'package:klinikaid_mobile/core/models/profile.dart';
 import 'package:klinikaid_mobile/features/auth/data/session_activity_service.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 import 'package:klinikaid_mobile/features/department/data/department_repository.dart';
+import 'package:klinikaid_mobile/features/department/data/lab_value_extraction_service.dart';
 import 'package:klinikaid_mobile/features/department/domain/lab_reference_ranges.dart';
+import 'package:klinikaid_mobile/features/documents/clinic_test_catalog.dart';
 import 'package:klinikaid_mobile/features/department/presentation/providers/result_entry_provider.dart';
 import 'package:klinikaid_mobile/features/department/presentation/screens/result_entry_screen.dart';
 
@@ -37,6 +40,51 @@ const List<String> kWebNarrativeTests = [
   'SGOT / AST',
   'Lipid Profile (narrative)',
 ];
+
+/// Exact id -> label pairs of the web CLINIC_TEST_CATALOG (constants.ts @
+/// 06ccce1). The mobile clinic test catalog must offer the same requestable
+/// tests under the same ids.
+const Map<String, String> kWebClinicCatalog = {
+  'cbc': 'Complete Blood Count (CBC)',
+  'urinalysis': 'Urinalysis',
+  'fecalysis': 'Fecalysis',
+  'fbs': 'Fasting Blood Sugar (FBS)',
+  'lipid_profile': 'Lipid Profile',
+  'creatinine': 'Creatinine',
+  'bun': 'Blood Urea Nitrogen (BUN)',
+  'sgpt_alt': 'SGPT / ALT',
+  'sgot_ast': 'SGOT / AST',
+  'chest_xray': 'Chest X-ray',
+  'ecg': 'ECG',
+  'ultrasound': 'Ultrasound',
+};
+
+/// Web CLINIC_TEST_CATALOG recording targets for the laboratory-requestable
+/// entries (constants.ts @ 06ccce1 `recording`): panel name for structured
+/// panels, narrative test name for narrative tests. The three non-laboratory
+/// entries (chest_xray, ecg, ultrasound) record outside the lab entry form and
+/// are deliberately absent.
+const Map<String, String> kWebLabRecordingTargets = {
+  'cbc': 'Complete Blood Count (CBC)', // panel
+  'urinalysis': 'Urinalysis', // narrative
+  'fecalysis': 'Fecalysis', // narrative
+  'fbs': 'Fasting Blood Sugar (FBS)', // panel
+  'lipid_profile': 'Lipid Profile (narrative)', // narrative
+  'creatinine': 'Renal Function', // panel
+  'bun': 'Blood Urea Nitrogen (BUN)', // narrative
+  'sgpt_alt': 'SGPT / ALT', // narrative
+  'sgot_ast': 'SGOT / AST', // narrative
+};
+
+/// Extraction service whose response is released by the test, so a stale
+/// structured OCR result can land after the user changed the selection.
+class _DelayedExtractionService extends LabValueExtractionService {
+  final Completer<LabValueExtractionResult> completer = Completer();
+
+  @override
+  Future<LabValueExtractionResult> extractFromImagePath(String imagePath) =>
+      completer.future;
+}
 
 class _FakeGoTrueClient extends GoTrueClient {
   _FakeGoTrueClient() : super(autoRefreshToken: false);
@@ -463,6 +511,143 @@ void main() {
     });
   });
 
+  group('Narrative selection state transitions (provider)', () {
+    late _CapturingRepository repo;
+    late ResultEntryProvider provider;
+
+    setUp(() {
+      repo = _CapturingRepository();
+      provider = ResultEntryProvider(repo);
+    });
+
+    test('changing to a different narrative test clears findings and impression', () {
+      provider.setNarrativeTest('Urinalysis');
+      provider.setFindings('Findings for A.');
+      provider.setImpression('Impression for A.');
+
+      provider.setNarrativeTest('Fecalysis');
+
+      expect(provider.findings, isEmpty,
+          reason: 'a changed test must not carry previous clinical answers');
+      expect(provider.impression, isEmpty);
+    });
+
+    test('switching to a structured group clears findings and impression', () {
+      provider.setNarrativeTest('Urinalysis');
+      provider.setFindings('Findings for A.');
+      provider.setImpression('Impression for A.');
+
+      provider.setLabGroup('Complete Blood Count (CBC)');
+
+      expect(provider.findings, isEmpty);
+      expect(provider.impression, isEmpty);
+    });
+
+    test('reselecting the same narrative test preserves unfinished input', () {
+      provider.setNarrativeTest('Urinalysis');
+      provider.setFindings('Partial findings');
+      provider.setImpression('Partial impression');
+
+      provider.setNarrativeTest('Urinalysis'); // same test: no state change
+
+      expect(provider.findings, 'Partial findings');
+      expect(provider.impression, 'Partial impression');
+    });
+
+    test('narrative A -> CBC -> narrative B cannot submit A\u2019s answers under B', () async {
+      provider.setNarrativeTest('Urinalysis');
+      provider.setFindings('Findings for A.');
+      provider.setImpression('Impression for A.');
+
+      provider.setLabGroup('Complete Blood Count (CBC)');
+      provider.setNarrativeTest('Fecalysis');
+
+      // Findings are required again for the new test; nothing may be posted.
+      expect(await provider.submitNarrativeLabResult(patientId: 'p1'), isFalse);
+      expect(repo.freeTextCalls, 0);
+      expect(provider.errorMessage, 'Findings are required.');
+    });
+
+    test('notes survive a test change (notes are shared, not per-test)', () {
+      provider.setNarrativeTest('Urinalysis');
+      provider.setFindings('Findings for A.');
+      provider.setNotes('Shared note.');
+
+      provider.setNarrativeTest('Fecalysis');
+
+      expect(provider.notes, 'Shared note.');
+    });
+
+    test('structured OCR autofill while a narrative test is active ends in a consistent structured state', () {
+      provider.setNarrativeTest('Urinalysis');
+      provider.setFindings('Findings for A.');
+      provider.setImpression('Impression for A.');
+
+      final applied = provider.applyOcrAutofill(
+        panel: 'Renal Function',
+        values: const {'Creatinine': ' 1.15 '},
+      );
+
+      expect(applied, isTrue);
+      expect(provider.isNarrativeSelection, isFalse,
+          reason: 'a structured OCR apply must not leave a narrative selection active');
+      expect(provider.currentLabSelection, 'Renal Function');
+      expect(provider.parameterValues, {'Creatinine': '1.15'});
+      expect(provider.hasOcrAutofill, isTrue);
+      expect(provider.findings, isEmpty);
+      expect(provider.impression, isEmpty);
+    });
+
+    test('failed structured OCR autofill leaves the narrative selection untouched', () {
+      provider.setNarrativeTest('Urinalysis');
+      provider.setFindings('Findings for A.');
+
+      final applied = provider.applyOcrAutofill(panel: null, values: const {});
+
+      expect(applied, isFalse);
+      expect(provider.narrativeTest, 'Urinalysis');
+      expect(provider.findings, 'Findings for A.');
+      expect(provider.errorMessage, 'No values extracted, enter manually.');
+    });
+  });
+
+  group('Requested-test catalog coverage (web CLINIC_TEST_CATALOG sync)', () {
+    test('mobile clinic test catalog matches the web catalog ids and labels', () {
+      final mobile = {
+        for (final t in clinicTestCatalog) t.id: t.label,
+      };
+      expect(mobile, kWebClinicCatalog);
+    });
+
+    test('every web-requestable laboratory test has a recording path offered by the mobile entry form', () {
+      final offered = {...kLabTestGroups.keys, ...kLabNarrativeTests};
+      for (final entry in kWebLabRecordingTargets.entries) {
+        expect(offered, contains(entry.value),
+            reason: '${entry.key} records as "${entry.value}", which the mobile lab form must offer');
+      }
+      // Every catalog laboratory entry is covered by the recording map, so a
+      // new requestable lab test cannot be added without a mobile path.
+      const nonLab = {'chest_xray', 'ecg', 'ultrasound'};
+      final labCatalogIds = kWebClinicCatalog.keys.where((id) => !nonLab.contains(id));
+      expect(kWebLabRecordingTargets.keys.toSet(), labCatalogIds.toSet());
+    });
+
+    test('every narrative test is requested by some catalog entry', () {
+      final requestedNarrative = kWebLabRecordingTargets.values
+          .where(kLabNarrativeTests.contains)
+          .toSet();
+      expect(requestedNarrative, kLabNarrativeTests.toSet());
+    });
+
+    test('catalog laboratory labels distinguish the two lipid profile targets', () {
+      // The catalog request "Lipid Profile" records as the narrative test;
+      // only total cholesterol uses the structured panel.
+      expect(kWebLabRecordingTargets['lipid_profile'], 'Lipid Profile (narrative)');
+      expect(kWebLabRecordingTargets['creatinine'], 'Renal Function');
+      expect(kLabTestGroups['Lipid Profile'], ['Cholesterol']);
+    });
+  });
+
   group('Narrative entry screen (widget)', () {
     late _CapturingRepository repo;
     late _MockAuthProvider auth;
@@ -472,7 +657,11 @@ void main() {
       auth = _MockAuthProvider();
     });
 
-    Future<void> pumpScreen(WidgetTester tester, {String department = 'laboratory'}) async {
+    Future<void> pumpScreen(
+      WidgetTester tester, {
+      String department = 'laboratory',
+      LabValueExtractionService? extractionService,
+    }) async {
       tester.view.physicalSize = const Size(800, 1600);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() {
@@ -488,6 +677,8 @@ void main() {
               patientId: 'patient-123',
               repo: repo,
               departmentOverride: department,
+              extractionService: extractionService,
+              imagePathPicker: () async => 'dummy.jpg',
             ),
           ),
         ],
@@ -575,6 +766,144 @@ void main() {
 
       expect(repo.freeTextCalls, 0);
       expect(find.text('Findings are required.'), findsOneWidget);
+    });
+
+    testWidgets(
+        'switching to a different narrative test blanks the fields and cannot save A\u2019s answers under B',
+        (tester) async {
+      await pumpScreen(tester);
+      await selectNarrativeTest(tester, 'Urinalysis');
+      await tester.enterText(
+          find.byKey(const Key('narrative_findings_input')), 'Findings for A.');
+      await tester.enterText(
+          find.byKey(const Key('narrative_impression_input')), 'Impression for A.');
+      await tester.pumpAndSettle();
+
+      await selectNarrativeTest(tester, 'Fecalysis');
+
+      // Visible field state always agrees with the provider: blank after a
+      // changed test.
+      expect(find.text('Findings for A.'), findsNothing);
+      expect(find.text('Impression for A.'), findsNothing);
+
+      await tester.tap(find.byKey(const Key('submit_result_btn')));
+      await tester.pumpAndSettle();
+
+      expect(repo.freeTextCalls, 0,
+          reason: 'a changed test must never post the previous test answers');
+      expect(find.text('Findings are required.'), findsOneWidget);
+
+      // Correct new input for B posts B.
+      await tester.enterText(
+          find.byKey(const Key('narrative_findings_input')), 'Findings for B.');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('submit_result_btn')));
+      await tester.pumpAndSettle();
+
+      expect(repo.freeTextCalls, 1);
+      expect(repo.lastTestName, 'Fecalysis');
+      expect(repo.lastFindings, 'Findings for B.');
+      expect(repo.lastImpression, '');
+    });
+
+    testWidgets(
+        'narrative A -> CBC -> narrative B shows blank fields and cannot post hidden old findings',
+        (tester) async {
+      await pumpScreen(tester);
+      await selectNarrativeTest(tester, 'Urinalysis');
+      await tester.enterText(
+          find.byKey(const Key('narrative_findings_input')), 'Findings for A.');
+      await tester.enterText(
+          find.byKey(const Key('narrative_impression_input')), 'Impression for A.');
+      await tester.pumpAndSettle();
+
+      await selectNarrativeTest(tester, 'Complete Blood Count (CBC)');
+      expect(find.byKey(const Key('narrative_findings_input')), findsNothing);
+      await selectNarrativeTest(tester, 'Fecalysis');
+
+      // Fields are recreated blank; the provider must not hide A's answers.
+      expect(find.text('Findings for A.'), findsNothing);
+      await tester.tap(find.byKey(const Key('submit_result_btn')));
+      await tester.pumpAndSettle();
+      expect(repo.freeTextCalls, 0,
+          reason: 'a blank new test must not save previous findings');
+      expect(find.text('Findings are required.'), findsOneWidget);
+
+      await tester.enterText(
+          find.byKey(const Key('narrative_findings_input')), 'Findings for B.');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('submit_result_btn')));
+      await tester.pumpAndSettle();
+
+      expect(repo.freeTextCalls, 1);
+      expect(repo.lastTestName, 'Fecalysis');
+      expect(repo.lastFindings, 'Findings for B.');
+    });
+
+    testWidgets('reselecting the same narrative test preserves unfinished input',
+        (tester) async {
+      await pumpScreen(tester);
+      await selectNarrativeTest(tester, 'Urinalysis');
+      await tester.enterText(
+          find.byKey(const Key('narrative_findings_input')), 'Partial findings');
+      await tester.pumpAndSettle();
+
+      await selectNarrativeTest(tester, 'Urinalysis'); // same test again
+
+      expect(find.text('Partial findings'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('submit_result_btn')));
+      await tester.pumpAndSettle();
+      expect(repo.freeTextCalls, 1);
+      expect(repo.lastTestName, 'Urinalysis');
+      expect(repo.lastFindings, 'Partial findings');
+    });
+
+    testWidgets(
+        'a stale structured OCR response landing after a narrative selection leaves a consistent structured state',
+        (tester) async {
+      final service = _DelayedExtractionService();
+      await pumpScreen(tester, extractionService: service);
+
+      // Extraction starts in structured mode; the user switches to a
+      // narrative test while the OCR response is still in flight. Fixed pumps
+      // here: the in-flight indicator animates, so pumpAndSettle never ends.
+      await tester.tap(find.byKey(const Key('extract_lab_values_button')));
+      await tester.pump();
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('Urinalysis').last);
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.enterText(
+          find.byKey(const Key('narrative_findings_input')), 'Findings for A.');
+      await tester.pump(const Duration(milliseconds: 300));
+
+      service.completer.complete(const LabValueExtractionResult(
+        panel: 'Renal Function',
+        values: {'Creatinine': '1.15'},
+        tokensUsed: 10,
+      ));
+      await tester.pumpAndSettle();
+
+      // The structured apply must end the narrative selection: no narrative
+      // fields, structured inputs present with the extracted value.
+      expect(find.byKey(const Key('narrative_findings_input')), findsNothing);
+      expect(find.text('Findings for A.'), findsNothing);
+      expect(find.byKey(const Key('param_input_Creatinine')), findsOneWidget);
+      final creatinine = tester.widget<TextField>(find.descendant(
+        of: find.byKey(const Key('param_input_Creatinine')),
+        matching: find.byType(TextField),
+      ));
+      expect(creatinine.controller?.text, '1.15');
+      expect(find.text('Renal Function'), findsWidgets);
+
+      // The structured save path is what runs, and it posts structured rows.
+      await tester.enterText(find.byKey(const Key('param_input_Creatinine')), '1.0');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('submit_result_btn')));
+      await tester.pumpAndSettle();
+      expect(repo.freeTextCalls, 0);
+      expect(repo.labCalls, 1);
+      expect(repo.lastRows?.single.testName, 'Creatinine');
     });
   });
 }

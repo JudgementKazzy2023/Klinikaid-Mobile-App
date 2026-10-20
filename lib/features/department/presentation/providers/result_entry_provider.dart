@@ -43,6 +43,10 @@ class ResultEntryProvider extends ChangeNotifier {
       _selectedLabGroup = group;
       _narrativeTest = null;
       _parameterValues.clear();
+      // A changed test/mode never carries narrative answers; notes are shared
+      // and survive (see setNotes).
+      _findings = '';
+      _impression = '';
       _errorMessage = null;
       _hasOcrAutofill = false;
       notifyListeners();
@@ -50,11 +54,15 @@ class ResultEntryProvider extends ChangeNotifier {
   }
 
   /// Selects a narrative laboratory test (no structured panel or ranges).
-  /// Ignored for names outside [kLabNarrativeTests].
+  /// Ignored for names outside [kLabNarrativeTests]. Selecting a different
+  /// test clears the previous test's Findings/Impression; reselecting the
+  /// same test preserves unfinished input.
   void setNarrativeTest(String test) {
     if (!kLabNarrativeTests.contains(test) || _narrativeTest == test) return;
     _narrativeTest = test;
     _parameterValues.clear();
+    _findings = '';
+    _impression = '';
     _errorMessage = null;
     _hasOcrAutofill = false;
     notifyListeners();
@@ -91,9 +99,14 @@ class ResultEntryProvider extends ChangeNotifier {
     }
 
     _selectedLabGroup = panel;
+    // A successful structured autofill ends any narrative selection so the
+    // model cannot report a narrative test while structured values are set.
+    _narrativeTest = null;
     _parameterValues
       ..clear()
       ..addAll(filteredValues);
+    _findings = '';
+    _impression = '';
     _hasOcrAutofill = true;
     _errorMessage = null;
     notifyListeners();
