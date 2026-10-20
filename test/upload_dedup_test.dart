@@ -109,8 +109,6 @@ class MockDocumentSubmissionProvider extends DocumentSubmissionProvider {
   @override
   List<OfflineDocument> get queuedSubmissions => [];
   @override
-  List<OfflineDocument> get orphanedSubmissions => [];
-  @override
   String? get errorMessage => mockErrorMessage;
 
   @override

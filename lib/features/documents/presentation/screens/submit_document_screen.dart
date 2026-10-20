@@ -212,8 +212,8 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
                 
                 const SizedBox(height: 24),
                 
-                // Queued Offline Documents Section
-                if (provider.queuedSubmissions.isNotEmpty || provider.orphanedSubmissions.isNotEmpty) ...[
+                // Queued Offline Documents Section (current account only)
+                if (provider.queuedSubmissions.isNotEmpty) ...[
                   Text(
                     'Offline Sync Queue',
                     style: TextStyle(
@@ -223,8 +223,7 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
                     ),
                   ),
                   const SizedBox(height: 12),
-                  ...provider.queuedSubmissions.map((doc) => _buildQueueItem(doc, provider, false)),
-                  ...provider.orphanedSubmissions.map((doc) => _buildQueueItem(doc, provider, true)),
+                  ...provider.queuedSubmissions.map((doc) => _buildQueueItem(doc, provider)),
                 ],
               ],
             ),
@@ -825,7 +824,7 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
     );
   }
 
-  Widget _buildQueueItem(OfflineDocument doc, DocumentSubmissionProvider provider, bool isOrphaned) {
+  Widget _buildQueueItem(OfflineDocument doc, DocumentSubmissionProvider provider) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
@@ -833,17 +832,15 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isOrphaned 
-              ? Theme.of(context).colorScheme.error.withValues(alpha: 0.2) 
-              : Theme.of(context).colorScheme.outline,
+          color: Theme.of(context).colorScheme.outline,
           width: 1,
         ),
       ),
       child: Row(
         children: [
           Icon(
-            isOrphaned ? Icons.account_circle_outlined : Icons.offline_bolt_outlined,
-            color: isOrphaned ? Theme.of(context).colorScheme.error : Colors.orange,
+            Icons.offline_bolt_outlined,
+            color: Colors.orange,
             size: 24,
           ),
           const SizedBox(width: 12),
@@ -857,11 +854,9 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  isOrphaned 
-                      ? 'Account Mismatch (Submit blocked)' 
-                      : 'Pending reconnect...',
+                  'Pending reconnect...',
                   style: TextStyle(
-                    color: isOrphaned ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                     fontSize: 11,
                   ),
                 ),
