@@ -195,6 +195,10 @@ class DepartmentRepository {
 
   /// Submits free-text findings & impression rows to Supabase and updates patient queue.
   /// Implements sequential non-atomic write logic matching web route.ts.
+  ///
+  /// Renders a Findings row and, when an impression is provided, a second
+  /// Impression row. Laboratory narrative tests reuse this path; the non-lab
+  /// entry forms require an impression before calling it.
   Future<void> submitFreeTextResult({
     required String patientId,
     required String testName,
@@ -211,7 +215,6 @@ class DepartmentRepository {
 
       final sharedNotes = notes?.trim().isEmpty == true ? null : notes?.trim();
 
-      // Renders exactly two records rows representing Findings and Impression respectively.
       final rowsJson = [
         {
           'patient_id': patientId,
@@ -226,19 +229,20 @@ class DepartmentRepository {
           'is_flagged': false,
           'notes': sharedNotes,
         },
-        {
-          'patient_id': patientId,
-          'recorder_id': userId,
-          'department': department,
-          'test_type': testName.trim(),
-          'test_name': 'Impression',
-          'test_value': impression.trim(),
-          'unit': null,
-          'reference_range_min': null,
-          'reference_range_max': null,
-          'is_flagged': false,
-          'notes': sharedNotes,
-        }
+        if (impression.trim().isNotEmpty)
+          {
+            'patient_id': patientId,
+            'recorder_id': userId,
+            'department': department,
+            'test_type': testName.trim(),
+            'test_name': 'Impression',
+            'test_value': impression.trim(),
+            'unit': null,
+            'reference_range_min': null,
+            'reference_range_max': null,
+            'is_flagged': false,
+            'notes': sharedNotes,
+          }
       ];
 
       // 1. Insert records rows to public.department_records
