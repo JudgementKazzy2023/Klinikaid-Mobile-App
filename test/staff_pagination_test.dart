@@ -11,11 +11,18 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:klinikaid_mobile/core/repositories/rag_documents_repository.dart';
 import 'package:klinikaid_mobile/features/admin/data/admin_repository.dart';
 import 'package:klinikaid_mobile/features/admin/presentation/providers/admin_provider.dart';
+import 'package:klinikaid_mobile/features/admin/presentation/screens/admin_logs_screen.dart';
 import 'package:klinikaid_mobile/features/admin/presentation/screens/admin_staff_screen.dart';
 import 'package:klinikaid_mobile/features/department/data/department_repository.dart';
 import 'package:klinikaid_mobile/features/specialist/data/specialist_repository.dart';
 import 'package:klinikaid_mobile/features/specialist/presentation/providers/specialist_provider.dart';
 import 'package:klinikaid_mobile/features/specialist/presentation/screens/specialist_directory_screen.dart';
+
+/// The index of the row that only a search finds.
+///
+/// It sits behind the first page of every list, so a read that filters on the
+/// client side never sees it.
+const int kNeedleIndex = 240;
 
 /// A minimal PostgREST stand-in.
 ///
@@ -23,6 +30,13 @@ import 'package:klinikaid_mobile/features/specialist/presentation/screens/specia
 /// caps a single response at [maxRows], the way PostgREST's max-rows does. A
 /// read that does not page therefore loses everything past the cap, which is
 /// what the regression tests guard against.
+///
+/// Rows that share every sort value have no fixed place in the order, and the
+/// server may answer two requests with a different order for them. The fake
+/// models that: a tied group is rotated by the number of requests it has
+/// already served for the same filter. A read that pages over such an order
+/// without a unique tiebreaker therefore skips and repeats rows, while a read
+/// that orders by a unique column has no tied rows at all and is unaffected.
 class FakePostgrest {
   FakePostgrest(this.tables, {this.maxRows = 1000});
 
@@ -34,11 +48,24 @@ class FakePostgrest {
   /// Every request the app made, in order.
   final List<Uri> requests = [];
 
+  /// The requests that asked the server for an exact count.
+  final List<Uri> countRequests = [];
+
+  /// How many requests each filter has served.
+  final Map<String, int> _sequences = {};
+
   int requestCount(String table) =>
       requests.where((uri) => uri.pathSegments.last == table).length;
 
+  /// The number of requests to [table] that asked for the exact count.
+  int countRequestCount(String table) =>
+      countRequests.where((uri) => uri.pathSegments.last == table).length;
+
   http.Response handle(http.Request request) {
     requests.add(request.url);
+    final prefer = request.headers['prefer'] ?? '';
+    if (prefer.contains('count=exact')) countRequests.add(request.url);
+
     final table = request.url.pathSegments.last;
     final params = request.url.queryParametersAll;
     var rows = List<Map<String, dynamic>>.from(tables[table] ?? const []);
@@ -51,7 +78,9 @@ class FakePostgrest {
     }
 
     final order = params['order']?.first;
-    if (order != null && order.isNotEmpty) _applyOrder(rows, order);
+    if (order != null && order.isNotEmpty) {
+      _applyOrder(rows, order, _nextSequence(table, params));
+    }
 
     final offset = int.tryParse(params['offset']?.first ?? '0') ?? 0;
     final limit = int.tryParse(params['limit']?.first ?? '${rows.length}') ?? rows.length;
@@ -74,17 +103,84 @@ class FakePostgrest {
     );
   }
 
-  void _applyOrder(List<Map<String, dynamic>> rows, String order) {
+  /// The number of requests this filter has served before this one.
+  int _nextSequence(String table, Map<String, List<String>> params) {
+    final signature = '$table|${params.entries
+        .where((entry) => !const {'select', 'offset', 'limit', 'order'}.contains(entry.key))
+        .map((entry) => '${entry.key}=${entry.value.join(',')}')
+        .join('&')}';
+    final next = _sequences[signature] ?? 0;
+    _sequences[signature] = next + 1;
+    return next;
+  }
+
+  /// Sorts the rows the way the server would and rotates the rows that share
+  /// every sort value.
+  ///
+  /// The sort is applied to all sort columns at once, the way PostgREST does.
+  /// The rows that share the whole sort key have no fixed place in the order,
+  /// so the fake rotates them by the number of requests it already served for
+  /// the same filter: two pages of one read then see a different order.
+  void _applyOrder(
+    List<Map<String, dynamic>> rows,
+    String order,
+    int sequence,
+  ) {
+    final columns = <({String column, bool descending})>[];
     for (final part in order.split(',')) {
       final bits = part.split('.');
-      final column = bits.first;
-      final descending = bits.length > 1 && bits[1] == 'desc';
-      rows.sort((a, b) {
-        final left = a[column]?.toString() ?? '';
-        final right = b[column]?.toString() ?? '';
-        return descending ? right.compareTo(left) : left.compareTo(right);
-      });
+      if (bits.isEmpty || bits.first.isEmpty) continue;
+      columns.add((
+        column: bits.first,
+        descending: bits.length > 1 && bits[1] == 'desc',
+      ));
     }
+    if (columns.isEmpty) return;
+
+    rows.sort((a, b) {
+      for (final column in columns) {
+        final cmp = _compareValues(a[column.column], b[column.column]);
+        if (cmp != 0) return column.descending ? -cmp : cmp;
+      }
+      return 0;
+    });
+
+    var start = 0;
+    while (start < rows.length) {
+      var end = start + 1;
+      while (end < rows.length && _sameKey(rows[start], rows[end], columns)) {
+        end++;
+      }
+      if (end - start > 1 && sequence > 0) {
+        final group = rows.sublist(start, end);
+        final shift = sequence % group.length;
+        final rotated = [...group.sublist(shift), ...group.sublist(0, shift)];
+        for (var i = 0; i < rotated.length; i++) {
+          rows[start + i] = rotated[i];
+        }
+      }
+      start = end;
+    }
+  }
+
+  /// Compares two cell values, numbers numerically and everything else as text.
+  int _compareValues(Object? left, Object? right) {
+    if (left is num && right is num) return left.compareTo(right);
+    final a = left?.toString() ?? '';
+    final b = right?.toString() ?? '';
+    return a.compareTo(b);
+  }
+
+  /// True when both rows share every sort value.
+  bool _sameKey(
+    Map<String, dynamic> a,
+    Map<String, dynamic> b,
+    List<({String column, bool descending})> columns,
+  ) {
+    for (final column in columns) {
+      if (_compareValues(a[column.column], b[column.column]) != 0) return false;
+    }
+    return true;
   }
 
   /// Fills the embedded rows the app asks for (`user:profiles(...)`).
@@ -215,8 +311,22 @@ Map<String, dynamic> _systemLogRow(int index) {
     'id': '$index',
     'user_id': 'profile-$index',
     'event_type': 'login',
-    'description': index == 1400 ? 'Needle event description' : 'Routine event $index',
+    'description': index == kNeedleIndex ? 'Needle event description' : 'Routine event $index',
     'ip_address': '0.0.0.0',
+    'created_at': created.toIso8601String(),
+  };
+}
+
+Map<String, dynamic> _chatbotLogRow(int index) {
+  final created = DateTime.utc(2026, 1, 1).subtract(Duration(minutes: index));
+  return {
+    'id': index + 1,
+    'user_id': null,
+    'session_id': 'session-$index',
+    'user_message': index == kNeedleIndex ? 'Needle question' : 'Question $index',
+    'bot_response': 'Answer $index',
+    'tokens_used': 10,
+    'feedback': null,
     'created_at': created.toIso8601String(),
   };
 }
@@ -238,6 +348,13 @@ void main() {
       authOptions: const AuthClientOptions(autoRefreshToken: false),
       httpClient: MockClient((request) async => server.handle(request)));
   }
+
+  /// The admin provider on top of the mocked server.
+  AdminProvider useAdmin() => AdminProvider(
+    repository: AdminRepository(client: client),
+    ragRepository: _UnusedRag(),
+    deptRepository: DepartmentRepository(client: client),
+  );
 
   tearDown(() async {
     await client.dispose();
@@ -372,19 +489,6 @@ void main() {
     expect(logs.single.userName, 'Needle Staff');
   });
 
-  test('admin system events page through every matching event', () async {
-    client = useTables({
-      'system_logs': [for (var i = 0; i < 1500; i++) _systemLogRow(i)],
-      'profiles': [for (var i = 0; i < 1500; i++) _profileRow(i)],
-    });
-    final repo = AdminRepository(client: client);
-
-    final logs = await repo.getSystemEvents();
-
-    expect(logs, hasLength(1500));
-    expect(server.requestCount('system_logs'), greaterThan(1));
-  });
-
   test('admin queue submissions reach every row past the server row cap', () async {
     client = useTables({
       'documents': [
@@ -441,36 +545,6 @@ void main() {
     expect(server.requestCount('department_records'), greaterThan(1));
   });
 
-  test('admin chatbot audit reaches every row and reports the exact total', () async {
-    client = useTables({
-      'chatbot_logs': [
-        for (var i = 0; i < 1200; i++)
-          {
-            'id': i + 1,
-            'user_id': null,
-            'session_id': 'session-$i',
-            'user_message': 'Question $i',
-            'bot_response': 'Answer $i',
-            'tokens_used': 10,
-            'feedback': null,
-            'created_at': DateTime.utc(2026, 1, 1).subtract(Duration(minutes: i)).toIso8601String(),
-          }
-      ],
-    });
-    final state = AdminProvider(
-      repository: AdminRepository(client: client),
-      ragRepository: _UnusedRag(),
-      deptRepository: DepartmentRepository(client: client),
-    );
-
-    await state.loadChatbotAudit();
-
-    expect(state.chatbotLogs, hasLength(1200));
-    expect(state.chatbotTotal, 1200);
-    expect(server.requestCount('chatbot_logs'), greaterThan(1));
-    state.dispose();
-  });
-
   test('admin dashboard workload counts every queue entry of the day', () async {
     final today = DateTime.now().toUtc();
     client = useTables({
@@ -495,6 +569,231 @@ void main() {
     expect(workload['laboratory'], 750);
     expect(workload['imaging'], 750);
     expect(server.requestCount('patient_queue'), greaterThan(1));
+  });
+
+  // --- Round 2: total order, paged log lists, one count per read ---
+
+  test('every row is read exactly once when many rows share a timestamp', () async {
+    const total = 1500;
+    client = useTables({
+      'specialist_patients': [
+        for (var i = 0; i < total; i++)
+          {
+            'id': 'patient-$i',
+            'specialist_id': 'specialist-1',
+            'first_name': 'Patient',
+            'last_name': 'Row$i',
+            'date_of_birth': '1990-01-01',
+            'gender': 'other',
+            // Every row shares the timestamp, so only the primary key can
+            // give them a fixed place in the order.
+            'created_at': '2026-01-01T00:00:00.000Z',
+            'updated_at': '2026-01-01T00:00:00.000Z',
+          }
+      ],
+    });
+    final repo = SpecialistRepository(client: client);
+
+    final patients = await repo.getMyPatients();
+
+    // The page boundary falls inside the group of rows that share a timestamp.
+    expect(server.requestCount('specialist_patients'), greaterThan(1));
+
+    // Every row is reached exactly once: none is skipped and none is read
+    // twice. The rows are counted, not deduplicated, so a repeated row would
+    // show up here.
+    final seen = <String, int>{};
+    for (final patient in patients) {
+      seen[patient.id] = (seen[patient.id] ?? 0) + 1;
+    }
+    expect(patients, hasLength(total));
+    expect(seen, hasLength(total));
+    expect(seen.values.every((count) => count == 1), isTrue);
+  });
+
+  test('the exact count is asked for once per read', () async {
+    client = useTables({
+      'specialist_patients': [for (var i = 0; i < 2500; i++) _patientRow(i)],
+    });
+    final repo = SpecialistRepository(client: client);
+
+    await repo.getMyPatients();
+
+    // Three pages were read...
+    expect(server.requestCount('specialist_patients'), 3);
+    // ...but the server counted the rows only once.
+    expect(server.countRequestCount('specialist_patients'), 1);
+  });
+
+  test('the system event list shows the first page with the exact total', () async {
+    client = useTables({
+      'system_logs': [for (var i = 0; i < 1500; i++) _systemLogRow(i)],
+      'profiles': [for (var i = 0; i < 1500; i++) _profileRow(i)],
+    });
+    final state = useAdmin();
+
+    await state.loadSystemEvents();
+
+    expect(state.systemEvents, hasLength(kAdminLogsPageSize));
+    expect(state.systemEventsTotal, 1500);
+    expect(state.hasMoreSystemEvents, isTrue);
+    // The list is read page by page, not in one eager sweep.
+    expect(server.requestCount('system_logs'), 1);
+    state.dispose();
+  });
+
+  test('load more appends the next page of the system event list', () async {
+    client = useTables({
+      'system_logs': [for (var i = 0; i < 1500; i++) _systemLogRow(i)],
+      'profiles': [for (var i = 0; i < 1500; i++) _profileRow(i)],
+    });
+    final state = useAdmin();
+
+    await state.loadSystemEvents();
+    await state.loadMoreSystemEvents();
+
+    expect(state.systemEvents, hasLength(2 * kAdminLogsPageSize));
+    expect(state.systemEventsTotal, 1500);
+    // The total comes from the first page; a second count is not paid for.
+    expect(server.countRequestCount('system_logs'), 1);
+    state.dispose();
+  });
+
+  test('every system event is reachable page by page', () async {
+    client = useTables({
+      'system_logs': [for (var i = 0; i < 1500; i++) _systemLogRow(i)],
+      'profiles': [for (var i = 0; i < 1500; i++) _profileRow(i)],
+    });
+    final state = useAdmin();
+
+    await state.loadSystemEvents();
+    while (state.hasMoreSystemEvents) {
+      await state.loadMoreSystemEvents();
+    }
+
+    expect(state.systemEvents, hasLength(1500));
+    // Every event is on screen once: the pages continue where the last one
+    // stopped instead of repeating or skipping rows.
+    final ids = state.systemEvents.map((log) => log.id).toList();
+    expect(ids.toSet(), hasLength(1500));
+    state.dispose();
+  });
+
+  test('a search match behind the first page is found and reachable', () async {
+    client = useTables({
+      'system_logs': [for (var i = 0; i < 1500; i++) _systemLogRow(i)],
+      'profiles': [for (var i = 0; i < 1500; i++) _profileRow(i)],
+    });
+    final repo = AdminRepository(client: client);
+    final state = useAdmin();
+
+    // The needle is not on the first page.
+    final first = await repo.getSystemEventsPage();
+    expect(first.logs, hasLength(kAdminLogsPageSize));
+    expect(
+      first.logs.any((log) => log.description.contains('Needle')),
+      isFalse,
+    );
+
+    // The server filters, so the needle is found although it is behind the
+    // first page of the list.
+    final found = await repo.getSystemEventsPage(textSearch: 'Needle');
+    expect(found.logs, hasLength(1));
+    expect(found.logs.single.description, 'Needle event description');
+
+    // Paging reaches it as well.
+    await state.loadSystemEvents();
+    while (!state.systemEvents.any((log) => log.description.contains('Needle'))) {
+      expect(state.hasMoreSystemEvents, isTrue);
+      await state.loadMoreSystemEvents();
+    }
+    expect(
+      state.systemEvents.where((log) => log.description.contains('Needle')),
+      hasLength(1),
+    );
+    state.dispose();
+  });
+
+  test('the chatbot audit shows the first page with the exact total', () async {
+    client = useTables({
+      'chatbot_logs': [for (var i = 0; i < 1200; i++) _chatbotLogRow(i)],
+    });
+    final state = useAdmin();
+
+    await state.loadChatbotAudit();
+
+    expect(state.chatbotLogs, hasLength(kAdminLogsPageSize));
+    expect(state.chatbotTotal, 1200);
+    expect(state.hasMoreChatbotLogs, isTrue);
+    state.dispose();
+  });
+
+  test('load more appends the next page of the chatbot audit', () async {
+    client = useTables({
+      'chatbot_logs': [for (var i = 0; i < 1200; i++) _chatbotLogRow(i)],
+    });
+    final state = useAdmin();
+
+    await state.loadChatbotAudit();
+    await state.loadMoreChatbotAudit();
+
+    expect(state.chatbotLogs, hasLength(2 * kAdminLogsPageSize));
+    expect(state.chatbotTotal, 1200);
+    state.dispose();
+  });
+
+  test('a chatbot log behind the first page is found by the search', () async {
+    client = useTables({
+      'chatbot_logs': [for (var i = 0; i < 1200; i++) _chatbotLogRow(i)],
+    });
+    final repo = AdminRepository(client: client);
+
+    final page = await repo.getChatbotAuditPage();
+    expect(page.logs, hasLength(kAdminLogsPageSize));
+    expect(
+      page.logs.any((log) => log.userMessage.contains('Needle')),
+      isFalse,
+    );
+
+    // The needle lives on the third page of the list.
+    final third = await repo.getChatbotAuditPage(offset: 2 * kAdminLogsPageSize);
+    expect(third.logs.any((log) => log.userMessage.contains('Needle')), isTrue);
+  });
+
+  testWidgets('the admin log screen shows the loaded count of the exact total',
+      (tester) async {
+    late AdminProvider state;
+    await tester.runAsync(() async {
+      // The rows are small on purpose: a widget test decodes a response of
+      // more than 10 kB in an isolate, whose answer the fake clock of the
+      // test never delivers.
+      client = useTables({
+        'system_logs': [
+          for (var i = 0; i < 150; i++)
+            {'id': '$i', 'created_at': '2026-01-01T00:00:00.000Z'},
+        ],
+      });
+      state = useAdmin();
+    });
+
+    await tester.pumpWidget(ChangeNotifierProvider.value(
+      value: state,
+      child: const MaterialApp(home: AdminLogsScreen()),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Showing 100 of 150'), findsOneWidget);
+    expect(find.byKey(const Key('btn_load_more_logs')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('btn_load_more_logs')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Showing 150 of 150'), findsOneWidget);
+    // Every event is on screen, so there is nothing left to load.
+    expect(find.byKey(const Key('btn_load_more_logs')), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    state.dispose();
   });
 }
 

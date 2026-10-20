@@ -355,14 +355,19 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                provider.isLogsLoading ? 'Loading events...' : provider.logsError != null ? 'Events unavailable' : '${provider.systemEvents.length} logs found',
+                provider.isLogsLoading ? 'Loading events...' : provider.logsError != null ? 'Events unavailable' : 'Showing ${provider.systemEvents.length} of ${provider.systemEventsTotal}',
                 style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
               ),
-              ElevatedButton.icon(
-                key: const Key('btn_export_csv'),
-                icon: const Icon(Icons.download_rounded, size: 16),
-                label: const Text('Export CSV', style: TextStyle(fontSize: 12)),
-                onPressed: provider.isLogsLoading || provider.logsError != null || provider.logsState != AdminReadState.loaded || provider.systemEvents.isEmpty ? null : () => _triggerCsvExport(provider.systemEvents),
+              Tooltip(
+                // The list is read page by page, so the export holds the
+                // events that are on screen.
+                message: 'Export the ${provider.systemEvents.length} events on screen',
+                child: ElevatedButton.icon(
+                  key: const Key('btn_export_csv'),
+                  icon: const Icon(Icons.download_rounded, size: 16),
+                  label: const Text('Export CSV', style: TextStyle(fontSize: 12)),
+                  onPressed: provider.isLogsLoading || provider.logsError != null || provider.logsState != AdminReadState.loaded || provider.systemEvents.isEmpty ? null : () => _triggerCsvExport(provider.systemEvents),
+                ),
               ),
             ],
           ),
@@ -379,16 +384,73 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
                   ? AdminReadError(message: 'System events have not been loaded.', onRetry: _onFilterChanged)
                   : provider.systemEvents.isEmpty
                   ? const Center(child: Text('No events matching filters.'))
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                      itemCount: provider.systemEvents.length,
-                      itemBuilder: (context, index) {
-                        final log = provider.systemEvents[index];
-                        return _buildSystemLogCard(context, log);
-                      },
+                  : Column(
+                      children: [
+                        Expanded(
+                          child: ListView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                            itemCount: provider.systemEvents.length,
+                            itemBuilder: (context, index) {
+                              final log = provider.systemEvents[index];
+                              return _buildSystemLogCard(context, log);
+                            },
+                          ),
+                        ),
+                        _buildLoadMore(
+                          context,
+                          buttonKey: const Key('btn_load_more_logs'),
+                          loading: provider.isLogsLoadingMore,
+                          hasMore: provider.hasMoreSystemEvents,
+                          error: provider.logsMoreError,
+                          onPressed: provider.loadMoreSystemEvents,
+                        ),
+                      ],
                     ),
         ),
       ],
+    );
+  }
+
+  /// The "load more" control of a paged log list.
+  ///
+  /// The lists are read page by page, so the screen says how much of the
+  /// server's count is on screen and offers the next page.
+  Widget _buildLoadMore(
+    BuildContext context, {
+    required Key buttonKey,
+    required bool loading,
+    required bool hasMore,
+    required String? error,
+    required Future<void> Function() onPressed,
+  }) {
+    if (!hasMore && error == null) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: Column(
+        children: [
+          if (error != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4.0),
+              child: Text(
+                error,
+                style: TextStyle(fontSize: 11, color: theme.colorScheme.error),
+              ),
+            ),
+          FilledButton.icon(
+            key: buttonKey,
+            icon: loading
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.expand_more_rounded, size: 18),
+            label: Text(loading ? 'Loading...' : 'Load more'),
+            onPressed: loading ? null : onPressed,
+          ),
+        ],
+      ),
     );
   }
 
@@ -444,6 +506,7 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
 
   // --- CHATBOT AUDIT TAB ---
   Widget _buildChatbotAuditTab(BuildContext context) {
+    final theme = Theme.of(context);
     final provider = Provider.of<AdminProvider>(context);
 
     if (provider.isChatbotLoading) {
@@ -494,13 +557,37 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
         Expanded(
           child: provider.chatbotLogs.isEmpty
               ? const Center(child: Text('No chatbot logs found.'))
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                  itemCount: provider.chatbotLogs.length,
-                  itemBuilder: (context, index) {
-                    final log = provider.chatbotLogs[index];
-                    return _buildChatbotLogCard(context, log);
-                  },
+              : Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Showing ${provider.chatbotLogs.length} of ${provider.chatbotTotal}',
+                          style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        itemCount: provider.chatbotLogs.length,
+                        itemBuilder: (context, index) {
+                          final log = provider.chatbotLogs[index];
+                          return _buildChatbotLogCard(context, log);
+                        },
+                      ),
+                    ),
+                    _buildLoadMore(
+                      context,
+                      buttonKey: const Key('btn_load_more_chatbot'),
+                      loading: provider.isChatbotLoadingMore,
+                      hasMore: provider.hasMoreChatbotLogs,
+                      error: provider.chatbotMoreError,
+                      onPressed: provider.loadMoreChatbotAudit,
+                    ),
+                  ],
                 ),
         ),
       ],

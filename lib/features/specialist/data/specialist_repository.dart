@@ -16,6 +16,10 @@ class SpecialistRepository {
   /// The read is paged: PostgREST caps one response at its max-rows (1,000) and
   /// reports no error when it drops the rest, so an unpaginated select would
   /// hide every patient past the cap.
+  ///
+  /// The order is total (newest first, then the primary key): patients that
+  /// share a timestamp keep a fixed place in the order, so a page boundary
+  /// never skips or repeats one of them.
   Future<List<SpecialistPatient>> getMyPatients() async {
     try {
       final read = await readAllPages(
@@ -23,6 +27,7 @@ class SpecialistRepository {
             .from('specialist_patients')
             .select()
             .order('created_at', ascending: false),
+        uniqueOrderColumn: 'id',
       );
 
       return read.rows
@@ -105,7 +110,9 @@ class SpecialistRepository {
   /// - 'total_patients': int (the server's exact patient count)
   ///
   /// Both reads are paged so the aggregates cover every row and not just the
-  /// first page the server was willing to return.
+  /// first page the server was willing to return, and both are ordered totally
+  /// (newest first, then the primary key) so a page boundary cannot skip or
+  /// repeat a row that shares a timestamp.
   Future<Map<String, dynamic>> getDashboardRawData() async {
     try {
       final patientsRead = await readAllPages(
@@ -113,6 +120,7 @@ class SpecialistRepository {
             .from('specialist_patients')
             .select()
             .order('created_at', ascending: false),
+        uniqueOrderColumn: 'id',
       );
 
       final recordsRead = await readAllPages(
@@ -120,6 +128,7 @@ class SpecialistRepository {
             .from('specialist_records')
             .select('*, patient:specialist_patients(*)')
             .order('created_at', ascending: false),
+        uniqueOrderColumn: 'id',
       );
 
       final patients = patientsRead.rows
@@ -177,7 +186,8 @@ class SpecialistRepository {
   /// Retrieve the records for a specific private patient.
   ///
   /// Paged, so a patient with more records than the server's row cap still
-  /// shows all of them.
+  /// shows all of them, and ordered totally (oldest first, then the primary
+  /// key) so records that share a timestamp keep a fixed place in the order.
   Future<List<SpecialistRecord>> getPatientRecords(String specialistPatientId) async {
     try {
       final read = await readAllPages(
@@ -186,6 +196,8 @@ class SpecialistRepository {
             .select()
             .eq('specialist_patient_id', specialistPatientId)
             .order('created_at', ascending: true),
+        uniqueOrderColumn: 'id',
+        uniqueOrderAscending: true,
       );
 
       return read.rows

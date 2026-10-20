@@ -28,23 +28,58 @@ class PagedReadResult {
 
 /// Reads every row a filter matches, one page at a time.
 ///
-/// [query] is a PostgREST builder with the filters already applied. Each page
-/// is requested with an explicit range together with the server's exact count
-/// for the same filter, so the caller can report the true total instead of the
-/// number of rows that happened to fit in one response.
+/// [query] is a PostgREST builder with the filters already applied and with
+/// the sort columns the caller wants already attached. [uniqueOrderColumn]
+/// names the column that makes that sort a total order - the table's primary
+/// key - and is appended to the order here.
+///
+/// The tiebreaker is mandatory, not a nicety. Two rows that share a sort value
+/// have no fixed place in the order, so the server may return them in a
+/// different order for two requests; a page boundary that falls inside such a
+/// group then skips rows and repeats others, which is the defect this read
+/// exists to prevent. The unique column gives every row a fixed place, so
+/// every row is read exactly once.
+///
+/// Only the first page asks the server for the exact count: the count costs
+/// the server a full scan and the number does not change between the pages of
+/// one read. The total is therefore the server's answer for the moment of the
+/// first page; a concurrent insert can make it stale before the last page
+/// arrives.
 Future<PagedReadResult> readAllPages(
   PostgrestTransformBuilder<PostgrestList> query, {
+  required String uniqueOrderColumn,
+  bool uniqueOrderAscending = false,
   int pageSize = kPagedReadPageSize,
 }) async {
+  assert(
+    uniqueOrderColumn.trim().isNotEmpty,
+    'readAllPages needs the unique tiebreaker column (the table primary key).',
+  );
+
+  // The tiebreaker turns the caller's sort into a total order.
+  final ordered =
+      query.order(uniqueOrderColumn, ascending: uniqueOrderAscending);
+
   final rows = <Map<String, dynamic>>[];
   var total = 0;
   var offset = 0;
 
   for (var page = 0; page < kPagedReadMaxPages; page++) {
-    final PostgrestResponse<PostgrestList> response;
+    final List<Map<String, dynamic>> pageRows;
+    final int pageTotal;
     try {
-      response =
-          await query.range(offset, offset + pageSize - 1).count(CountOption.exact);
+      if (page == 0) {
+        final response = await ordered
+            .range(offset, offset + pageSize - 1)
+            .count(CountOption.exact);
+        pageRows = response.data;
+        pageTotal = response.count;
+      } else {
+        // Only the first page asks for the count: it is the expensive part of
+        // the read and the answer does not change between the pages.
+        pageRows = await ordered.range(offset, offset + pageSize - 1);
+        pageTotal = total;
+      }
     } on PostgrestException catch (e) {
       // PostgREST answers 416/PGRST103 when the requested offset is past the
       // last row. That is the end of the data, not a server fault.
@@ -52,11 +87,9 @@ Future<PagedReadResult> readAllPages(
       rethrow;
     }
 
-    final pageRows = response.data;
     if (pageRows.isEmpty) break;
-
     rows.addAll(pageRows);
-    total = response.count;
+    if (page == 0) total = pageTotal;
     if (rows.length >= total) break;
 
     // Advance by the rows the server actually returned: a server whose
