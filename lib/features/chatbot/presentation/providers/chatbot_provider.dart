@@ -27,6 +27,15 @@ class ChatbotProvider extends ChangeNotifier {
 
   bool _isLoading = false;
   bool _isSending = false;
+  bool _disposed = false;
+  /// Bumped by [clearChat]; in-flight work from an older generation is ignored.
+  int _generation = 0;
+  /// Bumped by each history load, so a stale load never clears the loading
+  /// flag owned by a newer one.
+  int _loadSeq = 0;
+  /// Bumped by each send, so a stale completion never clears the sending
+  /// flag owned by a newer send.
+  int _sendSeq = 0;
   String? _errorMessage;
   List<ChatMsg> _messages = [];
   late String _sessionId;
@@ -42,85 +51,87 @@ class ChatbotProvider extends ChangeNotifier {
   List<ChatMsg> get messages => _messages;
   String get sessionId => _sessionId;
 
+  /// Whether late results may still be applied: not disposed, same [generation]
+  /// (not invalidated by [clearChat]) and the same authenticated account.
+  bool _isActive(String ownerId, int generation) =>
+      !_disposed &&
+      generation == _generation &&
+      SupabaseService.client.auth.currentUser?.id == ownerId;
+
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
   /// Loads chatbot history for the current authenticated user and maps it to UI messages.
   Future<void> loadHistory() async {
     final user = SupabaseService.client.auth.currentUser;
     if (user == null) return;
+    final ownerId = user.id;
+    final generation = _generation;
+    final seq = ++_loadSeq;
 
     _isLoading = true;
     _errorMessage = null;
-    notifyListeners();
+    _notify();
 
     try {
-      final logs = await _logsRepo.getLogsForUser(user.id);
-      
-      // Map ChatbotLog rows to ChatMsg instances in chronological order (oldest first)
-      _messages = logs.reversed.map((log) {
-        return ChatMsg(
-          text: log.userMessage,
-          isUser: true,
-          timestamp: log.createdAt,
-        );
-      }).expand((msg) => [
-        msg,
-        // Since we retrieve user and bot dialogue from a single row,
-        // we map it to two UI messages: the user message first, then the bot response
-        ChatMsg(
-          text: _findBotResponseForMsg(logs, msg.text) ?? "No response generated.",
-          isUser: false,
-          logId: _findLogIdForMsg(logs, msg.text),
-          feedback: _findFeedbackForMsg(logs, msg.text),
-          timestamp: msg.timestamp.add(const Duration(milliseconds: 200)),
-        )
-      ]).toList();
+      final logs = await _logsRepo.getLogsForUser(ownerId);
+      if (seq == _loadSeq) _isLoading = false;
+      if (!_isActive(ownerId, generation)) return;
 
-      _isLoading = false;
-      notifyListeners();
+      // Map each ChatbotLog row to its own pair of UI messages, oldest first:
+      // the user message, then that row's bot response with its own logId and
+      // feedback. Rows are never looked up by prompt text, so repeated prompts
+      // keep their distinct responses.
+      _messages = [
+        for (final log in logs.reversed) ...[
+          ChatMsg(
+            text: log.userMessage,
+            isUser: true,
+            timestamp: log.createdAt,
+          ),
+          ChatMsg(
+            text: log.botResponse,
+            isUser: false,
+            logId: log.id,
+            feedback: log.feedback,
+            timestamp: log.createdAt.add(const Duration(milliseconds: 200)),
+          ),
+        ],
+      ];
+      _notify();
     } catch (e) {
-      _isLoading = false;
+      if (seq == _loadSeq) _isLoading = false;
+      if (!_isActive(ownerId, generation)) return;
       _errorMessage = FailureMapper.fromException(e).message;
-      notifyListeners();
-    }
-  }
-
-  String? _findBotResponseForMsg(List<ChatbotLog> logs, String userMessage) {
-    try {
-      return logs.firstWhere((log) => log.userMessage == userMessage).botResponse;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  int? _findLogIdForMsg(List<ChatbotLog> logs, String userMessage) {
-    try {
-      return logs.firstWhere((log) => log.userMessage == userMessage).id;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  FeedbackType? _findFeedbackForMsg(List<ChatbotLog> logs, String userMessage) {
-    try {
-      return logs.firstWhere((log) => log.userMessage == userMessage).feedback;
-    } catch (_) {
-      return null;
+      _notify();
     }
   }
 
   /// Sends a message via Supabase Edge Function 'chat'.
   Future<bool> sendMessage(String text) async {
     if (text.trim().isEmpty) return false;
+    if (_isSending) return false; // reject a duplicate while one is pending
 
     final user = SupabaseService.client.auth.currentUser;
     if (user == null) {
       _errorMessage = "Session expired. Please log in again.";
-      notifyListeners();
+      _notify();
       return false;
     }
+    final ownerId = user.id;
+    final generation = _generation;
+    final seq = ++_sendSeq;
 
     _isSending = true;
     _errorMessage = null;
-    
+
     // Add user message to UI instantly for natural flow
     final userMsg = ChatMsg(
       text: text,
@@ -128,7 +139,17 @@ class ChatbotProvider extends ChangeNotifier {
       timestamp: DateTime.now(),
     );
     _messages.add(userMsg);
-    notifyListeners();
+    _notify();
+
+    // Applies a completed send only when this send's session and account are
+    // still current; always releases the sending flag for the latest send.
+    bool finish(void Function() apply) {
+      if (seq == _sendSeq) _isSending = false;
+      if (!_isActive(ownerId, generation)) return false;
+      apply();
+      _notify();
+      return true;
+    }
 
     try {
       final response = await SupabaseService.client.functions.invoke(
@@ -147,36 +168,36 @@ class ChatbotProvider extends ChangeNotifier {
       final botText = data['response'] as String? ?? "No response generated.";
       final logId = data['log_id'] as int?;
 
-      // Add bot response message
-      final botMsg = ChatMsg(
-        text: botText,
-        isUser: false,
-        logId: logId,
-        timestamp: DateTime.now(),
-      );
-      _messages.add(botMsg);
-
-      _isSending = false;
-      notifyListeners();
-      return true;
+      return finish(() {
+        _messages.add(ChatMsg(
+          text: botText,
+          isUser: false,
+          logId: logId,
+          timestamp: DateTime.now(),
+        ));
+      });
     } on SocketException catch (_) {
-      _isSending = false;
-      _errorMessage = "You are currently offline. Please check your network connection.";
-      _messages.removeLast(); // Remove the optimistic user message if call failed
-      notifyListeners();
+      finish(() {
+        _errorMessage = "You are currently offline. Please check your network connection.";
+        // Remove exactly the optimistic message this send added.
+        _messages.remove(userMsg);
+      });
       return false;
     } catch (e) {
-      _isSending = false;
       final failure = FailureMapper.fromException(e);
-      _errorMessage = failure.message;
-      _messages.removeLast(); // Remove optimistic user message on failure
-      notifyListeners();
+      finish(() {
+        _errorMessage = failure.message;
+        // Remove exactly the optimistic message this send added.
+        _messages.remove(userMsg);
+      });
       return false;
     }
   }
 
   /// Updates feedback for a message log.
   Future<void> submitFeedback(int logId, FeedbackType type) async {
+    final ownerId = SupabaseService.client.auth.currentUser?.id;
+    final generation = _generation;
     try {
       // Find the message in UI state and update optimistically
       final index = _messages.indexWhere((msg) => msg.logId == logId);
@@ -184,24 +205,34 @@ class ChatbotProvider extends ChangeNotifier {
         // Toggle behavior: if already selected, set to null; otherwise set to the feedback
         final currentFeedback = _messages[index].feedback;
         final newFeedback = currentFeedback == type ? null : type;
-        
+
         _messages[index].feedback = newFeedback;
-        notifyListeners();
+        _notify();
 
         // Send to remote database
         await _logsRepo.updateLogFeedback(logId, newFeedback);
       }
     } catch (e) {
       debugPrint('Failed to submit feedback: $e');
-      // Revert local state if DB call failed
-      loadHistory();
+      // Revert local state if the DB call failed, but only for the account
+      // and session that started it.
+      if (ownerId != null && _isActive(ownerId, generation)) {
+        await loadHistory();
+      }
     }
   }
 
   /// Clears the chat screen messages and resets session.
+  ///
+  /// Local-only: no server logs are deleted. Invalidates any in-flight
+  /// history load or send so its late result cannot add messages back or
+  /// remove state that belongs to the new chat.
   void clearChat() {
+    _generation++;
+    _isSending = false;
+    _isLoading = false;
     _messages.clear();
     _sessionId = UuidGenerator.generateV4();
-    notifyListeners();
+    _notify();
   }
 }
