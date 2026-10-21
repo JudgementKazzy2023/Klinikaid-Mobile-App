@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/errors/failures.dart';
 import '../domain/submission.dart';
@@ -6,15 +5,6 @@ import '../domain/submission_detail.dart';
 import '../domain/submission_status.dart';
 import '../domain/recent_triage_entry.dart';
 import '../../../../core/models/patient_queue.dart';
-
-/// 3-letter department codes — must match patient_queue.department CHECK values
-/// and replicate web's deptCode map exactly (web source confirmed).
-const _deptCodes = {
-  'laboratory': 'LAB',
-  'imaging': 'IMG',
-  'ultrasound': 'ULT',
-  'ecg': 'ECG',
-};
 
 /// Compute the start of today in PHT (UTC+8), expressed as a UTC DateTime.
 /// Replicates web's getPhtStartOfToday() exactly — Ralph verified the math.
@@ -25,7 +15,10 @@ DateTime phtStartOfTodayUtc() {
 }
 
 class ReceptionRepository {
-  final _client = Supabase.instance.client;
+  final SupabaseClient _client;
+
+  ReceptionRepository({SupabaseClient? client})
+      : _client = client ?? Supabase.instance.client;
 
   /// Fetch all submissions, optionally filtered by status.
   /// Scoped by RLS: Receptionists have full select access to public.documents.
@@ -170,42 +163,10 @@ class ReceptionRepository {
     }
   }
 
-  /// Generate the next queue number for a department for today (PHT).
-  ///
-  /// Replicates web's count-query logic (no shared DB function/RPC exists).
-  /// Counts ALL patient_queue rows for the department since PHT midnight today,
-  /// regardless of status (waiting/in_progress/completed/cancelled).
-  /// Returns e.g. "LAB-001", "IMG-003".
-  ///
-  /// Known limitation (shared with web): count query is non-atomic.
-  /// Two simultaneous routes to the same department can produce the same number.
-  /// This matches web's behaviour intentionally — do NOT add locking on mobile only.
-  Future<String> generateQueueNumber(String department) async {
-    try {
-      final startOfToday = phtStartOfTodayUtc();
-      final res = await _client
-          .from('patient_queue')
-          .select('id')
-          .eq('department', department)
-          .gte('created_at', startOfToday.toIso8601String())
-          .count(CountOption.exact);
-      final dailyCount = res.count + 1;
-      final code = _deptCodes[department]!;
-      return '$code-${dailyCount.toString().padLeft(3, '0')}';
-    } catch (e) {
-      throw FailureMapper.fromException(e);
-    }
-  }
-
-  /// Approve a document and route the patient to a department.
-  ///
-  /// Write ordering (matches task spec):
-  ///   1. generateQueueNumber
-  ///   2. INSERT patient_queue (with triage_notes JSON matching formatter shape)
-  ///   3. UPDATE documents SET status='approved'
-  ///
-  /// If INSERT fails → exception thrown, document NOT updated → stays pending.
-  /// If INSERT succeeds but UPDATE fails → edge case accepted for R2 scope.
+  /// Route through the authenticated, atomic allocator before approving.
+  /// Queue creation and document approval are separate transactions. If approval
+  /// fails, the queue remains; a repeated route is refused by the server's open
+  /// entry guard. Recover the document separately rather than creating a queue.
   Future<void> approveAndRoute({
     required String documentId,
     required String patientId,
@@ -217,11 +178,6 @@ class ReceptionRepository {
     String? triageNotes,
   }) async {
     try {
-      // 1. Generate queue number (replicates web count logic)
-      final queueNumber = await generateQueueNumber(department);
-
-      // 2. Build triage_notes JSON — must match existing formatter read shape:
-      //    { queue_number, vitals: {blood_pressure?, weight_kg?, temperature_c?}, notes? }
       final vitals = <String, dynamic>{};
       if (bloodPressure != null && bloodPressure.trim().isNotEmpty) {
         vitals['blood_pressure'] = bloodPressure.trim();
@@ -229,31 +185,52 @@ class ReceptionRepository {
       if (weightKg != null) vitals['weight_kg'] = weightKg;
       if (temperatureC != null) vitals['temperature_c'] = temperatureC;
 
-      final triageJson = <String, dynamic>{
-        'queue_number': queueNumber,
-        'vitals': vitals,
-      };
-      if (triageNotes != null && triageNotes.trim().isNotEmpty) {
-        triageJson['notes'] = triageNotes.trim();
+      await _client
+          .rpc(
+            'triage_patient',
+            params: {
+              'p_patient_id': patientId,
+              'p_department': department,
+              'p_priority_level': priority,
+              'p_vitals': vitals,
+              'p_notes': triageNotes?.trim() ?? '',
+            },
+          )
+          .single();
+    } on PostgrestException catch (e) {
+      if (e.code == 'PT409') {
+        const departments = {
+          'laboratory': 'Laboratory',
+          'imaging': 'Imaging',
+          'ultrasound': 'Ultrasound',
+          'ecg': 'ECG',
+        };
+        final departmentLabel = departments[e.details];
+        throw DatabaseFailure(
+          'Patient already has an open queue entry'
+          '${departmentLabel == null ? '' : ' in $departmentLabel'}. '
+          'Resolve the existing entry before routing a new one.',
+        );
       }
-      final triageJsonString = jsonEncode(triageJson);
+      throw FailureMapper.fromException(e);
+    } catch (e) {
+      throw FailureMapper.fromException(e);
+    }
 
-      // 3. INSERT patient_queue first — if this fails, document is NOT updated.
-      await _client.from('patient_queue').insert({
-        'patient_id': patientId,
-        'status': 'waiting',
-        'department': department,
-        'triage_notes': triageJsonString,
-        'priority_level': priority,
-      });
-
-      // 4. UPDATE document status to approved.
+    try {
+      // Require a returned row: RLS can silently hide a document from UPDATE.
       await _client
           .from('documents')
           .update({'status': 'approved'})
-          .eq('id', documentId);
+          .eq('id', documentId)
+          .select('id')
+          .single();
     } catch (e) {
-      throw FailureMapper.fromException(e);
+      throw DatabaseFailure(
+        'Patient was routed, but document approval could not be confirmed. '
+        'Refresh and resolve the document approval separately; '
+        'do not route the patient again. ${FailureMapper.fromException(e)}',
+      );
     }
   }
 
