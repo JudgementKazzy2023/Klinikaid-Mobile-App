@@ -164,9 +164,55 @@ class MockInsert extends Fake implements PostgrestFilterBuilder<dynamic> {
       MockSelect(_row, insertGate: insertGate);
 }
 
+/// The pending-document read of the duplicate check.
+///
+/// The mock answers with an empty result: the signed-in account has no
+/// pending document, so the duplicate check is clear and the submit continues
+/// to the file check this file gates. A failed read is no longer treated as
+/// "no duplicate" (see #34), so the mock has to model the read explicitly.
+class MockPendingDocumentsQuery extends Fake
+    implements PostgrestFilterBuilder<PostgrestList> {
+  @override
+  PostgrestFilterBuilder<PostgrestList> eq(String column, Object value) => this;
+
+  @override
+  Future<S> then<S>(FutureOr<S> Function(PostgrestList value) onValue,
+      {Function? onError}) {
+    return Future<PostgrestList>.value(<PostgrestMap>[])
+        .then(onValue, onError: onError);
+  }
+
+  @override
+  Future<PostgrestList> timeout(Duration timeLimit,
+      {FutureOr<PostgrestList> Function()? onTimeout}) {
+    return Future<PostgrestList>.value(<PostgrestMap>[])
+        .timeout(timeLimit, onTimeout: onTimeout);
+  }
+
+  @override
+  Future<PostgrestList> catchError(Function onError,
+      {bool Function(Object error)? test}) {
+    return Future<PostgrestList>.value(<PostgrestMap>[])
+        .catchError(onError, test: test);
+  }
+
+  @override
+  Future<PostgrestList> whenComplete(FutureOr<void> Function() action) {
+    return Future<PostgrestList>.value(<PostgrestMap>[]).whenComplete(action);
+  }
+
+  @override
+  Stream<PostgrestList> asStream() =>
+      Future<PostgrestList>.value(<PostgrestMap>[]).asStream();
+}
+
 class MockDocumentsTable extends Fake implements SupabaseQueryBuilder {
   final List<PostgrestMap> inserted = [];
   final InsertGate insertGate = InsertGate();
+
+  @override
+  PostgrestFilterBuilder<PostgrestList> select([String columns = '*']) =>
+      MockPendingDocumentsQuery();
 
   @override
   PostgrestFilterBuilder<dynamic> insert(Object values,
