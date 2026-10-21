@@ -179,17 +179,24 @@ class LocalDatabase extends _$LocalDatabase {
         .get();
   }
 
-  // Offline Upload Queue Helpers
+  // Offline Upload Queue Helpers (owner-scoped: every queue read/delete must
+  // name the account the rows belong to)
   Future<void> queueOfflineDocument(OfflineDocument doc) async {
     await into(offlineDocumentsQueue).insert(doc);
   }
 
-  Future<List<OfflineDocument>> getQueuedDocuments() async {
-    return select(offlineDocumentsQueue).get();
+  Future<List<OfflineDocument>> getQueuedDocuments(String uploaderId) async {
+    return (select(offlineDocumentsQueue)
+          ..where((t) => t.uploaderId.equals(uploaderId)))
+        .get();
   }
 
-  Future<void> removeQueuedDocument(String id) async {
-    await (delete(offlineDocumentsQueue)..where((t) => t.id.equals(id))).go();
+  /// Deletes [id] only when it is queued by [uploaderId]. Returns the number
+  /// of deleted rows, so 0 means the id is unknown to that owner.
+  Future<int> removeQueuedDocument(String id, String uploaderId) async {
+    return (delete(offlineDocumentsQueue)
+          ..where((t) => t.id.equals(id) & t.uploaderId.equals(uploaderId)))
+        .go();
   }
 
   Future<void> clearAllCache() async {

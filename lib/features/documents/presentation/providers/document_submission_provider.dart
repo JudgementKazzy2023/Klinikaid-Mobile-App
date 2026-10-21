@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/cache/local_database.dart';
 import '../../../../core/errors/failures.dart';
 import '../../../../core/models/document.dart';
@@ -33,11 +35,13 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   
   // Offline sync states
   List<OfflineDocument> _queuedSubmissions = [];
-  List<OfflineDocument> _orphanedSubmissions = [];
   final Map<String, int> _retryCounts = {};
-  
+  StreamSubscription<AuthState>? _authSubscription;
+  bool _disposed = false;
+
   DocumentSubmissionProvider(this._localDb) {
     _loadQueuedSubmissions();
+    _watchAuthIdentityChanges();
   }
   
   bool get isLoading => _isLoading;
@@ -52,35 +56,79 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   /// Returns true if there is a processed document ready for review.
   bool get hasCachedSubmission => _selectedImagePath != null && _preScreenMetadata != null;
   
+  /// Queued submissions owned by the signed-in identity only. Rows queued by
+  /// another account are never exposed here.
   List<OfflineDocument> get queuedSubmissions => _queuedSubmissions;
-  List<OfflineDocument> get orphanedSubmissions => _orphanedSubmissions;
-  
-  /// Loads all queued submissions from Drift DB, splitting into valid and orphaned based on current user.
-  Future<void> _loadQueuedSubmissions() async {
+
+  /// Signed-in user id, or null when it cannot be established.
+  /// Fails closed: an unreadable auth client counts as unauthenticated.
+  String? _currentUserId() {
     try {
-      final allQueued = await _localDb.getQueuedDocuments();
-      final currentUserId = SupabaseService.client.auth.currentUser?.id;
-      
+      return SupabaseService.client.auth.currentUser?.id;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Invalidates queue visibility on every auth change so getters can never
+  /// keep showing a previous account's drafts, then reloads for the new
+  /// identity.
+  void _watchAuthIdentityChanges() {
+    try {
+      _authSubscription =
+          SupabaseService.client.auth.onAuthStateChange.listen((_) {
+        if (_disposed) return;
+        _queuedSubmissions = [];
+        notifyListeners();
+        _loadQueuedSubmissions();
+      });
+    } catch (e) {
+      debugPrint('Offline queue auth listener unavailable: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _authSubscription?.cancel();
+    super.dispose();
+  }
+
+  /// Loads the queued submissions owned by the current identity only.
+  /// An unauthenticated state reveals nothing, and a result read for one
+  /// identity is discarded instead of being applied after an identity switch.
+  Future<void> _loadQueuedSubmissions() async {
+    final ownerId = _currentUserId();
+    if (ownerId == null) {
       _queuedSubmissions = [];
-      _orphanedSubmissions = [];
-      
-      for (final doc in allQueued) {
-        if (doc.uploaderId != currentUserId) {
-          _orphanedSubmissions.add(doc);
-        } else {
-          _queuedSubmissions.add(doc);
-        }
+      notifyListeners();
+      return;
+    }
+    try {
+      final owned = await _localDb.getQueuedDocuments(ownerId);
+      if (_disposed) return;
+      if (_currentUserId() != ownerId) {
+        // Identity changed while the read was in flight: discard the stale
+        // result without touching current state, so a list already loaded
+        // for the newer identity is never erased by an older read.
+        debugPrint('Discarding queue read for $ownerId: identity changed.');
+        return;
       }
+      _queuedSubmissions = owned;
       notifyListeners();
     } catch (e) {
       debugPrint('Error loading offline queue: $e');
     }
   }
 
-  /// Deletes a queued offline document.
+  /// Deletes a queued offline document owned by the signed-in identity.
+  /// Foreign ids and signed-out calls are a no-op: the owner-scoped delete
+  /// matches no row, so other accounts' drafts are never removed.
   Future<void> removeQueuedItem(String id) async {
+    final ownerId = _currentUserId();
+    if (ownerId == null) return;
     try {
-      await _localDb.removeQueuedDocument(id);
+      await _localDb.removeQueuedDocument(id, ownerId);
       await _loadQueuedSubmissions();
     } catch (e) {
       debugPrint('Error removing queued document: $e');
@@ -271,6 +319,15 @@ class DocumentSubmissionProvider extends ChangeNotifier {
       if (!await file.exists()) {
         throw Exception('Captured image file does not exist locally.');
       }
+
+      // The file check resumed after an await: stop before the dispatched
+      // upload rather than writing under a newer session.
+      if (_currentUserId() != currentUserId) {
+        _isLoading = false;
+        _errorMessage = 'Session changed. Please try again.';
+        notifyListeners();
+        return false;
+      }
       
       await SupabaseService.client.storage
           .from('patient-documents')
@@ -349,22 +406,27 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   }
 
   /// Triggers background queue uploads syncing when online.
+  ///
+  /// Only rows owned by the identity that started the sync are uploaded or
+  /// deleted. When the identity changes mid-flight the loop stops before any
+  /// further write: a request already dispatched to the backend cannot be
+  /// recalled from the client, but nothing new is written and no queued row
+  /// is deleted under the newer identity.
   Future<void> syncOfflineQueue() async {
     await _loadQueuedSubmissions();
-    if (_queuedSubmissions.isEmpty) return;
-    
-    final currentUser = SupabaseService.client.auth.currentUser;
-    if (currentUser == null) return;
-    
+    final ownerId = _currentUserId();
+    if (ownerId == null || _queuedSubmissions.isEmpty) return;
+
     final toSync = List<OfflineDocument>.from(_queuedSubmissions);
-    
+
     for (final doc in toSync) {
-      // Identity Check: verify auth.uid() matches uploader_id
-      if (doc.uploaderId != currentUser.id) {
-        // Safe check, should be caught by _loadQueuedSubmissions already
-        continue;
+      // Ownership: only this identity's rows are ever uploaded or deleted.
+      if (doc.uploaderId != ownerId) continue;
+      if (_currentUserId() != ownerId) {
+        debugPrint('Sync stopped before touching ${doc.id}: identity changed.');
+        return;
       }
-      
+
       final retryCount = _retryCounts[doc.id] ?? 0;
       if (retryCount >= 3) {
         // Capped retries reached, skip this item (surfaced via UI warning list)
@@ -375,15 +437,34 @@ class DocumentSubmissionProvider extends ChangeNotifier {
         final File file = File(doc.localFilePath);
         if (!await file.exists()) {
           // File deleted locally, remove from sync queue to avoid infinite loops
-          await _localDb.removeQueuedDocument(doc.id);
+          if (_currentUserId() != ownerId) {
+            debugPrint('Sync stopped before deleting ${doc.id}: identity changed.');
+            return;
+          }
+          await _localDb.removeQueuedDocument(doc.id, ownerId);
           continue;
         }
-        
+
+        // The file check resumed after an await: re-check identity before
+        // dispatching the write. A dispatched upload cannot be recalled
+        // from the client, so nothing new may be sent under a new session.
+        if (_currentUserId() != ownerId) {
+          debugPrint('Sync stopped before uploading ${doc.id}: identity changed.');
+          return;
+        }
+
         // 1. Upload file
-        final storagePath = '${currentUser.id}/${doc.id}_${doc.fileName}';
+        final storagePath = '$ownerId/${doc.id}_${doc.fileName}';
         await SupabaseService.client.storage
             .from('patient-documents')
             .upload(storagePath, file);
+
+        // Stop before the next write once the identity changed: the dispatched
+        // upload itself cannot be cancelled without backend support.
+        if (_currentUserId() != ownerId) {
+          debugPrint('Sync stopped before writing ${doc.id}: identity changed.');
+          return;
+        }
             
         // 2. Insert record
         final metadata = doc.extractedMetadata != null 
@@ -405,9 +486,17 @@ class DocumentSubmissionProvider extends ChangeNotifier {
         );
         
         await _docsRepo.insertDocument(docPayload);
-        
+
+        // The insert await resumed after an identity change: the dispatched
+        // insert itself cannot be recalled or reconciled from the client,
+        // but no queued row is deleted under the newer identity.
+        if (_currentUserId() != ownerId) {
+          debugPrint('Sync stopped before deleting ${doc.id}: identity changed.');
+          return;
+        }
+
         // Success: remove from local SQLite queue
-        await _localDb.removeQueuedDocument(doc.id);
+        await _localDb.removeQueuedDocument(doc.id, ownerId);
         _retryCounts.remove(doc.id);
         
       } catch (e) {
