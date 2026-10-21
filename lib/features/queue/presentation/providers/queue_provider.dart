@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:klinikaid_mobile/core/models/profile.dart';
+
 import '../../../../core/cache/local_database.dart';
 import '../../../../core/errors/failures.dart';
 import '../../../../core/models/patient_queue.dart';
@@ -16,6 +17,9 @@ class QueueProvider extends ChangeNotifier {
   String? _errorMessage;
   List<PatientQueue> _queueEntries = [];
   RealtimeChannel? _realtimeChannel;
+  String? _patientId;
+  bool _disposed = false;
+  Future<void> _refreshes = Future.value();
 
   QueueProvider(this._localDb);
 
@@ -28,7 +32,9 @@ class QueueProvider extends ChangeNotifier {
   PatientQueue? get activeEntry {
     try {
       return _queueEntries.firstWhere(
-        (q) => q.status == QueueStatus.waiting || q.status == QueueStatus.inProgress,
+        (q) =>
+            q.status == QueueStatus.waiting ||
+            q.status == QueueStatus.inProgress,
       );
     } catch (_) {
       return _queueEntries.isNotEmpty ? _queueEntries.first : null;
@@ -36,39 +42,59 @@ class QueueProvider extends ChangeNotifier {
   }
 
   /// Fetches the queue entries for [patientId] and subscribes to Realtime updates.
-  Future<void> fetchQueueAndSubscribe(String patientId) async {
+  Future<void> fetchQueueAndSubscribe(String patientId) {
+    if (_patientId != patientId) {
+      unsubscribe();
+      _patientId = patientId;
+      _queueEntries = [];
+    }
+    // Serialize snapshots so a slower earlier fetch cannot restore deleted rows.
+    _refreshes = _refreshes.then((_) => _fetchQueue(patientId));
+    return _refreshes;
+  }
+
+  Future<void> _fetchQueue(String patientId) async {
+    if (_disposed || _patientId != patientId) return;
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
       final remoteQueue = await _queueRepo.getQueueForPatient(patientId);
-      _queueEntries = remoteQueue;
-      _isOffline = false;
+      if (_disposed || _patientId != patientId) return;
 
       // Cache queue entries locally
-      final cachedQueue = remoteQueue.map((q) => CachedPatientQueue(
-        id: q.id,
-        patientId: q.patientId,
-        status: q.status.name,
-        department: q.department.name,
-        triageNotes: q.triageNotes,
-        priorityLevel: q.priorityLevel.name,
-        estimatedWaitMinutes: q.estimatedWaitMinutes,
-        createdAt: q.createdAt,
-        updatedAt: q.updatedAt,
-      )).toList();
+      final cachedQueue = remoteQueue
+          .map(
+            (q) => CachedPatientQueue(
+              id: q.id,
+              patientId: q.patientId,
+              status: q.status.toJsonValue(),
+              department: q.department.name,
+              triageNotes: q.triageNotes,
+              priorityLevel: q.priorityLevel.name,
+              estimatedWaitMinutes: q.estimatedWaitMinutes,
+              createdAt: q.createdAt,
+              updatedAt: q.updatedAt,
+            ),
+          )
+          .toList();
 
-      await _localDb.cacheQueueEntries(cachedQueue);
+      await _localDb.replaceQueueForPatient(patientId, cachedQueue);
+      if (_disposed || _patientId != patientId) return;
+      _queueEntries = remoteQueue;
+      _isOffline = false;
       _isLoading = false;
       notifyListeners();
 
       // Subscribe to Realtime changes (RLS enforces patient only sees own rows)
       subscribeToQueueUpdates(patientId);
     } on NetworkFailure catch (_) {
+      if (_disposed || _patientId != patientId) return;
       _isOffline = true;
       await _loadFromCache(patientId);
     } catch (e) {
+      if (_disposed || _patientId != patientId) return;
       _errorMessage = FailureMapper.fromException(e).message;
       await _loadFromCache(patientId);
     }
@@ -77,17 +103,24 @@ class QueueProvider extends ChangeNotifier {
   Future<void> _loadFromCache(String patientId) async {
     try {
       final cachedQueue = await _localDb.getQueueForPatient(patientId);
-      _queueEntries = cachedQueue.map((driftQ) => PatientQueue(
-        id: driftQ.id,
-        patientId: driftQ.patientId,
-        status: QueueStatus.fromString(driftQ.status),
-        department: Department.fromString(driftQ.department) ?? Department.laboratory,
-        triageNotes: driftQ.triageNotes,
-        priorityLevel: PriorityLevel.fromString(driftQ.priorityLevel),
-        estimatedWaitMinutes: driftQ.estimatedWaitMinutes,
-        createdAt: driftQ.createdAt,
-        updatedAt: driftQ.updatedAt,
-      )).toList();
+      if (_disposed || _patientId != patientId) return;
+      _queueEntries = cachedQueue
+          .map(
+            (driftQ) => PatientQueue(
+              id: driftQ.id,
+              patientId: driftQ.patientId,
+              status: QueueStatus.fromString(driftQ.status),
+              department:
+                  Department.fromString(driftQ.department) ??
+                  Department.laboratory,
+              triageNotes: driftQ.triageNotes,
+              priorityLevel: PriorityLevel.fromString(driftQ.priorityLevel),
+              estimatedWaitMinutes: driftQ.estimatedWaitMinutes,
+              createdAt: driftQ.createdAt,
+              updatedAt: driftQ.updatedAt,
+            ),
+          )
+          .toList();
 
       _isLoading = false;
       notifyListeners();
@@ -110,56 +143,28 @@ class QueueProvider extends ChangeNotifier {
           event: PostgresChangeEvent.all,
           schema: 'public',
           table: 'patient_queue',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'patient_id',
-            value: patientId,
-          ),
-          callback: (payload) async {
-            final newRecord = payload.newRecord;
-            final eventType = payload.eventType;
-
-            if (newRecord.isEmpty) return;
-
-            final updatedEntry = PatientQueue.fromJson(newRecord);
-
-            if (eventType == PostgresChangeEvent.insert) {
-              // Add to local state (most recent first)
-              _queueEntries.insert(0, updatedEntry);
-            } else if (eventType == PostgresChangeEvent.update) {
-              final index = _queueEntries.indexWhere((q) => q.id == updatedEntry.id);
-              if (index != -1) {
-                _queueEntries[index] = updatedEntry;
-              } else {
-                _queueEntries.insert(0, updatedEntry);
-              }
-            } else if (eventType == PostgresChangeEvent.delete) {
-              final oldRecord = payload.oldRecord;
-              if (oldRecord.isNotEmpty) {
-                final deletedId = oldRecord['id'];
-                _queueEntries.removeWhere((q) => q.id == deletedId);
-              }
-            }
-
-            // Sync to local Drift database
-            final cachedItem = CachedPatientQueue(
-              id: updatedEntry.id,
-              patientId: updatedEntry.patientId,
-              status: updatedEntry.status.name,
-              department: updatedEntry.department.name,
-              triageNotes: updatedEntry.triageNotes,
-              priorityLevel: updatedEntry.priorityLevel.name,
-              estimatedWaitMinutes: updatedEntry.estimatedWaitMinutes,
-              createdAt: updatedEntry.createdAt,
-              updatedAt: updatedEntry.updatedAt,
-            );
-            await _localDb.cacheQueueEntries([cachedItem]);
-
-            notifyListeners();
-          },
+          // DELETE may contain only a primary key under RLS. Do not rely on a
+          // patient filter or mutate local state from potentially stale payloads.
+          callback: (payload) => handleQueueChange(patientId, payload),
         );
 
     _realtimeChannel?.subscribe();
+  }
+
+  @visibleForTesting
+  Future<void> handleQueueChange(
+    String patientId,
+    PostgresChangePayload payload,
+  ) async {
+    if (_disposed || _patientId != patientId) return;
+    final record = payload.eventType == PostgresChangeEvent.delete
+        ? payload.oldRecord
+        : payload.newRecord;
+    final recordPatientId = record['patient_id'];
+    if (recordPatientId != null && recordPatientId != patientId) return;
+    // Unknown identity (notably DELETE oldRecord:{id}) requires an authoritative
+    // scoped read. The same read prevents delayed INSERT/UPDATE resurrection.
+    await fetchQueueAndSubscribe(patientId);
   }
 
   /// Unsubscribes from the realtime updates.
@@ -172,6 +177,7 @@ class QueueProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     unsubscribe();
     super.dispose();
   }

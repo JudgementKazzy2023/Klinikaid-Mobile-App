@@ -11,6 +11,7 @@ enum QueueStatus {
   static QueueStatus fromString(String value) {
     switch (value.toLowerCase()) {
       case 'in_progress':
+      case 'inprogress': // Legacy cache used the Dart enum name.
         return QueueStatus.inProgress;
       case 'completed':
         return QueueStatus.completed;
@@ -92,13 +93,19 @@ class PatientQueue {
       id: parsedId,
       patientId: json['patient_id'] as String,
       status: QueueStatus.fromString(json['status'] as String? ?? 'waiting'),
-      department: Department.fromString(json['department'] as String?) ?? Department.laboratory,
+      department:
+          Department.fromString(json['department'] as String?) ??
+          Department.laboratory,
       triageNotes: json['triage_notes'] as String?,
-      priorityLevel: PriorityLevel.fromString(json['priority_level'] as String? ?? 'routine'),
+      priorityLevel: PriorityLevel.fromString(
+        json['priority_level'] as String? ?? 'routine',
+      ),
       estimatedWaitMinutes: json['estimated_wait_minutes'] as int?,
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
-      patient: json['patient'] != null ? Patient.fromJson(json['patient'] as Map<String, dynamic>) : null,
+      patient: json['patient'] != null
+          ? Patient.fromJson(json['patient'] as Map<String, dynamic>)
+          : null,
     );
   }
 

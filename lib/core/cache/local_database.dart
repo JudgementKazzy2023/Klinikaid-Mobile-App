@@ -1,4 +1,5 @@
 import 'dart:io';
+
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:path_provider/path_provider.dart';
@@ -92,13 +93,15 @@ class OfflineDocumentsQueue extends Table {
   Set<Column> get primaryKey => {id};
 }
 
-@DriftDatabase(tables: [
-  CachedPatients,
-  CachedDocuments,
-  CachedPatientQueues,
-  CachedDepartmentRecords,
-  OfflineDocumentsQueue,
-])
+@DriftDatabase(
+  tables: [
+    CachedPatients,
+    CachedDocuments,
+    CachedPatientQueues,
+    CachedDepartmentRecords,
+    OfflineDocumentsQueue,
+  ],
+)
 class LocalDatabase extends _$LocalDatabase {
   LocalDatabase([QueryExecutor? e]) : super(e ?? _openConnection());
 
@@ -111,7 +114,9 @@ class LocalDatabase extends _$LocalDatabase {
   }
 
   Future<CachedPatient?> getPatient(String id) async {
-    return (select(cachedPatients)..where((t) => t.id.equals(id))).getSingleOrNull();
+    return (select(
+      cachedPatients,
+    )..where((t) => t.id.equals(id))).getSingleOrNull();
   }
 
   Future<void> cacheDocuments(List<CachedDocument> docs) async {
@@ -133,6 +138,23 @@ class LocalDatabase extends _$LocalDatabase {
     });
   }
 
+  /// Reconcile one successful remote snapshot, including an empty result.
+  /// Incremental callers retain the upsert semantics of cacheQueueEntries.
+  Future<void> replaceQueueForPatient(
+    String patientId,
+    List<CachedPatientQueue> entries,
+  ) async {
+    if (entries.any((entry) => entry.patientId != patientId)) {
+      throw ArgumentError('Queue snapshot contains another patient');
+    }
+    await transaction(() async {
+      await (delete(
+        cachedPatientQueues,
+      )..where((t) => t.patientId.equals(patientId))).go();
+      await cacheQueueEntries(entries);
+    });
+  }
+
   Future<List<CachedPatientQueue>> getQueueForPatient(String patientId) async {
     return (select(cachedPatientQueues)
           ..where((t) => t.patientId.equals(patientId))
@@ -140,13 +162,17 @@ class LocalDatabase extends _$LocalDatabase {
         .get();
   }
 
-  Future<void> cacheDepartmentRecords(List<CachedDepartmentRecord> records) async {
+  Future<void> cacheDepartmentRecords(
+    List<CachedDepartmentRecord> records,
+  ) async {
     await batch((batch) {
       batch.insertAllOnConflictUpdate(cachedDepartmentRecords, records);
     });
   }
 
-  Future<List<CachedDepartmentRecord>> getRecordsForPatient(String patientId) async {
+  Future<List<CachedDepartmentRecord>> getRecordsForPatient(
+    String patientId,
+  ) async {
     return (select(cachedDepartmentRecords)
           ..where((t) => t.patientId.equals(patientId))
           ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))
