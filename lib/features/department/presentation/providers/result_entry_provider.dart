@@ -16,6 +16,7 @@ class ResultEntryProvider extends ChangeNotifier {
 
   // Form State
   String _selectedLabGroup = 'Complete Blood Count (CBC)';
+  String? _narrativeTest;
   final Map<String, String> _parameterValues = {};
   String _findings = '';
   String _impression = '';
@@ -26,6 +27,11 @@ class ResultEntryProvider extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
 
   String get selectedLabGroup => _selectedLabGroup;
+  String? get narrativeTest => _narrativeTest;
+  bool get isNarrativeSelection => _narrativeTest != null;
+
+  /// The lab test currently selected in the entry form, structured or narrative.
+  String get currentLabSelection => _narrativeTest ?? _selectedLabGroup;
   Map<String, String> get parameterValues => _parameterValues;
   String get findings => _findings;
   String get impression => _impression;
@@ -33,13 +39,33 @@ class ResultEntryProvider extends ChangeNotifier {
   bool get hasOcrAutofill => _hasOcrAutofill;
 
   void setLabGroup(String group) {
-    if (_selectedLabGroup != group) {
+    if (_selectedLabGroup != group || _narrativeTest != null) {
       _selectedLabGroup = group;
+      _narrativeTest = null;
       _parameterValues.clear();
+      // A changed test/mode never carries narrative answers; notes are shared
+      // and survive (see setNotes).
+      _findings = '';
+      _impression = '';
       _errorMessage = null;
       _hasOcrAutofill = false;
       notifyListeners();
     }
+  }
+
+  /// Selects a narrative laboratory test (no structured panel or ranges).
+  /// Ignored for names outside [kLabNarrativeTests]. Selecting a different
+  /// test clears the previous test's Findings/Impression; reselecting the
+  /// same test preserves unfinished input.
+  void setNarrativeTest(String test) {
+    if (!kLabNarrativeTests.contains(test) || _narrativeTest == test) return;
+    _narrativeTest = test;
+    _parameterValues.clear();
+    _findings = '';
+    _impression = '';
+    _errorMessage = null;
+    _hasOcrAutofill = false;
+    notifyListeners();
   }
 
   void setParameterValue(String parameter, String value) {
@@ -73,9 +99,14 @@ class ResultEntryProvider extends ChangeNotifier {
     }
 
     _selectedLabGroup = panel;
+    // A successful structured autofill ends any narrative selection so the
+    // model cannot report a narrative test while structured values are set.
+    _narrativeTest = null;
     _parameterValues
       ..clear()
       ..addAll(filteredValues);
+    _findings = '';
+    _impression = '';
     _hasOcrAutofill = true;
     _errorMessage = null;
     notifyListeners();
@@ -109,6 +140,7 @@ class ResultEntryProvider extends ChangeNotifier {
     _impression = '';
     _notes = '';
     _selectedLabGroup = 'Complete Blood Count (CBC)';
+    _narrativeTest = null;
     _hasOcrAutofill = false;
     notifyListeners();
   }
@@ -190,6 +222,67 @@ class ResultEntryProvider extends ChangeNotifier {
       }
 
       await _repo.submitLabResults(patientId: patientId, rows: rows);
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } on QueueCompletionFailure {
+      _queueCompletionWarning = QueueCompletionFailure.message;
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _isLoading = false;
+      _errorMessage = FailureMapper.fromException(e).message;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Submits a narrative laboratory result (Findings required, Impression
+  /// optional). Narrative tests have no documented reference ranges, so nothing
+  /// is flagged and no unit or range is stored. Returns true on success.
+  Future<bool> submitNarrativeLabResult({
+    required String patientId,
+  }) async {
+    _queueCompletionWarning = null;
+    final test = _narrativeTest;
+    if (test == null || !kLabNarrativeTests.contains(test)) {
+      _errorMessage = 'Select a laboratory test.';
+      notifyListeners();
+      return false;
+    }
+
+    final findingsTrimmed = _findings.trim();
+    if (findingsTrimmed.isEmpty) {
+      _errorMessage = 'Findings are required.';
+      notifyListeners();
+      return false;
+    }
+    if (findingsTrimmed.length > kLabNarrativeMaxLength) {
+      _errorMessage = 'Findings must be no more than $kLabNarrativeMaxLength characters.';
+      notifyListeners();
+      return false;
+    }
+
+    final impressionTrimmed = _impression.trim();
+    if (impressionTrimmed.length > kLabNarrativeMaxLength) {
+      _errorMessage = 'Impression must be no more than $kLabNarrativeMaxLength characters.';
+      notifyListeners();
+      return false;
+    }
+
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      await _repo.submitFreeTextResult(
+        patientId: patientId,
+        testName: test,
+        findings: findingsTrimmed,
+        impression: impressionTrimmed,
+        notes: _notes,
+      );
       _isLoading = false;
       notifyListeners();
       return true;

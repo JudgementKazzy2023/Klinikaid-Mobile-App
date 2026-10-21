@@ -372,47 +372,50 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
   ) {
     final theme = Theme.of(context);
     final parameters = kLabTestGroups[provider.selectedLabGroup] ?? [];
+    final isNarrative = provider.isNarrativeSelection;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        OutlinedButton.icon(
-          key: const Key('extract_lab_values_button'),
-          onPressed: _isExtractingLabValues
-              ? null
-              : () => _extractLabValues(context, provider),
-          icon: _isExtractingLabValues
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.document_scanner_outlined),
-          label: Text(_isExtractingLabValues ? 'Extracting...' : 'Extract from Result Sheet'),
-        ),
-        if (provider.hasOcrAutofill) ...[
-          const SizedBox(height: 8),
-          Container(
-            key: const Key('ocr_verify_note'),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.amber.shade50,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.amber.shade200),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.fact_check_outlined, color: Colors.amber.shade900),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Verify OCR values before saving. Edit any incorrect field.',
-                    style: TextStyle(color: Colors.amber.shade900, fontSize: 13),
-                  ),
-                ),
-              ],
-            ),
+        if (!isNarrative) ...[
+          OutlinedButton.icon(
+            key: const Key('extract_lab_values_button'),
+            onPressed: _isExtractingLabValues
+                ? null
+                : () => _extractLabValues(context, provider),
+            icon: _isExtractingLabValues
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.document_scanner_outlined),
+            label: Text(_isExtractingLabValues ? 'Extracting...' : 'Extract from Result Sheet'),
           ),
+          if (provider.hasOcrAutofill) ...[
+            const SizedBox(height: 8),
+            Container(
+              key: const Key('ocr_verify_note'),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.fact_check_outlined, color: Colors.amber.shade900),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Verify OCR values before saving. Edit any incorrect field.',
+                      style: TextStyle(color: Colors.amber.shade900, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
         const SizedBox(height: 20),
         Text(
@@ -421,16 +424,22 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
         ),
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
-          initialValue: provider.selectedLabGroup,
-          items: kLabTestGroups.keys.map((group) {
+          initialValue: provider.currentLabSelection,
+          items: [
+            ...kLabTestGroups.keys,
+            ...kLabNarrativeTests,
+          ].map((group) {
             return DropdownMenuItem<String>(
               value: group,
               child: Text(group),
             );
           }).toList(),
           onChanged: (val) {
-            if (val != null) {
+            if (val == null) return;
+            if (kLabTestGroups.containsKey(val)) {
               provider.setLabGroup(val);
+            } else {
+              provider.setNarrativeTest(val);
             }
           },
           decoration: InputDecoration(
@@ -440,6 +449,58 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
             contentPadding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
           ),
         ),
+        if (isNarrative) ...[
+          // Keyed per selected test: a changed test recreates the fields
+          // blank, so visible state always agrees with the provider, which
+          // clears Findings/Impression on a test change. Reselecting the same
+          // test keeps the subtree (and unfinished input).
+          KeyedSubtree(
+            key: ValueKey<String>('narrative_${provider.narrativeTest}'),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 20),
+                Text(
+                  'Findings (Required)',
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  key: const Key('narrative_findings_input'),
+                  maxLines: 5,
+                  maxLength: kLabNarrativeMaxLength,
+                  onChanged: provider.setFindings,
+                  decoration: InputDecoration(
+                    hintText: 'Enter narrative findings...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8.0),
+                    ),
+                    contentPadding: const EdgeInsets.all(12.0),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Impression (Optional)',
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  key: const Key('narrative_impression_input'),
+                  maxLines: 3,
+                  maxLength: kLabNarrativeMaxLength,
+                  onChanged: provider.setImpression,
+                  decoration: InputDecoration(
+                    hintText: 'Enter clinical impression / summary...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8.0),
+                    ),
+                    contentPadding: const EdgeInsets.all(12.0),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ] else ...[
         const SizedBox(height: 20),
 
         Text(
@@ -538,6 +599,7 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
             ),
           );
         }),
+        ],
       ],
     );
   }
@@ -618,7 +680,8 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
     final goRouter = GoRouter.of(context);
 
     final patient = _patient;
-    if (department.toLowerCase() == 'laboratory' && patient != null) {
+    final isLaboratory = department.toLowerCase() == 'laboratory';
+    if (isLaboratory && patient != null && !provider.isNarrativeSelection) {
       final outOfRangeMessages = <String>[];
       final parameters = kLabTestGroups[provider.selectedLabGroup] ?? [];
       for (final param in parameters) {
@@ -665,11 +728,19 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
     }
 
     bool success = false;
-    if (department.toLowerCase() == 'laboratory') {
-      success = await provider.submitLabResults(
-        patientId: widget.patientId,
-        gender: _patient?.gender.name,
-      );
+    if (isLaboratory) {
+      if (provider.isNarrativeSelection) {
+        // Narrative tests have no documented reference ranges: no flagging
+        // dialog, no numeric validation — text only, per web narrative contract.
+        success = await provider.submitNarrativeLabResult(
+          patientId: widget.patientId,
+        );
+      } else {
+        success = await provider.submitLabResults(
+          patientId: widget.patientId,
+          gender: _patient?.gender.name,
+        );
+      }
     } else {
       success = await provider.submitFreeTextResult(
         patientId: widget.patientId,

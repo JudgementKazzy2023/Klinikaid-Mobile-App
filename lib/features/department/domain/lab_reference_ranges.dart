@@ -85,3 +85,21 @@ const Map<String, List<String>> kLabTestGroups = {
     'Cholesterol',
   ],
 };
+
+// SYNC SOURCE: web constants.ts LAB_NARRATIVE_TESTS + LAB_NARRATIVE_FIELDS +
+// LAB_NARRATIVE_MAX_LENGTH. Case-sensitive, including spaces around the '/'.
+// Narrative laboratory tests have no documented reference ranges, so they are
+// recorded as text (Findings required, Impression optional) and are never
+// flagged. Disjoint from the keys of kLabTestGroups above.
+const List<String> kLabNarrativeTests = [
+  'Urinalysis',
+  'Fecalysis',
+  'Blood Urea Nitrogen (BUN)',
+  'SGPT / ALT',
+  'SGOT / AST',
+  'Lipid Profile (narrative)',
+];
+
+const List<String> kLabNarrativeFields = ['Findings', 'Impression'];
+
+const int kLabNarrativeMaxLength = 5000;
