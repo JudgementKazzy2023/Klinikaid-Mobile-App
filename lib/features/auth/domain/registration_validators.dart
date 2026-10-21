@@ -1,10 +1,12 @@
 class RegistrationValidators {
   static const int minimumRegistrationAge = 18;
 
-  /// Validates standard email format
+  /// Validates common email syntax, including plus tags and long TLDs.
   static bool validateEmail(String email) {
     final trimmed = email.trim();
-    return RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(trimmed);
+    return RegExp(
+      r"^[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$",
+    ).hasMatch(trimmed);
   }
 
   /// Validates password rules:
