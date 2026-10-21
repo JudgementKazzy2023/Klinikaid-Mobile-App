@@ -272,9 +272,9 @@ class StaticPatientAuthProvider extends AuthProvider {
   bool get isAuthenticated => true;
 }
 
-Patient _patient() => Patient(
+Patient _patient({String profileId = 'profile-uuid-1'}) => Patient(
       id: 'patient-uuid-1',
-      profileId: 'profile-uuid-1',
+      profileId: profileId,
       firstName: 'Alice',
       lastName: 'Nguyen',
       dateOfBirth: DateTime(1995, 4, 12),
@@ -754,7 +754,7 @@ void main() {
         localFilePath: filePath,
         originalFileName: 'submit-a.jpg',
         fileExtension: 'jpg',
-        patient: _patient(),
+        patient: _patient(profileId: userA),
         documentType: 'laboratory',
       ),
       createFile: (path) => GatedExistsFile(realFile, started, gate),
