@@ -17,6 +17,12 @@ const double kGeminiBlendedUsdPer1MTokens = 0.63;
 /// and asks the server for the exact total instead of reading every row.
 const int kAdminLogsPageSize = 100;
 
+/// How many users the picker of the log filter offers at once.
+///
+/// The picker reads a bounded list, so a name never turns into a read of the
+/// whole profile table.
+const int kAdminLogUserPickerLimit = 20;
+
 /// One page of the system event list.
 class SystemEventsPage {
   const SystemEventsPage({required this.logs, required this.total});
@@ -166,26 +172,25 @@ class AdminRepository {
 
   /// Fetches system events, newest first.
   ///
-  /// The search terms are applied by the server, so a match past the first
-  /// page is found instead of being filtered out of the rows that were read.
-  /// [limit] caps the rows returned (the dashboard's "recent events").
+  /// The filters are applied by the server, so a match past the first page is
+  /// found instead of being filtered out of the rows that were read. [limit]
+  /// caps the rows returned (the dashboard's "recent events").
   Future<List<SystemLog>> getSystemEvents({
     String? eventType,
-    String? userSearch,
+    String? userId,
     DateTime? startDate,
     DateTime? endDate,
     String? textSearch,
     int limit = kAdminLogsPageSize,
   }) async {
     try {
-      final query = await _systemEventsQuery(
+      final query = _systemEventsQuery(
         eventType: eventType,
-        userSearch: userSearch,
+        userId: userId,
         startDate: startDate,
         endDate: endDate,
         textSearch: textSearch,
       );
-      if (query == null) return [];
 
       final rows = await query.limit(limit);
       return rows.map((json) => SystemLog.fromJson(json)).toList();
@@ -203,7 +208,7 @@ class AdminRepository {
   /// page keeps the total of the first page.
   Future<SystemEventsPage> getSystemEventsPage({
     String? eventType,
-    String? userSearch,
+    String? userId,
     DateTime? startDate,
     DateTime? endDate,
     String? textSearch,
@@ -211,14 +216,13 @@ class AdminRepository {
     int limit = kAdminLogsPageSize,
   }) async {
     try {
-      final query = await _systemEventsQuery(
+      final query = _systemEventsQuery(
         eventType: eventType,
-        userSearch: userSearch,
+        userId: userId,
         startDate: startDate,
         endDate: endDate,
         textSearch: textSearch,
       );
-      if (query == null) return const SystemEventsPage(logs: [], total: 0);
 
       final List<Map<String, dynamic>> rows;
       final int total;
@@ -247,16 +251,13 @@ class AdminRepository {
   /// The order is newest first and then the primary key, so two events that
   /// share a timestamp keep a fixed place in the order and a page boundary
   /// cannot skip or repeat one of them.
-  ///
-  /// Returns null when the user search matches nobody: the filter would then
-  /// ask for an empty id list, which the server rejects.
-  Future<PostgrestTransformBuilder<PostgrestList>?> _systemEventsQuery({
+  PostgrestTransformBuilder<PostgrestList> _systemEventsQuery({
     String? eventType,
-    String? userSearch,
+    String? userId,
     DateTime? startDate,
     DateTime? endDate,
     String? textSearch,
-  }) async {
+  }) {
     var query = _client.from('system_logs').select('*, user:profiles(full_name, role)');
 
     if (eventType != null && eventType.isNotEmpty && eventType != 'All') {
@@ -277,14 +278,13 @@ class AdminRepository {
       query = query.ilike('description', _containsPattern(text));
     }
 
-    // The event list carries the user's name and role through a join, so
-    // the term is resolved against `profiles` first and the events are
-    // then filtered by that id.
-    final user = userSearch?.trim() ?? '';
+    // The user filter is the id of one chosen user, the way the web filters
+    // it. A term used to be resolved against `profiles` and every match was
+    // sent as an id list, which grows with the staff list until the server
+    // rejects the url.
+    final user = userId?.trim() ?? '';
     if (user.isNotEmpty) {
-      final userIds = await _matchingProfileIds(user);
-      if (userIds.isEmpty) return null;
-      query = query.inFilter('user_id', userIds);
+      query = query.eq('user_id', user);
     }
 
     return query
@@ -292,27 +292,31 @@ class AdminRepository {
         .order('id', ascending: false);
   }
 
-  /// The ids of the profiles whose name or role match [term].
+  /// The users whose name matches [term], at most [limit] of them.
   ///
-  /// Two reads instead of one `or` filter: a term that contains a comma
-  /// would otherwise break the `or` list syntax and fail the whole query.
-  Future<List<String>> _matchingProfileIds(String term) async {
-    final pattern = _containsPattern(term);
-    final byName = await readAllPages(
-      _client.from('profiles').select('id').ilike('full_name', pattern),
-      uniqueOrderColumn: 'id',
-      uniqueOrderAscending: true,
-    );
-    final byRole = await readAllPages(
-      _client.from('profiles').select('id').ilike('role', pattern),
-      uniqueOrderColumn: 'id',
-      uniqueOrderAscending: true,
-    );
-    final ids = <String>{
-      for (final row in byName.rows) row['id'] as String,
-      for (final row in byRole.rows) row['id'] as String,
-    };
-    return ids.toList();
+  /// The picker of the log filter asks for a bounded list: the log query
+  /// itself takes one id, so the picker must not read the whole profile
+  /// table.
+  Future<List<Profile>> searchLogUsers(
+    String term, {
+    int limit = kAdminLogUserPickerLimit,
+  }) async {
+    try {
+      final text = term.trim();
+      if (text.isEmpty) return const [];
+
+      final rows = await _client
+          .from('profiles')
+          .select()
+          .ilike('full_name', _containsPattern(text))
+          .order('full_name', ascending: true)
+          .order('id', ascending: true)
+          .limit(limit);
+
+      return rows.map((json) => Profile.fromJson(json)).toList();
+    } catch (e) {
+      throw FailureMapper.fromException(e);
+    }
   }
 
   /// Builds an ILIKE pattern that matches [term] literally anywhere in a column.

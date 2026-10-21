@@ -305,11 +305,11 @@ Map<String, dynamic> _profileRow(int index, {String role = 'receptionist'}) {
   };
 }
 
-Map<String, dynamic> _systemLogRow(int index) {
+Map<String, dynamic> _systemLogRow(int index, {String? userId}) {
   final created = DateTime.utc(2026, 1, 1).subtract(Duration(minutes: index));
   return {
     'id': '$index',
-    'user_id': 'profile-$index',
+    'user_id': userId ?? 'profile-$index',
     'event_type': 'login',
     'description': index == kNeedleIndex ? 'Needle event description' : 'Routine event $index',
     'ip_address': '0.0.0.0',
@@ -476,17 +476,74 @@ void main() {
     expect(server.requestCount('system_logs'), 1);
   });
 
-  test('admin system events find a user match past the first page', () async {
+  test('admin system events are filtered by one chosen user', () async {
     client = useTables({
       'system_logs': [for (var i = 0; i < 1500; i++) _systemLogRow(i)],
       'profiles': [for (var i = 0; i < 1500; i++) _profileRow(i)],
     });
     final repo = AdminRepository(client: client);
 
-    final logs = await repo.getSystemEvents(userSearch: 'Needle Staff');
+    final logs = await repo.getSystemEvents(userId: 'profile-1400');
 
+    // The events of the chosen user, and only those.
     expect(logs, hasLength(1));
     expect(logs.single.userName, 'Needle Staff');
+    // The server compares the column with one id, the way the web filters it.
+    // A list of ids would grow with the staff list until the server rejects
+    // the url.
+    expect(server.requests.last.queryParameters['user_id'], 'eq.profile-1400');
+    expect(server.requests.last.query, isNot(contains('in.(')));
+  });
+
+  test('the user filter keeps the event list paged and totally ordered', () async {
+    client = useTables({
+      // One staff member wrote every event, so the filtered list is as long
+      // as the unfiltered one.
+      'system_logs': [
+        for (var i = 0; i < 1500; i++) _systemLogRow(i, userId: 'profile-7')
+      ],
+      'profiles': [for (var i = 0; i < 1500; i++) _profileRow(i)],
+    });
+    final state = useAdmin();
+
+    await state.loadSystemEvents(userId: 'profile-7');
+    await state.loadMoreSystemEvents();
+
+    final request = server.requests
+        .firstWhere((uri) => uri.pathSegments.last == 'system_logs');
+    // The server compares the column with one id, the way the web filters it.
+    expect(request.queryParameters['user_id'], 'eq.profile-7');
+    expect(request.query, isNot(contains('in.(')));
+    // The list is read page by page, in a total order.
+    expect(
+      request.queryParameters['order'],
+      'created_at.desc.nullslast,id.desc.nullslast',
+    );
+    expect(request.queryParameters['offset'], '0');
+    expect(request.queryParameters['limit'], '$kAdminLogsPageSize');
+    expect(state.systemEvents, hasLength(2 * kAdminLogsPageSize));
+    expect(state.systemEventsTotal, 1500);
+    // The total comes from the first page; a second count is not paid for.
+    expect(server.countRequestCount('system_logs'), 1);
+    state.dispose();
+  });
+
+  test('the user picker reads a bounded list of profiles', () async {
+    client = useTables({
+      'profiles': [for (var i = 0; i < 1500; i++) _profileRow(i)],
+    });
+    final repo = AdminRepository(client: client);
+
+    final users = await repo.searchLogUsers('Staff');
+
+    // The picker offers a bounded list, so a name never turns into a read of
+    // the whole profile table.
+    expect(users, hasLength(kAdminLogUserPickerLimit));
+    expect(server.requestCount('profiles'), 1);
+    expect(
+      server.requests.last.queryParameters['limit'],
+      '$kAdminLogUserPickerLimit',
+    );
   });
 
   test('admin queue submissions reach every row past the server row cap', () async {
@@ -758,6 +815,48 @@ void main() {
     // The needle lives on the third page of the list.
     final third = await repo.getChatbotAuditPage(offset: 2 * kAdminLogsPageSize);
     expect(third.logs.any((log) => log.userMessage.contains('Needle')), isTrue);
+  });
+
+  testWidgets('the log screen filters the events by the chosen user',
+      (tester) async {
+    late AdminProvider state;
+    await tester.runAsync(() async {
+      client = useTables({
+        'system_logs': [
+          for (var i = 0; i < 20; i++) _systemLogRow(i, userId: 'profile-1'),
+        ],
+        'profiles': [_profileRow(1)],
+      });
+      state = useAdmin();
+    });
+
+    await tester.pumpWidget(ChangeNotifierProvider.value(
+      value: state,
+      child: const MaterialApp(home: AdminLogsScreen()),
+    ));
+    await tester.pumpAndSettle();
+
+    // The filter board is a collapsed tile, so open it before the picker.
+    await tester.tap(find.text('Event Filters'));
+    await tester.pumpAndSettle();
+
+    // The picker offers the users whose name matches the term.
+    await tester.enterText(find.byType(TextField).first, 'Staff 1');
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(ListTile, 'Staff 1'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(ListTile, 'Staff 1'));
+    await tester.pumpAndSettle();
+
+    // The chosen user is the one the server is asked for.
+    final request = server.requests
+        .lastWhere((uri) => uri.pathSegments.last == 'system_logs');
+    expect(request.queryParameters['user_id'], 'eq.profile-1');
+    expect(request.query, isNot(contains('in.(')));
+    expect(find.text('Showing the events of Staff 1'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    state.dispose();
   });
 
   testWidgets('the admin log screen shows the loaded count of the exact total',

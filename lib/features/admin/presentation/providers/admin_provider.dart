@@ -62,10 +62,12 @@ class AdminProvider extends ChangeNotifier {
 
   // The filters of the list on screen, so "load more" repeats the same read.
   String? _logsEventType;
-  String? _logsUserSearch;
+  String? _logsUserId;
   DateTime? _logsStartDate;
   DateTime? _logsEndDate;
   String? _logsTextSearch;
+  String? _logsUserSearchError;
+  List<Profile> _logUserOptions = [];
   
   bool _isChatbotLoading = false;
   bool _isChatbotLoadingMore = false;
@@ -128,6 +130,12 @@ class AdminProvider extends ChangeNotifier {
 
   /// The exact number of events the current filter matched.
   int get systemEventsTotal => _systemEventsTotal;
+
+  /// The error of the last failed user lookup of the log filter.
+  String? get logsUserSearchError => _logsUserSearchError;
+
+  /// The users the picker of the log filter offers.
+  List<Profile> get logUserOptions => _logUserOptions;
 
   /// True when the list holds fewer events than the server counted.
   bool get hasMoreSystemEvents => _systemEvents.length < _systemEventsTotal;
@@ -285,7 +293,7 @@ class AdminProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> loadSystemEvents({String? eventType, String? userSearch, DateTime? startDate, DateTime? endDate, String? textSearch,}) async {
+  Future<void> loadSystemEvents({String? eventType, String? userId, DateTime? startDate, DateTime? endDate, String? textSearch,}) async {
     final request = ++_logsRequest;
     final isRefresh = _logsHadSuccess;
     _isLogsLoading = true;
@@ -294,13 +302,13 @@ class AdminProvider extends ChangeNotifier {
     logsState = AdminReadState.loading;
     notifyListeners();
     try {
-      final page = await _repository.getSystemEventsPage(eventType: eventType, userSearch: userSearch, startDate: startDate, endDate: endDate, textSearch: textSearch);
+      final page = await _repository.getSystemEventsPage(eventType: eventType, userId: userId, startDate: startDate, endDate: endDate, textSearch: textSearch);
       if (request != _logsRequest) return;
       _systemEvents = page.logs;
       _systemEventsTotal = page.total;
       // The filters of the list on screen, so "load more" repeats this read.
       _logsEventType = eventType;
-      _logsUserSearch = userSearch;
+      _logsUserId = userId;
       _logsStartDate = startDate;
       _logsEndDate = endDate;
       _logsTextSearch = textSearch;
@@ -320,6 +328,29 @@ class AdminProvider extends ChangeNotifier {
     }
   }
 
+  /// The users whose name matches [term], at most a bounded number of them.
+  ///
+  /// The picker of the log filter needs a list to choose from, and the log
+  /// query itself takes the id of the chosen user.
+  Future<void> searchLogUsers(String term) async {
+    try {
+      _logUserOptions = await _repository.searchLogUsers(term);
+      _logsUserSearchError = null;
+    } catch (e) {
+      _logUserOptions = [];
+      _logsUserSearchError =
+          'Could not load the user list. Check your connection and retry.';
+    }
+    notifyListeners();
+  }
+
+  /// Forgets the offered users, so the picker closes after a choice.
+  void clearLogUserOptions() {
+    if (_logUserOptions.isEmpty) return;
+    _logUserOptions = [];
+    notifyListeners();
+  }
+
   /// Appends the next page of the system event list.
   ///
   /// The same filters and the same order are used, so the page continues
@@ -334,7 +365,7 @@ class AdminProvider extends ChangeNotifier {
     try {
       final page = await _repository.getSystemEventsPage(
         eventType: _logsEventType,
-        userSearch: _logsUserSearch,
+        userId: _logsUserId,
         startDate: _logsStartDate,
         endDate: _logsEndDate,
         textSearch: _logsTextSearch,

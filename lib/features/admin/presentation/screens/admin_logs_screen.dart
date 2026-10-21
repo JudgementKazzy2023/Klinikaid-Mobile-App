@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../providers/admin_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../../core/models/profile.dart';
 import '../../../../core/models/system_log.dart';
 import '../../../../core/models/chatbot_log.dart';
 import '../../../../core/permissions/permission_constants.dart';
@@ -32,10 +33,17 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
 
   // System Event filters state
   String _eventTypeFilter = 'All';
-  final TextEditingController _userSearchController = TextEditingController();
   final TextEditingController _textSearchController = TextEditingController();
   DateTime? _startDate;
   DateTime? _endDate;
+
+  // The user filter of the log list is one chosen user, the way the web
+  // filters it. The picker reads a bounded list of profiles and hands the
+  // chosen id to the log query, so the query asks for one id and not for a
+  // list of them.
+  final TextEditingController _userSearchController = TextEditingController();
+  String? _selectedUserId;
+  String? _selectedUserName;
 
   @override
   void initState() {
@@ -61,7 +69,6 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
 
 
     // Bind listeners to refresh logs automatically on filter change
-    _userSearchController.addListener(_onFilterChanged);
     _textSearchController.addListener(_onFilterChanged);
 
     _tabController.addListener(() {
@@ -86,7 +93,7 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
     final provider = Provider.of<AdminProvider>(context, listen: false);
     provider.loadSystemEvents(
       eventType: _eventTypeFilter,
-      userSearch: _userSearchController.text,
+      userId: _selectedUserId,
       textSearch: _textSearchController.text,
       startDate: _startDate,
       endDate: _endDate,
@@ -100,7 +107,7 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
     if (tab == _AdminLogTabType.systemEvents) {
       provider.loadSystemEvents(
         eventType: _eventTypeFilter,
-        userSearch: _userSearchController.text,
+        userId: _selectedUserId,
         textSearch: _textSearchController.text,
         startDate: _startDate,
         endDate: _endDate,
@@ -110,6 +117,91 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
     } else if (tab == _AdminLogTabType.apiCost) {
       provider.loadApiCost();
     }
+  }
+
+  /// The picker of the user filter.
+  ///
+  /// The list of users is bounded (the repository asks for at most
+  /// [kAdminLogUserPickerLimit] profiles), and the chosen user is passed on
+  /// as its id, so the log query filters by one id and not by a list of them.
+  Widget _buildUserFilter(AdminProvider provider) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _userSearchController,
+          onChanged: (text) => provider.searchLogUsers(text),
+          decoration: InputDecoration(
+            labelText: 'Filter by User',
+            border: const OutlineInputBorder(),
+            prefixIcon: const Icon(Icons.person_search_outlined),
+            suffixIcon: _selectedUserId == null
+                ? null
+                : IconButton(
+                    icon: const Icon(Icons.clear),
+                    tooltip: 'Clear the user filter',
+                    onPressed: _clearUserFilter,
+                  ),
+          ),
+        ),
+        if (provider.logsUserSearchError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4.0),
+            child: Text(
+              provider.logsUserSearchError!,
+              style: TextStyle(fontSize: 11, color: theme.colorScheme.error),
+            ),
+          ),
+        if (_selectedUserName != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4.0),
+            child: Text(
+              'Showing the events of $_selectedUserName',
+              style: const TextStyle(fontSize: 11),
+            ),
+          ),
+        if (provider.logUserOptions.isNotEmpty)
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 160),
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: provider.logUserOptions.length,
+              itemBuilder: (context, index) {
+                final profile = provider.logUserOptions[index];
+                return ListTile(
+                  dense: true,
+                  title: Text(profile.fullName, style: const TextStyle(fontSize: 13)),
+                  subtitle: Text(profile.role.displayName, style: const TextStyle(fontSize: 11)),
+                  onTap: () => _selectUser(profile),
+                );
+              },
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Chooses the user the log list is filtered by.
+  void _selectUser(Profile profile) {
+    _userSearchController.clear();
+    setState(() {
+      _selectedUserId = profile.id;
+      _selectedUserName = profile.fullName;
+    });
+    Provider.of<AdminProvider>(context, listen: false).clearLogUserOptions();
+    _onFilterChanged();
+  }
+
+  /// Drops the chosen user and reads the list without the user filter.
+  void _clearUserFilter() {
+    _userSearchController.clear();
+    setState(() {
+      _selectedUserId = null;
+      _selectedUserName = null;
+    });
+    Provider.of<AdminProvider>(context, listen: false).clearLogUserOptions();
+    _onFilterChanged();
   }
 
   void _triggerCsvExport(List<SystemLog> logs) async {
@@ -276,10 +368,7 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
                 },
               ),
               const SizedBox(height: 8),
-              TextField(
-                controller: _userSearchController,
-                decoration: const InputDecoration(labelText: 'Search User / Role', border: OutlineInputBorder(), prefixIcon: Icon(Icons.person_search_outlined)),
-              ),
+              _buildUserFilter(provider),
               const SizedBox(height: 8),
               TextField(
                 controller: _textSearchController,
@@ -334,10 +423,13 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
                       setState(() {
                         _eventTypeFilter = 'All';
                         _userSearchController.clear();
+                        _selectedUserId = null;
+                        _selectedUserName = null;
                         _textSearchController.clear();
                         _startDate = null;
                         _endDate = null;
                       });
+                      Provider.of<AdminProvider>(context, listen: false).clearLogUserOptions();
                       _onFilterChanged();
                     },
                     child: const Text('Clear All'),
