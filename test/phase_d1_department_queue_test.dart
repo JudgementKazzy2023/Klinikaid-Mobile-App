@@ -21,7 +21,7 @@ class MockAuthProvider extends AuthProvider {
   bool _mockIsAuthenticated = false;
   bool _mockHasConsented = false;
   bool _mockIsOnboarded = false;
-  bool _mockIsLoading = false;
+  final bool _mockIsLoading = false;
   Profile? _mockProfile;
   Patient? _mockPatient;
   supabase.User? _mockUser;
@@ -347,7 +347,14 @@ void main() {
       appRouter.router.go('/department/queue');
       await tester.pumpAndSettle();
 
-      expect(find.text("No patients queued. Today's queue is empty."), findsOneWidget);
+      // Source-proven label: department_queue_screen.dart renders
+      // "No active patients queued." when the queue is empty and no search
+      // text is entered.
+      expect(find.text('No active patients queued.'), findsOneWidget);
+
+      // Meaningful empty state: no queue cards or result-entry actions render.
+      expect(find.widgetWithText(ElevatedButton, 'Enter Results'), findsNothing);
+      expect(find.textContaining('Triage Note:'), findsNothing);
     });
 
     testWidgets('7. Search filters queue entries by patient name client-side', (tester) async {
