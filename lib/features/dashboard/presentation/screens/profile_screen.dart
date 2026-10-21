@@ -5,6 +5,7 @@ import '../../../../core/models/patient.dart';
 import '../../../../core/models/profile.dart';
 import '../../../../core/utils/role_formatter.dart';
 import '../providers/dashboard_provider.dart';
+import '../widgets/patient_record_state_view.dart';
 import 'package:klinikaid_mobile/features/auth/domain/registration_validators.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/widgets/email_change_modal.dart';
 import 'package:klinikaid_mobile/features/reception/presentation/widgets/change_password_modal.dart';
@@ -29,13 +30,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isInit = false;
   bool _isEditing = false;
 
+  /// Id of the patient record the form was filled from.
+  String? _syncedPatientId;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final authProvider = Provider.of<AuthProvider>(context);
+    final patient = authProvider.patient;
+
     if (!_isInit) {
-      final authProvider = Provider.of<AuthProvider>(context);
-      final patient = authProvider.patient;
-      
       _firstNameController = TextEditingController(text: patient?.firstName ?? '');
       _lastNameController = TextEditingController(text: patient?.lastName ?? '');
       _contactController = TextEditingController(text: patient?.contactNumber ?? '');
@@ -43,7 +47,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _selectedDateOfBirth = patient?.dateOfBirth;
       _selectedGender = patient?.gender ?? Gender.other;
       _isInit = true;
+    } else if (patient != null && _syncedPatientId == null) {
+      // The record only arrived after the first build, for example after a
+      // successful retry: fill the form with it instead of leaving it blank.
+      // Only done while the form is not on screen, so the fields are never
+      // rewritten under the user.
+      _firstNameController.text = patient.firstName;
+      _lastNameController.text = patient.lastName;
+      _contactController.text = patient.contactNumber;
+      _addressController.text = patient.address;
+      _selectedDateOfBirth = patient.dateOfBirth;
+      _selectedGender = patient.gender;
     }
+    _syncedPatientId = patient?.id;
   }
 
   @override
@@ -53,6 +69,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _contactController.dispose();
     _addressController.dispose();
     super.dispose();
+  }
+
+  /// Re-runs the patient record lookup so the profile can be shown again
+  /// after a failed read.
+  Future<void> _retryPatientLookup() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    await authProvider.retryPatientLookup();
   }
 
   void _cancelEdit() {
@@ -292,8 +315,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (patient == null) {
       return Scaffold(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        body: Center(
-          child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary),
+        appBar: AppBar(
+          title: Text(
+            'My Profile',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.primary,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+          elevation: 0,
+        ),
+        body: PatientRecordStateView(
+          state: authProvider.patientRecordState,
+          errorMessage: authProvider.patientRecordError,
+          onRetry: _retryPatientLookup,
+          onSignOut: authProvider.signOut,
         ),
       );
     }
