@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Base class representing any app-level failure or error.
@@ -55,5 +57,18 @@ class FailureMapper {
     }
 
     return UnknownFailure(errStr);
+  }
+
+  /// Whether [exception] means the device could not reach the server.
+  ///
+  /// The offline fallback of the document submission path and the pending
+  /// duplicate check classify connectivity failures the same way, so a check
+  /// that failed for connectivity reasons takes the same offline branch as an
+  /// upload that failed for the same reason.
+  static bool isNetworkFailure(dynamic exception) {
+    if (exception is SocketException) {
+      return true;
+    }
+    return fromException(exception) is NetworkFailure;
   }
 }
