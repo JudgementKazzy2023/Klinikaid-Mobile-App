@@ -27,7 +27,30 @@ class AuthProvider extends ChangeNotifier {
   final SessionActivityService _activityService;
   final MfaService _mfaService;
 
-  User? _user;
+  User? _activeUser;
+  int _identityEpoch = 0;
+
+  /// Bumped synchronously by every [signOut] call so in-flight sign-ins can
+  /// detect that a newer sign-out intent superseded them, even before any
+  /// identity change is visible.
+  int _signOutGeneration = 0;
+  User? get _user => _activeUser;
+  set _user(User? value) {
+    if (value == null || value.id != _activeUser?.id) {
+      _identityEpoch++;
+      _pendingMfaFactorId = null;
+      _needsMfaEnrollment = false;
+      _verificationState = VerificationState();
+      _errorMessage = null;
+      _hasConsented = false;
+      _isOnboarded = false;
+      _profile = null;
+      _patient = null;
+      _permissions = const <String>{};
+      _permissionFallbackActive = false;
+    }
+    _activeUser = value;
+  }
   Session? _session;
   Profile? _profile;
   Patient? _patient;
@@ -143,6 +166,7 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       final currentUser = _user;
+      final epoch = _identityEpoch;
       if (currentUser == null) {
        _hasConsented = false;
        _isOnboarded = false;
@@ -154,12 +178,16 @@ class AuthProvider extends ChangeNotifier {
 
     // 1. Fetch profile from database
     try {
-      _profile = await _profilesRepo.getProfile(currentUser.id);
+      final profile = await _profilesRepo.getProfile(currentUser.id);
+      if (epoch != _identityEpoch) return;
+      _profile = profile;
     } catch (_) {
       _profile = null;
     }
 
-    await _loadPermissionsForProfile();
+    if (epoch != _identityEpoch) return;
+    await _loadPermissionsForProfile(epoch);
+    if (epoch != _identityEpoch) return;
 
     if (_profile?.isActive == false) {
       _errorMessage = 'This account has been deactivated. Contact an administrator.';
@@ -196,6 +224,7 @@ class AuthProvider extends ChangeNotifier {
           try {
             print('[AuthProvider _updateLocalStates] Admin AAL1, no pending factor — calling listVerifiedFactors.');
             final factors = await _mfaService.listVerifiedFactors();
+            if (epoch != _identityEpoch) return;
             print('[AuthProvider _updateLocalStates] listVerifiedFactors returned ${factors.length} factor(s).');
             if (factors.isNotEmpty) {
               _pendingMfaFactorId = factors.first.id;
@@ -207,6 +236,7 @@ class AuthProvider extends ChangeNotifier {
             }
           } catch (e) {
             print('[AuthProvider _updateLocalStates] listVerifiedFactors error: $e — defaulting to needs enrollment.');
+            if (epoch != _identityEpoch) return;
             _needsMfaEnrollment = true;
           }
         }
@@ -220,7 +250,9 @@ class AuthProvider extends ChangeNotifier {
 
       // 3. Evaluate Onboarding Status (linked patients row)
       try {
-        _patient = await _patientsRepo.getPatientByProfileId(currentUser.id);
+        final patient = await _patientsRepo.getPatientByProfileId(currentUser.id);
+        if (epoch != _identityEpoch) return;
+        _patient = patient;
         _isOnboarded = _patient != null;
       } catch (_) {
         _patient = null;
@@ -232,24 +264,30 @@ class AuthProvider extends ChangeNotifier {
     if (isAuthenticated) {
       if (_isFirstAuthCheck) {
         _isFirstAuthCheck = false;
+        final activityEpoch = _identityEpoch;
         await _activityService.restoreLastActivity();
-        final role = _profile?.role;
-        final timeout = (role == UserRole.patient)
-            ? const Duration(minutes: 20)
-            : const Duration(minutes: 10);
-        if (!_activityService.isExempt && _activityService.idleTime > timeout) {
-          _wasLoggedOutForInactivity = true;
-          await _client.auth.signOut();
-          _user = null;
-          _session = null;
-          _profile = null;
-          _patient = null;
-          _permissions = const <String>{};
-          _permissionFallbackActive = false;
-          _hasConsented = false;
-          _isOnboarded = false;
-          _activityService.stopMonitoring();
-          return;
+        // A sign-out or account switch that completed while the restore was
+        // in flight owns the current state; do not run the idle-logout
+        // decision against the newer identity with this run's stale context.
+        if (activityEpoch == _identityEpoch) {
+          final role = _profile?.role;
+          final timeout = (role == UserRole.patient)
+              ? const Duration(minutes: 20)
+              : const Duration(minutes: 10);
+          if (!_activityService.isExempt && _activityService.idleTime > timeout) {
+            _wasLoggedOutForInactivity = true;
+            await _client.auth.signOut();
+            _user = null;
+            _session = null;
+            _profile = null;
+            _patient = null;
+            _permissions = const <String>{};
+            _permissionFallbackActive = false;
+            _hasConsented = false;
+            _isOnboarded = false;
+            _activityService.stopMonitoring();
+            return;
+          }
         }
       }
       _startInactivityMonitor();
@@ -326,12 +364,31 @@ class AuthProvider extends ChangeNotifier {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
+    final signOutGeneration = _signOutGeneration;
+    var loginEpoch = _identityEpoch;
 
     try {
       final response = await _client.auth.signInWithPassword(email: email, password: password);
+      if (signOutGeneration != _signOutGeneration || loginEpoch != _identityEpoch) {
+        // A sign-out was requested while this login was in flight; the newer
+        // intent wins — never install this identity or report success.
+        return LoginOutcome.invalidCredentials;
+      }
       _session = response.session;
       _user = response.user;
+      // Capture the epoch at the moment this identity becomes active, before
+      // any further awaits: a sign-out or account switch during the profile
+      // load or MFA factor listing below must not be mistaken for a
+      // still-valid login.
+      final epoch = _identityEpoch;
+      loginEpoch = epoch;
       await _updateLocalStates();
+
+      if (epoch != _identityEpoch) {
+        // Identity changed while signing in — never report success or arm a
+        // pending MFA factor for a session that is no longer active.
+        return LoginOutcome.invalidCredentials;
+      }
 
       if (_errorMessage == 'This account has been deactivated. Contact an administrator.') {
         _isLoading = false;
@@ -342,6 +399,7 @@ class AuthProvider extends ChangeNotifier {
       // Check if step-up required
       if (_mfaService.requiresStepUp()) {
         final factors = await _mfaService.listVerifiedFactors();
+        if (epoch != _identityEpoch) return LoginOutcome.invalidCredentials;
         if (factors.isNotEmpty) {
           _pendingMfaFactorId = factors.first.id;
           _isLoading = false;
@@ -354,15 +412,19 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return LoginOutcome.success;
     } catch (e) {
-      _errorMessage = e is AuthException ? e.message : e.toString();
-      _isLoading = false;
-      notifyListeners();
+      if (loginEpoch == _identityEpoch && signOutGeneration == _signOutGeneration) {
+        _errorMessage = e is AuthException ? e.message : e.toString();
+        _isLoading = false;
+        notifyListeners();
+      }
       return LoginOutcome.invalidCredentials;
     }
   }
 
   /// Starts MFA Enrollment for admin
   Future<dynamic> startMfaEnrollment() async {
+    final epoch = _identityEpoch;
+    if (_user == null) throw StateError('No active session');
     _isLoading = true;
     notifyListeners();
     try {
@@ -371,6 +433,7 @@ class AuthProvider extends ChangeNotifier {
         factorType: FactorType.totp,
         issuer: 'KlinikAid',
       );
+      if (epoch != _identityEpoch) throw StateError('Session changed');
       _pendingMfaFactorId = response.id;
       _needsMfaEnrollment = false; // Factor enrolled, now verify it
       print('[AuthProvider startMfaEnrollment] (${identityHashCode(this)}) Success: factorId = ${response.id}');
@@ -387,6 +450,7 @@ class AuthProvider extends ChangeNotifier {
 
   /// Verify TOTP code → upgrades session to AAL2
   Future<MfaVerifyResult> verifyMfa(String code) async {
+    final epoch = _identityEpoch;
     print('[AuthProvider verifyMfa] Called. _pendingMfaFactorId=$_pendingMfaFactorId, code length=${code.length}');
     if (_pendingMfaFactorId == null) {
       print('[AuthProvider verifyMfa] ABORT: _pendingMfaFactorId is null — cannot verify.');
@@ -404,6 +468,7 @@ class AuthProvider extends ChangeNotifier {
       );
       print('[AuthProvider verifyMfa] verifyTotp outcome: $result');
 
+      if (epoch != _identityEpoch) return MfaVerifyResult.error;
       if (result == MfaVerifyResult.success) {
         _pendingMfaFactorId = null;
         _needsMfaEnrollment = false;
@@ -424,8 +489,12 @@ class AuthProvider extends ChangeNotifier {
       return MfaVerifyResult.error;
     } finally {
       // ALWAYS clear loading — this was missing and caused the spinner to lock
-      _isLoading = false;
-      notifyListeners();
+      // — but only when this verify still owns the active identity; a newer
+      // sign-in or sign-out flow manages its own loading state.
+      if (epoch == _identityEpoch) {
+        _isLoading = false;
+        notifyListeners();
+      }
       print('[AuthProvider verifyMfa] finally: _isLoading cleared.');
     }
   }
@@ -741,26 +810,34 @@ class AuthProvider extends ChangeNotifier {
 
   /// Signs out of the active session.
   Future<void> signOut() async {
+    _signOutGeneration++;
+    _user = null;
+    _session = null;
+    // Captured after the local clear above: if a newer identity signs in while
+    // the network sign-out is in flight, its state must not be wiped below.
+    final epoch = _identityEpoch;
     _isLoading = true;
     notifyListeners();
     try {
       _activityService.stopMonitoring();
       await _client.auth.signOut();
     } finally {
-      _user = null;
-      _session = null;
-      _profile = null;
-      _patient = null;
-      _permissions = const <String>{};
-      _permissionFallbackActive = false;
-      _hasConsented = false;
-      _isOnboarded = false;
-      _isLoading = false;
+      if (epoch == _identityEpoch) {
+        _user = null;
+        _session = null;
+        _profile = null;
+        _patient = null;
+        _permissions = const <String>{};
+        _permissionFallbackActive = false;
+        _hasConsented = false;
+        _isOnboarded = false;
+        _isLoading = false;
+      }
       notifyListeners();
     }
   }
 
-  Future<void> _loadPermissionsForProfile() async {
+  Future<void> _loadPermissionsForProfile(int epoch) async {
     final roleId = _profile?.roleId;
     if (roleId == null || roleId.trim().isEmpty) {
       _permissions = const <String>{};
@@ -773,12 +850,14 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       final loaded = await _permissionService.loadPermissionsForRole(roleId);
+      if (epoch != _identityEpoch) return;
       _permissions = loaded;
       _permissionFallbackActive = loaded.isEmpty && _profile?.role != UserRole.patient;
       if (_permissionFallbackActive) {
         print('[AuthProvider] Permission routing fallback active: no permissions returned.');
       }
     } catch (e) {
+      if (epoch != _identityEpoch) return;
       _permissions = const <String>{};
       _permissionFallbackActive = _profile?.role != UserRole.patient;
       if (_permissionFallbackActive) {
@@ -789,10 +868,12 @@ class AuthProvider extends ChangeNotifier {
 
   /// Triggers Edge Function to send email verification code.
   Future<bool> sendVerificationCode(String email) async {
+    final epoch = _identityEpoch;
     _verificationState = _verificationState.copyWith(status: VerificationStatus.verifying);
     notifyListeners();
 
     final result = await _verificationService.sendCode(email: email);
+    if (epoch != _identityEpoch) return false;
     if (result.status == VerificationStatus.codeSent) {
       _verificationState = VerificationState(
         status: VerificationStatus.codeSent,
@@ -814,6 +895,7 @@ class AuthProvider extends ChangeNotifier {
 
   /// Triggers Edge Function to verify code and updates local profile state upon success.
   Future<bool> verifyCode(String code) async {
+    final epoch = _identityEpoch;
     final email = _user?.email;
     if (email == null) {
       _errorMessage = 'No active session email found.';
@@ -825,6 +907,7 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     final result = await _verificationService.verifyCode(email: email, code: code);
+    if (epoch != _identityEpoch) return false;
     if (result.status == VerificationStatus.verified) {
       _verificationState = VerificationState(status: VerificationStatus.verified);
       _errorMessage = null;
