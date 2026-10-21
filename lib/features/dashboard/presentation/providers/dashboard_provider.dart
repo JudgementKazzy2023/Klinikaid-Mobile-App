@@ -153,7 +153,7 @@ class DashboardProvider extends ChangeNotifier {
       // Write to Drift
       await _localDb.cacheDocuments(cachedDocs);
       await _localDb.replaceQueueForPatient(patientId, cachedQueue);
-      await _localDb.cacheDepartmentRecords(cachedRecords);
+      await _localDb.replaceDepartmentRecords(patientId, cachedRecords);
     } catch (e) {
       debugPrint('Error caching dashboard data: $e');
     }
