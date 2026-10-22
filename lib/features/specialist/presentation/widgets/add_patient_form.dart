@@ -86,23 +86,8 @@ class AddPatientFormState extends State<AddPatientForm> {
         return;
       }
 
-      // Explicitly check the age restriction
-      final now = DateTime.now();
-      int age = now.year - selectedDob!.year;
-      if (now.month < selectedDob!.month ||
-          (now.month == selectedDob!.month && now.day < selectedDob!.day)) {
-        age--;
-      }
-      if (age < _minimumPatientAge) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Patient must be 18 years or older.')),
-        );
-        setState(() {
-          _isSubmitting = false;
-        });
-        return;
-      }
-
+      // No 18+ rule: like web's specialist path, private patients may be minors.
+      // The date picker limits the date to the past 120 years.
       final provider = Provider.of<SpecialistProvider>(context, listen: false);
       final success = await provider.addPatient(
         firstName: _firstNameController.text.trim(),
@@ -182,11 +167,8 @@ class AddPatientFormState extends State<AddPatientForm> {
                     border: OutlineInputBorder(),
                   ),
                   validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'First name is required';
-                    }
-                    if (value.trim().length < 3) {
-                      return 'Minimum 3 characters';
+                    if (value == null || !RegistrationValidators.validateName(value)) {
+                      return RegistrationValidators.nameFieldMessage('First name');
                     }
                     return null;
                   },
@@ -202,8 +184,8 @@ class AddPatientFormState extends State<AddPatientForm> {
                     border: OutlineInputBorder(),
                   ),
                   validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Last name is required';
+                    if (value == null || !RegistrationValidators.validateName(value)) {
+                      return RegistrationValidators.nameFieldMessage('Last name');
                     }
                     return null;
                   },
@@ -239,29 +221,6 @@ class AddPatientFormState extends State<AddPatientForm> {
                     ),
                   ),
                 ),
-                if (selectedDob != null) ...[
-                  const SizedBox(height: 4),
-                  Builder(
-                    builder: (context) {
-                      final now = DateTime.now();
-                      int age = now.year - selectedDob!.year;
-                      if (now.month < selectedDob!.month ||
-                          (now.month == selectedDob!.month && now.day < selectedDob!.day)) {
-                        age--;
-                      }
-                      if (age < _minimumPatientAge) {
-                        return Padding(
-                          padding: const EdgeInsets.only(left: 12.0),
-                          child: Text(
-                            'Patient must be 18 years or older.',
-                            style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
-                          ),
-                        );
-                      }
-                      return const SizedBox.shrink();
-                    },
-                  ),
-                ],
                 const SizedBox(height: 16),
 
                 // Gender Dropdown
@@ -316,9 +275,8 @@ class AddPatientFormState extends State<AddPatientForm> {
                   ),
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) return null;
-                    final reg = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
-                    if (!reg.hasMatch(value.trim())) {
-                      return 'Invalid email format';
+                    if (!RegistrationValidators.validateEmail(value)) {
+                      return 'Invalid email address';
                     }
                     return null;
                   },
@@ -333,6 +291,13 @@ class AddPatientFormState extends State<AddPatientForm> {
                     labelText: 'Address',
                     border: OutlineInputBorder(),
                   ),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) return null;
+                    if (!RegistrationValidators.validateAddress(value)) {
+                      return RegistrationValidators.addressFieldMessage;
+                    }
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 24),
 
