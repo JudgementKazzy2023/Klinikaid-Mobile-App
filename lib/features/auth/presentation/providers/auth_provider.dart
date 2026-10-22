@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../../core/cache/local_database.dart';
 import '../../../../core/repositories/patients_repository.dart';
 import '../../../../core/repositories/profiles_repository.dart';
 import '../../../../core/models/patient.dart';
@@ -27,6 +28,7 @@ class AuthProvider extends ChangeNotifier {
   final PermissionService _permissionService;
   final SessionActivityService _activityService;
   final MfaService _mfaService;
+  final LocalDatabase? localDatabase;
 
   User? _activeUser;
   int _identityEpoch = 0;
@@ -117,6 +119,7 @@ class AuthProvider extends ChangeNotifier {
     PermissionService? permissionService,
     SessionActivityService? activityService,
     MfaService? mfaService,
+    this.localDatabase,
   })  : _client = client ?? Supabase.instance.client,
         _patientsRepo = patientsRepo ?? PatientsRepository(),
         _profilesRepo = profilesRepo ?? ProfilesRepository(),
@@ -150,13 +153,27 @@ class AuthProvider extends ChangeNotifier {
     });
 
     _authStateSubscription = _client.auth.onAuthStateChange.listen((data) async {
+      // Ignore an obsolete signed-out event if the client already has a new
+      // session. Expiry and SDK-initiated sign-outs also need cache cleanup.
+      if (data.event == AuthChangeEvent.signedOut &&
+          _client.auth.currentSession != null) {
+        return;
+      }
       _session = data.session;
-      _user = data.session?.user;
+      if (_user != null || data.session?.user != null) {
+        _user = data.session?.user;
+      }
+      final epoch = _identityEpoch;
       
       _isLoading = true;
       notifyListeners();
 
+      if (data.event == AuthChangeEvent.signedOut && epoch == _identityEpoch) {
+        await localDatabase?.clearAllCache();
+      }
+      if (epoch != _identityEpoch || _isDisposed) return;
       await _updateLocalStates();
+      if (epoch != _identityEpoch || _isDisposed) return;
       
       _isLoading = false;
       notifyListeners();
@@ -296,18 +313,7 @@ class AuthProvider extends ChangeNotifier {
               : const Duration(minutes: 10);
           if (!_activityService.isExempt && _activityService.idleTime > timeout) {
             _wasLoggedOutForInactivity = true;
-            await _client.auth.signOut();
-            _user = null;
-            _session = null;
-            _profile = null;
-            _patient = null;
-            _patientRecordState = PatientRecordState.unknown;
-            _patientRecordError = null;
-            _permissions = const <String>{};
-            _permissionFallbackActive = false;
-            _hasConsented = false;
-            _isOnboarded = false;
-            _activityService.stopMonitoring();
+            await signOut();
             return;
           }
         }
@@ -908,6 +914,9 @@ class AuthProvider extends ChangeNotifier {
       _activityService.stopMonitoring();
       await _client.auth.signOut();
     } finally {
+      if (epoch == _identityEpoch) {
+        await localDatabase?.clearAllCache();
+      }
       if (epoch == _identityEpoch) {
         _user = null;
         _session = null;

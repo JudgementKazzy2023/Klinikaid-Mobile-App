@@ -4,6 +4,7 @@
                      android:maxSdkVersion="29"
                      tools:replace="android:maxSdkVersion"/>
     <application
+        android:allowBackup="false"
         android:label="KlinikAId"
         android:name="${applicationName}"
         android:requestLegacyExternalStorage="true"
