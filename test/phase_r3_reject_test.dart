@@ -29,9 +29,18 @@ class MockReceptionRepository extends ReceptionRepository {
   MockReceptionRepository({this.submissions = const [], this.detail});
 
   @override
-  Future<List<Submission>> getSubmissions({SubmissionStatus? status}) async {
-    if (status == null) return submissions;
-    return submissions.where((s) => s.status == status).toList();
+  Future<SubmissionsPage> getSubmissionsPage({
+    SubmissionStatus? status,
+    int offset = 0,
+    int limit = kReceptionSubmissionsPageSize,
+  }) async {
+    final matching = status == null
+        ? submissions
+        : submissions.where((s) => s.status == status).toList();
+    return SubmissionsPage(
+      submissions: matching.skip(offset).take(limit).toList(),
+      total: matching.length,
+    );
   }
 
   @override

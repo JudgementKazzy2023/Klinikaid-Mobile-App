@@ -4,52 +4,173 @@ import '../../domain/submission.dart';
 import '../../domain/submission_detail.dart';
 import '../../domain/submission_status.dart';
 
+/// One column of the reception board: the rows on screen and the server's
+/// exact count for that column.
+class SubmissionColumn {
+  const SubmissionColumn({required this.rows, required this.total});
+
+  /// The submissions on screen, newest first.
+  final List<Submission> rows;
+
+  /// The exact number of submissions the server holds for this column.
+  final int total;
+
+  /// True when the server holds more submissions than are on screen.
+  bool get hasMore => rows.length < total;
+}
+
 class ReceptionQueueProvider extends ChangeNotifier {
   final ReceptionRepository _repository;
 
-  List<Submission> _submissions = [];
+  ReceptionQueueProvider({required ReceptionRepository repository})
+      : _repository = repository;
+
+  /// The columns of the board, one per status.
+  ///
+  /// The board reads one status at a time: every column is a work list of its
+  /// own, and a mixed page would leave a column empty while that column holds
+  /// rows.
+  static const List<SubmissionStatus> boardStatuses = <SubmissionStatus>[
+    SubmissionStatus.submitted,
+    SubmissionStatus.approved,
+    SubmissionStatus.rejected,
+  ];
+
+  final Map<SubmissionStatus, SubmissionColumn> _columns =
+      <SubmissionStatus, SubmissionColumn>{
+    for (final status in boardStatuses)
+      status: const SubmissionColumn(rows: <Submission>[], total: 0),
+  };
+
+  /// The columns whose next page is being read.
+  final Map<SubmissionStatus, bool> _loadingMore = <SubmissionStatus, bool>{
+    for (final status in boardStatuses) status: false,
+  };
+
+  /// The failure of the last "load more" of a column.
+  final Map<SubmissionStatus, String?> _moreErrors = <SubmissionStatus, String?>{
+    for (final status in boardStatuses) status: null,
+  };
+
   bool _isLoading = false;
   String? _errorMessage;
+  String? _boardError;
   SubmissionDetail? _selectedDetail;
 
   bool _isRouting = false;
   String? _routingError;
 
-  ReceptionQueueProvider({required ReceptionRepository repository})
-      : _repository = repository;
-
-  List<Submission> get submissions => _submissions;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
+
+  /// The failure of the board read, if it failed.
+  ///
+  /// The board has its own failure: a detail read that fails says nothing
+  /// about the board, and the board must not go blank because one document
+  /// could not be opened.
+  String? get boardError => _boardError;
+
   SubmissionDetail? get selectedDetail => _selectedDetail;
   bool get isRouting => _isRouting;
   String? get routingError => _routingError;
 
+  /// The submissions of one board column, newest first.
+  List<Submission> submissionsOf(SubmissionStatus status) =>
+      _columns[status]!.rows;
+
+  /// The exact number of submissions the server holds for one column.
+  int totalOf(SubmissionStatus status) => _columns[status]!.total;
+
+  /// True when the column holds more submissions than are on screen.
+  bool hasMoreOf(SubmissionStatus status) => _columns[status]!.hasMore;
+
+  /// True while the next page of the column is being read.
+  bool isLoadingMoreOf(SubmissionStatus status) => _loadingMore[status]!;
+
+  /// The failure of the last "load more" of the column, if it failed.
+  String? moreErrorOf(SubmissionStatus status) => _moreErrors[status];
+
   List<Submission> get pendingSubmissions =>
-      _submissions.where((s) => s.status == SubmissionStatus.submitted).toList();
+      submissionsOf(SubmissionStatus.submitted);
 
   List<Submission> get submittedSubmissions =>
-      _submissions.where((s) => s.status == SubmissionStatus.submitted).toList();
+      submissionsOf(SubmissionStatus.submitted);
 
   List<Submission> get approvedSubmissions =>
-      _submissions.where((s) => s.status == SubmissionStatus.approved).toList();
+      submissionsOf(SubmissionStatus.approved);
 
   List<Submission> get rejectedSubmissions =>
-      _submissions.where((s) => s.status == SubmissionStatus.rejected).toList();
+      submissionsOf(SubmissionStatus.rejected);
 
-  /// Loads all submissions to populate the queue lists and badge counts.
+  /// The exact number of pending submissions the server holds.
+  int get pendingTotal => totalOf(SubmissionStatus.submitted);
+
+  /// The exact number of approved submissions the server holds.
+  int get approvedTotal => totalOf(SubmissionStatus.approved);
+
+  /// The exact number of rejected submissions the server holds.
+  int get rejectedTotal => totalOf(SubmissionStatus.rejected);
+
+  /// Loads the first page of every board column.
+  ///
+  /// Each column is read on its own, so every count on the board is the
+  /// server's exact count for that column and not the size of one page.
   Future<void> loadSubmissions() async {
     _isLoading = true;
-    _errorMessage = null;
+    _boardError = null;
     notifyListeners();
 
     try {
-      _submissions = await _repository.getSubmissions();
+      final pages = await Future.wait(<Future<SubmissionsPage>>[
+        for (final status in boardStatuses)
+          _repository.getSubmissionsPage(status: status),
+      ]);
+
+      for (var index = 0; index < boardStatuses.length; index++) {
+        final status = boardStatuses[index];
+        final page = pages[index];
+        _columns[status] = SubmissionColumn(
+          rows: page.submissions,
+          total: page.total,
+        );
+      }
+
       _isLoading = false;
       notifyListeners();
     } catch (e) {
       _isLoading = false;
-      _errorMessage = e.toString();
+      _boardError = e.toString();
+      notifyListeners();
+    }
+  }
+
+  /// Appends the next page of one board column.
+  ///
+  /// The page continues where the last one stopped, so no submission is
+  /// skipped and none is read twice. The rows that are on screen stay when the
+  /// read fails, and the failure is shown next to the button.
+  Future<void> loadMore(SubmissionStatus status) async {
+    if (_loadingMore[status] == true) return;
+    final column = _columns[status]!;
+    if (!column.hasMore) return;
+
+    _loadingMore[status] = true;
+    _moreErrors[status] = null;
+    notifyListeners();
+
+    try {
+      final page = await _repository.getSubmissionsPage(
+        status: status,
+        offset: column.rows.length,
+      );
+      _columns[status] = SubmissionColumn(
+        rows: <Submission>[...column.rows, ...page.submissions],
+        total: column.total,
+      );
+    } catch (e) {
+      _moreErrors[status] = e.toString();
+    } finally {
+      _loadingMore[status] = false;
       notifyListeners();
     }
   }

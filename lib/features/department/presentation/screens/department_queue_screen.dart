@@ -175,10 +175,32 @@ class _DepartmentQueueScreenState extends State<DepartmentQueueScreen> {
               ),
             ),
 
+            // Queue size: the entries on screen and the exact size of the
+            // queue the server holds. The count is hidden while the queue is
+            // loading and after a failed read: a count of zero would claim
+            // the queue is empty when nobody could measure it.
+            if (!provider.isLoading && provider.queueError == null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Showing ${filteredQueue.length} of ${provider.queueTotal} queue entries',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                    ),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 8.0),
+
             // Queue List
             Expanded(
               child: provider.isLoading
                   ? const Center(child: CircularProgressIndicator())
+                  : provider.queueError != null
+                  ? _buildErrorState(context, provider, provider.queueError!)
                   : RefreshIndicator(
                       onRefresh: () => provider.loadDashboard(),
                       child: filteredQueue.isEmpty
@@ -421,6 +443,67 @@ class _DepartmentQueueScreenState extends State<DepartmentQueueScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// The state of a queue read that failed.
+  ///
+  /// A failed read is not an empty queue: showing the empty state here would
+  /// tell the department that nobody is waiting while the read is broken.
+  Widget _buildErrorState(
+    BuildContext context,
+    DepartmentProvider provider,
+    String message,
+  ) {
+    final theme = Theme.of(context);
+    return RefreshIndicator(
+      onRefresh: provider.loadDashboard,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: Container(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              alignment: Alignment.center,
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.cloud_off_rounded,
+                    size: 64,
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'The queue could not be loaded.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.8),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    key: const Key('btn_retry_queue'),
+                    onPressed: provider.loadDashboard,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }

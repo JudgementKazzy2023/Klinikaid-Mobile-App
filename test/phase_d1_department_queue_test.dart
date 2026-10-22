@@ -106,6 +106,9 @@ class MockDepartmentProvider extends DepartmentProvider {
   List<PatientQueue> get queueEntries => mockQueueEntries;
 
   @override
+  int get queueTotal => mockQueueEntries.length;
+
+  @override
   Future<void> loadDashboard() async {
     // No-op
   }

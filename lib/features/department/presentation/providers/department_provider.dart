@@ -13,33 +13,79 @@ class DepartmentProvider extends ChangeNotifier {
 
   bool _isLoading = false;
   String? _errorMessage;
+  String? _queueError;
+  String? _recordsError;
   List<PatientQueue> _queueEntries = [];
+  int _queueTotal = 0;
   List<DepartmentRecord> _recentRecords = [];
 
   RealtimeChannel? _queueChannel;
 
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
+
+  /// The failure of the queue read, if it failed.
+  ///
+  /// The queue and the records history keep their failures apart: a broken
+  /// records read says nothing about the queue and must not hide it.
+  String? get queueError => _queueError;
+
+  /// The failure of the records history read, if it failed.
+  String? get recordsError => _recordsError;
+
   List<PatientQueue> get queueEntries => _queueEntries;
+
+  /// The exact number of open entries the server holds for this department.
+  ///
+  /// The count comes from the server, not from the length of the list that was
+  /// read back, so the workload the screen reports is never the size of one
+  /// page.
+  int get queueTotal => _queueTotal;
+
   List<DepartmentRecord> get recentRecords => _recentRecords;
   List<GroupedRecord> get groupedRecords => groupRecords(_recentRecords);
 
   DepartmentProvider(this.department);
 
   /// Loads the active department-scoped queue and recent records.
+  ///
+  /// Both reads run together and each keeps its own failure, so a broken
+  /// records read does not take the queue down with it.
   Future<void> loadDashboard() async {
     _isLoading = true;
     _errorMessage = null;
+    _queueError = null;
+    _recordsError = null;
     notifyListeners();
 
     try {
-      final queueFuture = _repo.getActiveQueue();
-      final recordsFuture = _repo.getRecordsHistory();
+      final results = await Future.wait(<Future<Object?>>[
+        _repo
+            .getActiveQueue()
+            .then<Object?>((page) => page)
+            .catchError((Object e) => e),
+        _repo
+            .getRecordsHistory()
+            .then<Object?>((records) => records)
+            .catchError((Object e) => e),
+      ]);
 
-      final results = await Future.wait([queueFuture, recordsFuture]);
+      final queue = results[0];
+      if (queue is DepartmentQueuePage) {
+        _queueEntries = queue.entries;
+        _queueTotal = queue.total;
+      } else {
+        _queueError = FailureMapper.fromException(queue).message;
+      }
 
-      _queueEntries = results[0] as List<PatientQueue>;
-      _recentRecords = results[1] as List<DepartmentRecord>;
+      final records = results[1];
+      if (records is List) {
+        _recentRecords = records.cast<DepartmentRecord>();
+      } else {
+        _recordsError = FailureMapper.fromException(records).message;
+      }
+
+      _errorMessage = _queueError ?? _recordsError;
 
       _isLoading = false;
       notifyListeners();
@@ -57,7 +103,8 @@ class DepartmentProvider extends ChangeNotifier {
   Future<void> quietFetchQueue() async {
     try {
       final queue = await _repo.getActiveQueue();
-      _queueEntries = queue;
+      _queueEntries = queue.entries;
+      _queueTotal = queue.total;
       notifyListeners();
     } catch (e) {
       // ignore: avoid_print

@@ -1,10 +1,33 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/errors/failures.dart';
+import '../../../../core/supabase/paged_read.dart';
 import '../domain/submission.dart';
 import '../domain/submission_detail.dart';
 import '../domain/submission_status.dart';
 import '../domain/recent_triage_entry.dart';
 import '../../../../core/models/patient_queue.dart';
+
+/// Rows shown per page in the reception board.
+///
+/// The documents table is the largest one reception reads, and the web caps
+/// its board for the same reason (3.1 MB of HTML for 557 rows). The mobile
+/// board shows one page at a time and discloses the exact total instead of
+/// reading the whole table onto a phone.
+const int kReceptionSubmissionsPageSize = 100;
+
+/// One page of the reception board, plus the exact number of rows it holds.
+class SubmissionsPage {
+  const SubmissionsPage({required this.submissions, required this.total});
+
+  /// The submissions of this page, newest first.
+  final List<Submission> submissions;
+
+  /// The server's exact count of the submissions the filter matched.
+  ///
+  /// Independent of how many rows were read back, so the board never reports
+  /// the size of one page as the size of the queue.
+  final int total;
+}
 
 /// Compute the start of today in PHT (UTC+8), expressed as a UTC DateTime.
 /// Replicates web's getPhtStartOfToday() exactly — Ralph verified the math.
@@ -20,9 +43,25 @@ class ReceptionRepository {
   ReceptionRepository({SupabaseClient? client})
       : _client = client ?? Supabase.instance.client;
 
-  /// Fetch all submissions, optionally filtered by status.
+  /// Fetches one page of the submissions, optionally filtered by status.
   /// Scoped by RLS: Receptionists have full select access to public.documents.
-  Future<List<Submission>> getSubmissions({SubmissionStatus? status}) async {
+  ///
+  /// The read is paged: PostgREST caps one response at its max-rows (1,000)
+  /// and reports no error when it drops the rest, so an unpaginated select
+  /// would hide every document past the cap - a referral that would never be
+  /// actioned.
+  ///
+  /// The order is total (newest first, then the primary key): documents that
+  /// share a timestamp keep a fixed place in the order, so a page boundary
+  /// never skips or repeats one of them.
+  ///
+  /// The exact count is asked for with the first page only; a later page keeps
+  /// the total of the first one instead of paying for a second count.
+  Future<SubmissionsPage> getSubmissionsPage({
+    SubmissionStatus? status,
+    int offset = 0,
+    int limit = kReceptionSubmissionsPageSize,
+  }) async {
     try {
       var query = _client.from('documents').select(
           '*, uploader:profiles(*), patient:patients(*)');
@@ -31,12 +70,15 @@ class ReceptionRepository {
         query = query.eq('status', status.toDbStatus());
       }
 
-      final response = await query.order('created_at', ascending: false);
+      final read = await readPage(
+        query.order('created_at', ascending: false),
+        uniqueOrderColumn: 'id',
+        offset: offset,
+        pageSize: limit,
+      );
 
       final List<Submission> submissions = [];
-      for (final json in response as List) {
-        final doc = json as Map<String, dynamic>;
-
+      for (final doc in read.rows) {
         final uploader = doc['uploader'] as Map<String, dynamic>?;
         final patient = doc['patient'] as Map<String, dynamic>?;
 
@@ -66,7 +108,7 @@ class ReceptionRepository {
         ));
       }
 
-      return submissions;
+      return SubmissionsPage(submissions: submissions, total: read.total);
     } catch (e) {
       throw FailureMapper.fromException(e);
     }
