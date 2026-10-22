@@ -46,6 +46,10 @@ class RouterAuthProvider extends AuthProvider {
 
   @override
   PermissionLoadState get permissionLoadState => state;
+
+  // Staff already past MFA: these tests are about the permission answer.
+  @override
+  bool get isAal2 => true;
 }
 
 class MockGoTrueClient extends GoTrueClient {

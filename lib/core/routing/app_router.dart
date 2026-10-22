@@ -76,6 +76,10 @@ class AppRouter {
       );
 
   String? _homeForCurrentUser() {
+    // Without a profile the grants are unknown, so there is no home to send
+    // the account to and no grounds to deny it one.
+    if (authProvider.profile == null) return null;
+
     // An account that may open no screen at all belongs on the access
     // screen, not on a screen it is not allowed to open.
     return _permissionHomeForRole(authProvider.profile?.role) ??
