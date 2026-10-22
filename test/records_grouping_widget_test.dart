@@ -50,6 +50,10 @@ class MockAuthProvider extends AuthProvider {
 
   @override
   Profile? get profile => _mockProfile;
+
+  // Staff routes require AAL2 since #49; this screen test starts past MFA.
+  @override
+  bool get isAal2 => true;
 }
 
 class MockDepartmentProvider extends DepartmentProvider {
