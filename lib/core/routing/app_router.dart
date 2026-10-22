@@ -25,8 +25,6 @@ import '../../features/dashboard/presentation/providers/dashboard_provider.dart'
 import '../../features/documents/presentation/providers/document_submission_provider.dart';
 import '../cache/local_database.dart';
 import '../models/profile.dart';
-import '../../features/staff/presentation/screens/reception_home_screen.dart';
-import '../../features/staff/presentation/screens/specialist_home_screen.dart';
 import '../../features/auth/presentation/screens/totp_verify_screen.dart';
 import '../../features/reception/presentation/reception_shell.dart';
 import '../../features/reception/presentation/screens/reception_queue_screen.dart';
@@ -95,9 +93,7 @@ class AppRouter {
         location == '/register' ||
         location == '/consent' ||
         location == '/verify' ||
-        location == '/' ||
-        location == '/staff/reception' ||
-        location == '/staff/specialist') {
+        location == '/') {
       return _permissionHomeForRole(authProvider.profile?.role);
     }
 
@@ -204,8 +200,7 @@ class AppRouter {
         }
 
         // Patient trying to access staff/admin routes is redirected to /patient
-        if (location.startsWith('/staff/') ||
-            location.startsWith('/reception/') ||
+        if (location.startsWith('/reception/') ||
             location.startsWith('/department/') ||
             location.startsWith('/admin/') ||
             location.startsWith('/specialist/')) {
@@ -245,8 +240,7 @@ class AppRouter {
           }
         }
 
-        final isStaffPath = location.startsWith('/staff/') ||
-                            location.startsWith('/reception/') ||
+        final isStaffPath = location.startsWith('/reception/') ||
                             location.startsWith('/department/') ||
                             location.startsWith('/specialist/');
         final isCommonPath = isLoggingIn || isRegistering || isConsenting;
@@ -319,10 +313,6 @@ class AppRouter {
         path: '/verify',
         builder: (context, state) => const VerificationCodeScreen(),
       ),
-      GoRoute(
-        path: '/staff/reception',
-        builder: (context, state) => const ReceptionHomeScreen(),
-      ),
       ShellRoute(
         builder: (context, state, child) {
           return DepartmentShell(child: child);
@@ -368,10 +358,6 @@ class AppRouter {
             departmentOverride: dept,
           );
         },
-      ),
-      GoRoute(
-        path: '/staff/specialist',
-        builder: (context, state) => const SpecialistHomeScreen(),
       ),
       ShellRoute(
         builder: (context, state, child) {
