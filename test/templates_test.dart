@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 import 'package:klinikaid_mobile/features/patient/templates/document_templates.dart';
-import 'package:klinikaid_mobile/features/patient/templates/presentation/providers/templates_provider.dart';
 import 'package:klinikaid_mobile/features/reception/domain/submission.dart';
 import 'package:klinikaid_mobile/features/reception/domain/submission_detail.dart';
 import 'package:klinikaid_mobile/features/reception/domain/submission_status.dart';

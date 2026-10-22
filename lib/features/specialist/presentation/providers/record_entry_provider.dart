@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../../../core/errors/failures.dart';
 import '../../../../core/models/specialist_patient.dart';
 import '../../../department/domain/lab_reference_ranges.dart';
 import '../../../department/domain/flag_calculator.dart';

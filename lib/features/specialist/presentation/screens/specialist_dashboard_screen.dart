@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../providers/specialist_provider.dart';
-import '../../../../core/models/specialist_patient.dart';
 import '../../../../core/models/specialist_record.dart';
 import '../../../../core/utils/lab_validators.dart';
 
