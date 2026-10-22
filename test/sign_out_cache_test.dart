@@ -13,6 +13,22 @@ import 'package:klinikaid_mobile/features/auth/data/verification_service.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+class FailingCacheDatabase extends LocalDatabase {
+  FailingCacheDatabase() : super(NativeDatabase.memory());
+
+  bool failCacheClear = false;
+  int failedClearAttempts = 0;
+
+  @override
+  Future<void> clearAllCache() async {
+    if (failCacheClear) {
+      failedClearAttempts++;
+      throw StateError('Cache unavailable');
+    }
+    await super.clearAllCache();
+  }
+}
+
 class EventAuth extends GoTrueClient {
   EventAuth() : super(autoRefreshToken: false);
   final events = StreamController<AuthState>.broadcast(sync: true);
@@ -88,7 +104,7 @@ class TestMfa extends MfaService {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  late LocalDatabase db;
+  late FailingCacheDatabase db;
   late EventAuth auth;
   late AuthProvider provider;
 
@@ -133,7 +149,7 @@ void main() {
   }
 
   setUp(() async {
-    db = LocalDatabase(NativeDatabase.memory());
+    db = FailingCacheDatabase();
     auth = EventAuth();
     final client = TestClient(auth);
     SupabaseService.mockClient = client;
@@ -180,6 +196,43 @@ void main() {
       await expectCacheCount(0);
     },
   );
+
+  test('failed cache clear still completes sign-out', () async {
+    db.failCacheClear = true;
+    await provider.signOut();
+    expect(provider.isLoading, isFalse);
+    expect(provider.isAuthenticated, isFalse);
+    expect(provider.profile, isNull);
+  });
+
+  test('SDK sign-out completes when cache clear fails', () async {
+    db.failCacheClear = true;
+    final finished = Completer<void>();
+    provider.addListener(() {
+      if (!provider.isLoading && !finished.isCompleted) {
+        finished.complete();
+      }
+    });
+    auth.events.add(AuthState(AuthChangeEvent.signedOut, null));
+    await finished.future.timeout(const Duration(seconds: 5));
+    expect(db.failedClearAttempts, 1);
+    expect(provider.isAuthenticated, isFalse);
+    expect(provider.profile, isNull);
+    expect(provider.patient, isNull);
+    expect(provider.permissions, isEmpty);
+    await expectCacheCount(1);
+  });
+
+  test('offline sign-out and cache failure still reset local state', () async {
+    auth.failSignOut = true;
+    db.failCacheClear = true;
+    await expectLater(provider.signOut(), throwsA(isA<AuthException>()));
+    expect(db.failedClearAttempts, 1);
+    expect(provider.isLoading, isFalse);
+    expect(provider.isAuthenticated, isFalse);
+    expect(provider.profile, isNull);
+    expect(provider.permissions, isEmpty);
+  });
 
   test('offline sign-out still clears caches', () async {
     auth.failSignOut = true;

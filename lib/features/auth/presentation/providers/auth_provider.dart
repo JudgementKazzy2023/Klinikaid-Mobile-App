@@ -160,16 +160,14 @@ class AuthProvider extends ChangeNotifier {
         return;
       }
       _session = data.session;
-      if (_user != null || data.session?.user != null) {
-        _user = data.session?.user;
-      }
+      _user = data.session?.user;
       final epoch = _identityEpoch;
       
       _isLoading = true;
       notifyListeners();
 
       if (data.event == AuthChangeEvent.signedOut && epoch == _identityEpoch) {
-        await localDatabase?.clearAllCache();
+        await _clearLocalCache();
       }
       if (epoch != _identityEpoch || _isDisposed) return;
       await _updateLocalStates();
@@ -915,7 +913,7 @@ class AuthProvider extends ChangeNotifier {
       await _client.auth.signOut();
     } finally {
       if (epoch == _identityEpoch) {
-        await localDatabase?.clearAllCache();
+        await _clearLocalCache();
       }
       if (epoch == _identityEpoch) {
         _user = null;
@@ -931,6 +929,15 @@ class AuthProvider extends ChangeNotifier {
         _isLoading = false;
       }
       notifyListeners();
+    }
+  }
+
+  // A failed cache clear must not leave sign-out half done.
+  Future<void> _clearLocalCache() async {
+    try {
+      await localDatabase?.clearAllCache();
+    } catch (e) {
+      debugPrint('[AuthProvider] Local cache clear failed on sign-out: $e');
     }
   }
 
