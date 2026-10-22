@@ -233,7 +233,7 @@ class AuthProvider extends ChangeNotifier {
       _patientRecordState = PatientRecordState.unknown;
       _patientRecordError = null;
 
-      if (_profile?.role == UserRole.admin && !isAal2) {
+      if (_profile?.role != UserRole.patient && !isAal2) {
         // IMPORTANT: If we already have a pending factor from enrollment/login,
         // do NOT call listVerifiedFactors — the newly-enrolled factor is still
         // unverified and will not appear, and overwriting _pendingMfaFactorId

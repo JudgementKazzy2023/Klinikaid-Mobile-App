@@ -162,14 +162,16 @@ class AppRouter {
 
       // Prevent non-pending users from accessing /mfa-verify
       if (location == '/mfa-verify') {
-        if (role == UserRole.admin && !authProvider.isAal2) {
+        if (role != UserRole.patient && !authProvider.isAal2) {
           return null;
         }
         return _homeForCurrentUser();
       }
 
-      // 3. Admin AAL2 guarding remains tied to the legacy admin role.
-      if (role == UserRole.admin && !authProvider.isAal2) {
+      // 3. All staff require AAL2 before protected routes can load.
+      // Patient RLS exemption also requires role_id to link to the patient role;
+      // a missing link is a backend data issue, not a reason to enroll a patient.
+      if (role != UserRole.patient && !authProvider.isAal2) {
         return '/mfa-verify';
       }
 

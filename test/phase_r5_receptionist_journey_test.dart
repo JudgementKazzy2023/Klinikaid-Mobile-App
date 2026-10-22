@@ -189,6 +189,10 @@ class MockReceptionJourneyRepository extends ReceptionRepository {
 // ─── Journey Mock AuthProvider ──────────────────────────────────────────────
 
 class MockJourneyAuthProvider extends AuthProvider {
+  // These screen tests start after staff MFA verification.
+  @override
+  bool get isAal2 => true;
+
   bool _mockIsAuthenticated = false;
   Profile? _mockProfile;
 
