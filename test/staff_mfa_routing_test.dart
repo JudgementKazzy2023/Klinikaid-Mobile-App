@@ -7,19 +7,21 @@ import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provi
 
 // Implements rather than constructs AuthProvider: no Supabase or platform work.
 class RouterAuth extends ChangeNotifier implements AuthProvider {
-  RouterAuth(UserRole role)
-    : profile = Profile(
-        id: 'test-user',
-        fullName: 'Test User',
-        role: role,
-        department: Department.laboratory,
-        emailVerifiedAt: DateTime(2026),
-        createdAt: DateTime(2026),
-        updatedAt: DateTime(2026),
-      );
+  RouterAuth(UserRole? role)
+    : profile = role == null
+          ? null
+          : Profile(
+              id: 'test-user',
+              fullName: 'Test User',
+              role: role,
+              department: Department.laboratory,
+              emailVerifiedAt: DateTime(2026),
+              createdAt: DateTime(2026),
+              updatedAt: DateTime(2026),
+            );
 
   @override
-  final Profile profile;
+  final Profile? profile;
   @override
   bool get isAuthenticated => true;
   @override
@@ -123,11 +125,45 @@ void main() {
             pageKey: ValueKey(location),
           ),
         );
-    expect(auth.profile.roleId, isNull);
+    expect(auth.profile?.roleId, isNull);
     // The backend also needs role_id linked to the patient role for its RLS
     // exemption. Fixing a missing link is outside this client gating change.
     expect(await redirect('/'), '/patient');
     expect(await redirect('/patient'), isNull);
     expect(await redirect('/mfa-verify'), '/patient');
+  });
+  testWidgets('authenticated AAL1 with a missing profile is not sent to MFA', (
+    tester,
+  ) async {
+    final auth = RouterAuth(null);
+    final router = AppRouter(auth).router;
+    addTearDown(router.dispose);
+    addTearDown(auth.dispose);
+    late BuildContext context;
+    await tester.pumpWidget(
+      Builder(
+        builder: (value) {
+          context = value;
+          return const SizedBox();
+        },
+      ),
+    );
+    Future<String?> redirect(String location) async =>
+        router.configuration.topRedirect(
+          context,
+          GoRouterState(
+            router.configuration,
+            uri: Uri.parse(location),
+            matchedLocation: location,
+            fullPath: location,
+            pathParameters: const {},
+            pageKey: ValueKey(location),
+          ),
+        );
+    expect(auth.profile, isNull);
+    expect(await redirect('/'), isNull);
+    expect(await redirect('/login'), isNull);
+    expect(await redirect('/patient'), isNull);
+    expect(await redirect('/mfa-verify'), isNull);
   });
 }
