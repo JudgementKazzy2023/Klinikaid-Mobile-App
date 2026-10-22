@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/specialist_provider.dart';
+import '../../../auth/domain/registration_validators.dart';
 
 class AddPatientForm extends StatefulWidget {
   const AddPatientForm({super.key});
@@ -108,7 +109,7 @@ class AddPatientFormState extends State<AddPatientForm> {
         lastName: _lastNameController.text.trim(),
         dob: selectedDob!,
         gender: _gender,
-        contactNumber: _contactController.text.trim(),
+        contactNumber: RegistrationValidators.normalizeContactNumber(_contactController.text),
         email: _emailController.text.trim(),
         address: _addressController.text.trim(),
       );

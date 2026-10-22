@@ -110,7 +110,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       lastName: _lastNameController.text.trim(),
       dateOfBirth: _selectedDateOfBirth!,
       gender: _selectedGender,
-      contactNumber: _contactController.text.trim(),
+      contactNumber: RegistrationValidators.normalizeContactNumber(_contactController.text),
       address: _addressController.text.trim(),
     );
 

@@ -227,7 +227,7 @@ void main() {
       await tester.pump();
 
       // Inline validator error should show
-      expect(find.textContaining('Min 8 characters'), findsOneWidget);
+      expect(find.textContaining('at least 8 characters'), findsOneWidget);
 
       // Button still disabled
       final btn = tester.widget<ElevatedButton>(
