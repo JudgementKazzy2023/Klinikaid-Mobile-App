@@ -4,6 +4,7 @@ import '../../../../core/models/chatbot_log.dart';
 import '../../../../core/models/rag_document.dart';
 import '../../../../core/models/system_log.dart';
 import '../../../../core/models/patient_queue.dart';
+import '../../../../core/permissions/permission_source.dart';
 import '../../../../core/repositories/rag_documents_repository.dart';
 import '../../../records/domain/record_grouper.dart';
 import '../../../department/data/department_repository.dart';
@@ -21,7 +22,9 @@ class AdminProvider extends ChangeNotifier {
     AdminRepository? repository,
     RagDocumentsRepository? ragRepository,
     DepartmentRepository? deptRepository,
-  })  : _repository = repository ?? AdminRepository(),
+    PermissionSource? permissionSource,
+  })  : _repository = repository ??
+            AdminRepository(permissionSource: permissionSource),
         _ragRepository = ragRepository ?? RagDocumentsRepository(),
         _deptRepository = deptRepository ?? DepartmentRepository();
 

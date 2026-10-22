@@ -4,6 +4,8 @@ import '../../../../core/models/profile.dart';
 import '../../../../core/models/chatbot_log.dart';
 import '../../../../core/models/system_log.dart';
 import '../../../../core/models/department_record.dart';
+import '../../../../core/permissions/permission_source.dart';
+import '../../../../core/permissions/web_operation_permissions.dart';
 import '../../../../core/supabase/paged_read.dart';
 import '../../../../core/supabase/supabase_client.dart';
 import '../domain/admin_rbac.dart';
@@ -67,8 +69,31 @@ class ChatbotAuditPage {
 }
 
 class AdminRepository {
-  AdminRepository({SupabaseClient? client}) : _client = client ?? SupabaseService.client;
+  AdminRepository({
+    SupabaseClient? client,
+    this.permissionSource,
+  }) : _client = client ?? SupabaseService.client;
+
   final SupabaseClient _client;
+
+  /// The permissions of the signed-in account, when the caller knows them.
+  ///
+  /// The repository asks it before a read or a write that the web gates on
+  /// a permission, so the app does not start a side effect it is not allowed
+  /// to make. This is a client-side preflight only: the shared backend checks
+  /// the same permissions again on every request, and the server stays the
+  /// authority.
+  final PermissionSource? permissionSource;
+
+  /// Stops the operation when the account does not hold [required].
+  ///
+  /// The check runs before the operation starts, never after it.
+  void _preflight(String operation, List<String> required) {
+    final source = permissionSource;
+    if (source == null) return;
+    if (source.hasAllPermissions(required)) return;
+    throw PermissionDeniedException(operation, required);
+  }
 
   DateTime phtStartOfTodayUtc() {
     final phtNow = DateTime.now().toUtc().add(const Duration(hours: 8));
@@ -561,7 +586,12 @@ class AdminRepository {
     }
   }
 
+  /// The staff the clinic holds, without the patients and the administrators.
+  ///
+  /// Pinned to the permission the web requires for the same read (web:
+  /// `GET /api/admin/staff` requires `staff.manage`).
   Future<List<Profile>> getStaffPersonnel() async {
+    _preflight('read the staff list', WebOperationPermissions.staffListRead);
     try {
       // Paged, so a staff member past the server's row cap is still listed,
       // and ordered totally (name, then the primary key) so two staff members
@@ -585,7 +615,13 @@ class AdminRepository {
     }
   }
 
+  /// The role catalogue: the roles, the permissions and the mappings.
+  ///
+  /// Pinned to the permission the web requires for the same read (web: the
+  /// `/admin/roles` page and the read-only catalogue the staff form uses
+  /// both require `roles.read`).
   Future<AdminRbacCatalog> getRbacCatalog() async {
+    _preflight('read the role catalogue', WebOperationPermissions.roleCatalogueRead);
     try {
       final rolesResponse = await _client
           .from('roles')
@@ -638,10 +674,19 @@ class AdminRepository {
     }
   }
 
+  /// Activates or deactivates a staff member.
+  ///
+  /// Pinned to the permissions the web requires for the same write (web:
+  /// `PATCH /api/admin/staff/[id]` requires `staff.manage` and preflights
+  /// `profiles.manage` before it changes the account status). The check runs
+  /// before the write, so the app does not start a change it is not allowed
+  /// to make. The server checks the same permissions again.
   Future<Profile> setStaffActive({
     required String userId,
     required bool isActive,
   }) async {
+    _preflight('change a staff account status',
+        WebOperationPermissions.staffStatusUpdate);
     try {
       final response = await _client
           .from('profiles')
@@ -656,11 +701,17 @@ class AdminRepository {
     }
   }
 
+  /// Changes the legacy role text of a staff member.
+  ///
+  /// Pinned to the permissions the web requires for the same write, the same
+  /// set the complete staff update needs.
   Future<Profile> updateStaffRole({
     required String userId,
     required String role,
     String? department,
   }) async {
+    _preflight('change the role of a staff member',
+        WebOperationPermissions.staffProfileUpdate);
     try {
       // Normalize department: if role is not department_staff, must be null
       final normalizedDept = role == 'department_staff' ? department : null;
@@ -680,6 +731,14 @@ class AdminRepository {
     }
   }
 
+  /// Changes the profile of a staff member: name, role, department and
+  /// position titles.
+  ///
+  /// Pinned to the permissions the web requires for the same write (web:
+  /// `PUT /api/admin/staff/[id]` requires `staff.manage` and preflights
+  /// `roles.read` and `profiles.manage` before it touches the account). The
+  /// check runs before the write, so the app does not start a change it is
+  /// not allowed to make. The server checks the same permissions again.
   Future<Profile> updateStaffProfile({
     required String userId,
     required String fullName,
@@ -688,6 +747,7 @@ class AdminRepository {
     String? department,
     String? employeeType,
   }) async {
+    _preflight('update a staff member', WebOperationPermissions.staffProfileUpdate);
     try {
       final normalizedDept = role == 'department_staff' ? department : null;
       final normalizedEmployeeType = employeeType?.trim();
@@ -712,7 +772,14 @@ class AdminRepository {
     }
   }
 
+  /// Removes a RAG knowledge document.
+  ///
+  /// Pinned to the permission the web requires for the same write (web: the
+  /// `/admin/rag` page and its delete action require
+  /// `rag_documents.manage`). The check runs before the delete.
   Future<void> deleteRagDocument({required String documentId}) async {
+    _preflight('delete a knowledge document',
+        WebOperationPermissions.ragDocumentDelete);
     try {
       await _client
           .from('rag_documents')

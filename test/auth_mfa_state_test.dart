@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:klinikaid_mobile/core/models/patient.dart';
 import 'package:klinikaid_mobile/core/models/profile.dart';
+import 'package:klinikaid_mobile/core/permissions/permission_constants.dart';
 import 'package:klinikaid_mobile/core/permissions/permission_service.dart';
 import 'package:klinikaid_mobile/core/repositories/patients_repository.dart';
 import 'package:klinikaid_mobile/core/repositories/profiles_repository.dart';
@@ -160,14 +161,14 @@ class MockPermissionService implements PermissionService {
   Completer<Set<String>>? gate;
 
   @override
-  Future<Set<String>> loadPermissionsForRole(String roleId) async {
+  Future<Set<String>> loadPermissions() async {
     final pending = gate;
     if (pending != null) {
       gate = null;
       return pending.future;
     }
     if (shouldFail) {
-      throw Exception('Mock permission load failed');
+      throw const PermissionLoadException('Mock permission load failed');
     }
     return permissions;
   }
@@ -525,10 +526,10 @@ void main() {
 
       expect(provider.user, isNull);
       expect(provider.permissions, isEmpty);
-      expect(provider.permissionFallbackActive, isFalse);
+      expect(provider.permissionLoadState, PermissionLoadState.idle);
     });
 
-    test('late permission load failure after sign-out cannot activate the routing fallback',
+    test('late permission load failure after sign-out cannot leave a failure state',
         () async {
       final permGate = Completer<Set<String>>();
       permissionService.gate = permGate;
@@ -544,7 +545,7 @@ void main() {
 
       expect(provider.user, isNull);
       expect(provider.permissions, isEmpty);
-      expect(provider.permissionFallbackActive, isFalse);
+      expect(provider.permissionLoadState, PermissionLoadState.idle);
     });
 
     test('late activity restore cannot log out a newer signed-in identity',
@@ -849,6 +850,13 @@ void main() {
       profilesRepo.profilesById['user-b'] = receptionistProfile();
       mfaService.stepUpRequired = true;
       mfaService.verifiedFactorsByUserId['user-b'] = [makeFactor('factor-b2')];
+      // The screen B lands on is the one its permissions open, not the one
+      // its role text names: the receptionist holds the reception queue
+      // permissions.
+      permissionService.permissions = {
+        PermissionConstants.documentsManage,
+        PermissionConstants.queueManage,
+      };
       expect(await provider.signIn('b@clinic.test', 'password'),
           LoginOutcome.mfaRequired);
 

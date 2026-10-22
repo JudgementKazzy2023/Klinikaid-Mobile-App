@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import '../providers/admin_provider.dart';
 import '../../domain/admin_rbac.dart';
 import '../../../../core/models/profile.dart';
+import '../../../../core/permissions/permission_constants.dart';
+import '../../../../core/permissions/web_operation_permissions.dart';
 import '../../../../core/utils/role_formatter.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 
@@ -34,6 +36,19 @@ class _AdminStaffScreenState extends State<AdminStaffScreen> {
     super.dispose();
   }
 
+  /// The signed-in account, when the screen is shown under one.
+  ///
+  /// The screen is also rendered in tests and previews without the auth
+  /// provider above it, so the lookup is defensive: a missing provider means
+  /// "no permissions are known here", not a crash.
+  AuthProvider? _authProvider(BuildContext context) {
+    try {
+      return Provider.of<AuthProvider>(context, listen: false);
+    } catch (_) {
+      return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -41,6 +56,13 @@ class _AdminStaffScreenState extends State<AdminStaffScreen> {
     if (provider.rbacRoles.isEmpty && !provider.isRbacLoading && provider.rbacError == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
+          // The role catalogue is read under the permission the web requires
+          // for the same read (`roles.read`). An account without it does not
+          // ask for the catalogue at all.
+          final auth = _authProvider(context);
+          if (auth != null && !auth.hasPermission(PermissionConstants.rolesRead)) {
+            return;
+          }
           Provider.of<AdminProvider>(context, listen: false).loadRbacCatalog();
         }
       });
@@ -167,9 +189,9 @@ class _AdminStaffScreenState extends State<AdminStaffScreen> {
   }
 
   void _showEditStaffSheet(BuildContext context, Profile staff) {
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final adminProvider = Provider.of<AdminProvider>(context, listen: false);
-    final currentUserId = authProvider.user?.id;
+    final authProvider = _authProvider(context);
+    final currentUserId = authProvider?.user?.id;
     final isOwnAccount = staff.id == currentUserId;
 
     showModalBottomSheet<void>(
@@ -186,15 +208,46 @@ class _AdminStaffScreenState extends State<AdminStaffScreen> {
           rolesLoading: adminProvider.isRbacLoading,
           onSave: (isActive, selectedRole, department, fullName, employeeType) async {
             final scaffoldMessenger = ScaffoldMessenger.of(context);
+            final roleChanged = selectedRole.id != staff.roleId ||
+                selectedRole.legacyProfileRole != staff.role.toJsonValue();
+            final profileChanged = fullName.trim() != staff.fullName.trim() ||
+                employeeType.trim() != (staff.employeeType ?? '').trim() ||
+                department?.toJsonValue() != staff.department?.toJsonValue();
+            final statusChanged = isActive != staff.isActive;
+
+            // The preflight runs before the first side effect and asks for
+            // every permission the web requires for the same write: the status
+            // write needs `staff.manage` and `profiles.manage` (web:
+            // `PATCH /api/admin/staff/[id]`), the profile write needs
+            // `staff.manage`, `roles.read` and `profiles.manage` (web:
+            // `PUT /api/admin/staff/[id]`).
+            //
+            // This is a client-side preflight only. The shared backend checks
+            // the same permissions again on every request, and the server
+            // stays the authority.
+            final required = <String>[
+              if (statusChanged) ...WebOperationPermissions.staffStatusUpdate,
+              if (roleChanged || profileChanged)
+                ...WebOperationPermissions.staffProfileUpdate,
+            ];
+            if (required.isNotEmpty &&
+                authProvider != null &&
+                !authProvider.hasAllPermissions(required)) {
+              scaffoldMessenger.showSnackBar(
+                SnackBar(
+                  content: Text(
+                    'This account cannot make that change. It needs: ${required.join(', ')}.',
+                  ),
+                  backgroundColor: Colors.red,
+                ),
+              );
+              return;
+            }
+
             try {
-              if (isActive != staff.isActive) {
+              if (statusChanged) {
                 await adminProvider.toggleStaffActive(staff.id, isActive);
               }
-              final roleChanged = selectedRole.id != staff.roleId ||
-                  selectedRole.legacyProfileRole != staff.role.toJsonValue();
-              final profileChanged = fullName.trim() != staff.fullName.trim() ||
-                  employeeType.trim() != (staff.employeeType ?? '').trim() ||
-                  department?.toJsonValue() != staff.department?.toJsonValue();
               if (roleChanged || profileChanged) {
                 await adminProvider.editStaffProfile(
                   userId: staff.id,
@@ -715,7 +768,8 @@ class _EditStaffSheetState extends State<_EditStaffSheet> {
             const Center(child: CircularProgressIndicator())
           else if (rolesUnavailable)
             Text(
-              'Role catalog unavailable. Pull to refresh Staff Management.',
+              'Role catalog unavailable. Changing the role of a staff member needs the '
+              'roles.read permission; pull to refresh Staff Management.',
               style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
             )
           else
@@ -789,7 +843,9 @@ class _EditStaffSheetState extends State<_EditStaffSheet> {
           
           // Footnote
           Text(
-            'Account creation and password resets are managed on the web portal.',
+            'This form changes the staff profile. The sign-in account, its role '
+            'mirror and the audit trail are updated on the web portal, together with '
+            'account creation and password resets.',
             style: TextStyle(
               fontSize: 11,
               fontStyle: FontStyle.italic,

@@ -11,6 +11,8 @@ import 'package:klinikaid_mobile/features/reception/domain/submission_status.dar
 import 'package:klinikaid_mobile/features/reception/domain/recent_triage_entry.dart';
 import 'package:klinikaid_mobile/core/models/patient_queue.dart';
 import 'package:klinikaid_mobile/core/models/profile.dart';
+import 'package:klinikaid_mobile/core/permissions/permission_constants.dart';
+import 'package:klinikaid_mobile/core/permissions/permission_service.dart';
 import 'package:klinikaid_mobile/features/reception/presentation/providers/reception_queue_provider.dart';
 import 'package:klinikaid_mobile/features/reception/presentation/providers/reception_dashboard_provider.dart';
 import 'package:klinikaid_mobile/features/reception/presentation/screens/reception_queue_screen.dart';
@@ -216,6 +218,19 @@ class MockJourneyAuthProvider extends AuthProvider {
 
   @override
   Profile? get profile => _mockProfile;
+
+  // The journey runs as a receptionist, so the account holds the permissions
+  // the shared backend grants that role. The app routes by these, not by the
+  // role text on the profile.
+  @override
+  Set<String> get permissions => {
+        PermissionConstants.documentsManage,
+        PermissionConstants.queueManage,
+        PermissionConstants.patientsManage,
+      };
+
+  @override
+  PermissionLoadState get permissionLoadState => PermissionLoadState.loaded;
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

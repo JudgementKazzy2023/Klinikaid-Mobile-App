@@ -42,8 +42,7 @@ class _DepartmentBottomNavBar extends StatelessWidget {
 
   List<_DepartmentNavItem> _items(BuildContext context) {
     final auth = Provider.of<AuthProvider>(context, listen: false);
-    final canRecords = auth.usesLegacyPermissionFallback ||
-        auth.hasAnyPermission(PermissionConstants.departmentRecordsAny);
+    final canRecords = auth.hasAnyPermission(PermissionConstants.departmentRecordsAny);
     return [
       if (canRecords)
         const _DepartmentNavItem(
@@ -82,6 +81,11 @@ class _DepartmentBottomNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = _items(context);
     final selectedIndex = _calculateSelectedIndex(context, items);
+
+    // A bar needs at least two entries to be a bar. An account that may open
+    // neither the queue nor the records keeps the profile entry only, and a
+    // one-entry bar is not a bar.
+    if (items.length < 2) return const SizedBox.shrink();
 
     return Container(
       decoration: BoxDecoration(
