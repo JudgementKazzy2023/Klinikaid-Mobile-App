@@ -26,9 +26,10 @@ class LabReferenceRange {
 }
 
 /// The refusal message for a value outside [range]'s plausible bounds, or null.
-String? labPlausibilityError(LabReferenceRange range, double value) {
+/// [entered] is echoed as typed, like web (`30.0` stays `30.0`).
+String? labPlausibilityError(LabReferenceRange range, double value, {String? entered}) {
   if (value >= range.plausibleMin && value <= range.plausibleMax) return null;
-  return '${range.parameter}: ${_fmt(value)} ${range.unit} is outside the possible range '
+  return '${range.parameter}: ${entered ?? _fmt(value)} ${range.unit} is outside the possible range '
       '(${_fmt(range.plausibleMin)}–${_fmt(range.plausibleMax)} ${range.unit}). '
       'Check the value and its unit.';
 }

@@ -171,7 +171,8 @@ class ResultEntryProvider extends ChangeNotifier {
         if (valStr.isNotEmpty) {
           enteredCount++;
           final parsed = double.tryParse(valStr);
-          if (parsed == null || validateLabValue(valStr) != null) {
+          // A trailing '.' is fine while typing but not as a stored value (web refuses "5.").
+          if (parsed == null || validateLabValue(valStr) != null || valStr.endsWith('.')) {
             _isLoading = false;
             _errorMessage = 'Invalid numeric input for "$param". Please enter numbers only.';
             notifyListeners();
@@ -179,7 +180,7 @@ class ResultEntryProvider extends ChangeNotifier {
           }
           final plausibilityError = kLabReferenceRanges
               .where((r) => r.parameter == param)
-              .map((r) => labPlausibilityError(r, parsed))
+              .map((r) => labPlausibilityError(r, parsed, entered: valStr))
               .firstOrNull;
           if (plausibilityError != null) {
             _isLoading = false;

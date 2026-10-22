@@ -99,7 +99,8 @@ class RecordEntryProvider extends ChangeNotifier {
 
         // Shared validation check
         final error = validateLabValue(textValue);
-        if (error != null) {
+        // A trailing '.' is fine while typing but not as a stored value (web refuses "5.").
+        if (error != null || textValue.endsWith('.')) {
           throw Exception('Value for $paramName must be a valid number.');
         }
 
@@ -114,7 +115,7 @@ class RecordEntryProvider extends ChangeNotifier {
           (r) => r.parameter == paramName,
           orElse: () => throw Exception('Reference range not found for $paramName.'),
         );
-        final plausibilityError = labPlausibilityError(range, parsedVal);
+        final plausibilityError = labPlausibilityError(range, parsedVal, entered: textValue);
         if (plausibilityError != null) throw Exception(plausibilityError);
 
         final isFemale = _patient!.gender.toLowerCase() == 'female';

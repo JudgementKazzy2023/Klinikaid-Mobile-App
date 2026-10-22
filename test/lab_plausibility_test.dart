@@ -75,8 +75,13 @@ void main() {
       expect(repo.rows!.single.testValue, '14');
     });
 
-    test('exponent and non-numeric forms are refused', () async {
-      for (final bad in ['1e1', 'NaN', 'Infinity']) {
+    test('the refusal message echoes the value as entered, like web', () async {
+      expect(await submitHemoglobin('30.0'), isFalse);
+      expect(provider.errorMessage, startsWith('Hemoglobin: 30.0 g/dL is outside'));
+    });
+
+    test('exponent, non-numeric and trailing-dot forms are refused', () async {
+      for (final bad in ['1e1', 'NaN', 'Infinity', '5.']) {
         expect(await submitHemoglobin(bad), isFalse, reason: bad);
         expect(repo.rows, isNull, reason: bad);
       }
