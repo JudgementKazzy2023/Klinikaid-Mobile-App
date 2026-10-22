@@ -729,10 +729,25 @@ class AuthProvider extends ChangeNotifier {
             updatedAt: DateTime.now(),
           );
     } on PatientProvisioningException catch (e) {
-      _errorMessage = e.message;
-      if (!e.functionRan) {
-        await _verificationService.deletePendingUser();
+      if (e.outcome == PatientProvisioningOutcome.uncertain) {
+        // The function may have created the row before the connection dropped.
+        // The account is kept either way: a pending account can be recovered,
+        // a deleted one cannot.
+        final resolved = await _resolveUncertainProvisioning(
+          firstName: firstName,
+          lastName: lastName,
+          dateOfBirth: dateOfBirth,
+          gender: gender,
+          contactNumber: contactNumber,
+          email: email,
+          address: address,
+        );
+        if (resolved != null) {
+          return resolved;
+        }
       }
+
+      _errorMessage = e.message;
       await _client.auth.signOut().catchError((_) {});
       _user = null;
       _session = null;
@@ -744,6 +759,51 @@ class AuthProvider extends ChangeNotifier {
       _isOnboarded = false;
       _isLoading = false;
       notifyListeners();
+      return null;
+    }
+  }
+
+  /// Resolves a provisioning attempt whose outcome is unknown: the function
+  /// may already have created the patient row.
+  ///
+  /// The row is looked up first and the (now idempotent) function is retried
+  /// once, so a lost response never leaves the account without its patient row
+  /// and never deletes a working account.
+  Future<Patient?> _resolveUncertainProvisioning({
+    required String firstName,
+    required String lastName,
+    required DateTime dateOfBirth,
+    required Gender gender,
+    required String contactNumber,
+    required String email,
+    required String address,
+  }) async {
+    final userId = _user?.id;
+    if (userId == null) {
+      return null;
+    }
+
+    try {
+      final existing = await _patientsRepo.getPatientByProfileId(userId);
+      if (existing != null) {
+        return existing;
+      }
+    } catch (_) {
+      // The lookup failed (for example the device is offline); the retry
+      // below is the second chance.
+    }
+
+    try {
+      return await _patientProvisioningService.createPatientRecord(
+        firstName: firstName,
+        lastName: lastName,
+        dateOfBirth: dateOfBirth,
+        gender: gender,
+        contactNumber: contactNumber,
+        email: email,
+        address: address,
+      );
+    } on PatientProvisioningException {
       return null;
     }
   }

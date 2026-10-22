@@ -88,6 +88,15 @@ class ThrowingPatientsRepository extends PatientsRepository {
   Future<Patient?> getPatientByProfileId(String profileId) async => null;
 }
 
+class FakePatientsRepository extends PatientsRepository {
+  final Patient? patient;
+
+  FakePatientsRepository(this.patient);
+
+  @override
+  Future<Patient?> getPatientByProfileId(String profileId) async => patient;
+}
+
 class FakeVerificationService implements VerificationService {
   bool sendCodeCalled = false;
   bool deletePendingUserCalled = false;
@@ -115,7 +124,7 @@ class FakeVerificationService implements VerificationService {
 
 AuthProvider buildProvider({
   required MockGoTrueClient auth,
-  required ThrowingPatientsRepository patientsRepo,
+  required PatientsRepository patientsRepo,
   required FakeVerificationService verificationService,
   required PatientProvisioningService provisioningService,
 }) {
@@ -206,7 +215,7 @@ void main() {
       final verificationService = FakeVerificationService();
       final provisioningService = MockPatientProvisioningService()
         ..shouldFail = true
-        ..functionRan = true;
+        ..outcome = PatientProvisioningOutcome.rejected;
       final provider = buildProvider(
         auth: auth,
         patientsRepo: patientsRepo,
@@ -231,13 +240,77 @@ void main() {
       expect(patientsRepo.createPatientCalls, 0);
     });
 
-    test('invoke network failure calls deletePendingUser before local sign out', () async {
+    test('uncertain outcome keeps the account and uses the existing patient row', () async {
+      final auth = MockGoTrueClient();
+      final patientsRepo = FakePatientsRepository(patient());
+      final verificationService = FakeVerificationService();
+      final provisioningService = MockPatientProvisioningService()
+        ..shouldFail = true
+        ..outcome = PatientProvisioningOutcome.uncertain;
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: patientsRepo,
+        verificationService: verificationService,
+        provisioningService: provisioningService,
+      );
+
+      final success = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(success, true);
+      expect(verificationService.deletePendingUserCalled, false);
+      expect(provider.patient?.profileId, 'auth-user-1');
+      expect(provisioningService.callCount, 1);
+      expect(auth.signOutCalled, false);
+    });
+
+    test('uncertain outcome retries the idempotent function when no row exists', () async {
+      final auth = MockGoTrueClient();
+      final patientsRepo = ThrowingPatientsRepository();
+      final verificationService = FakeVerificationService();
+      final provisioningService = MockPatientProvisioningService()
+        ..outcome = PatientProvisioningOutcome.uncertain
+        ..failFirstCalls = 1
+        ..patient = patient();
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: patientsRepo,
+        verificationService: verificationService,
+        provisioningService: provisioningService,
+      );
+
+      final success = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(success, true);
+      expect(provisioningService.callCount, 2);
+      expect(verificationService.deletePendingUserCalled, false);
+      expect(provider.patient?.profileId, 'auth-user-1');
+    });
+
+    test('invoke network failure never deletes the pending user', () async {
       final auth = MockGoTrueClient();
       final patientsRepo = ThrowingPatientsRepository();
       final verificationService = FakeVerificationService();
       final provisioningService = MockPatientProvisioningService()
         ..shouldFail = true
-        ..functionRan = false;
+        ..outcome = PatientProvisioningOutcome.uncertain;
       final provider = buildProvider(
         auth: auth,
         patientsRepo: patientsRepo,
@@ -257,9 +330,10 @@ void main() {
       );
 
       expect(success, false);
-      expect(verificationService.deletePendingUserCalled, true);
+      expect(verificationService.deletePendingUserCalled, false);
       expect(auth.signOutCalled, true);
       expect(patientsRepo.createPatientCalls, 0);
+      expect(provisioningService.callCount, 2);
     });
   });
 }
