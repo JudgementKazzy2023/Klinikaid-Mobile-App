@@ -132,6 +132,36 @@ class LocalDatabase extends _$LocalDatabase {
         .get();
   }
 
+  /// Replaces the cached documents of [uploaderId] with [documents].
+  ///
+  /// Rows the server no longer returns are dropped, and an empty [documents]
+  /// list clears that uploader's cache entirely. A successful read that returns
+  /// nothing means the account has no submissions, not that the old ones are
+  /// still valid. Other accounts' cached documents are left untouched, and the
+  /// offline upload queue is never touched.
+  Future<void> replaceDocumentsForUploader(
+    String uploaderId,
+    List<CachedDocument> documents,
+  ) async {
+    await transaction(() async {
+      final ids = documents.map((doc) => doc.id).toList();
+      if (ids.isEmpty) {
+        await (delete(cachedDocuments)
+              ..where((t) => t.uploaderId.equals(uploaderId)))
+            .go();
+      } else {
+        await (delete(cachedDocuments)
+              ..where((t) => t.uploaderId.equals(uploaderId) & t.id.isNotIn(ids)))
+            .go();
+      }
+      if (documents.isNotEmpty) {
+        await batch((batch) {
+          batch.insertAllOnConflictUpdate(cachedDocuments, documents);
+        });
+      }
+    });
+  }
+
   Future<void> cacheQueueEntries(List<CachedPatientQueue> entries) async {
     await batch((batch) {
       batch.insertAllOnConflictUpdate(cachedPatientQueues, entries);
