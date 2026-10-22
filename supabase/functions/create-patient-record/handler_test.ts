@@ -371,7 +371,7 @@ Deno.test("keeps an account that is not a brand new signup when the insert fails
   assertEquals(db.deletedUsers.length, 0, "an existing account is never deleted");
 });
 
-Deno.test("keeps the account when the patient row appeared while the insert failed", async () => {
+Deno.test("returns the row an overlapping call inserted when this insert fails", async () => {
   const db = createDatabase({
     profiles: [{ id: "user-1", role: "patient" }],
     patients: [{
@@ -393,7 +393,10 @@ Deno.test("keeps the account when the patient row appeared while the insert fail
 
   const response = await handler(buildRequest(validBody));
 
-  assertEquals(response.status, 500, "the failed insert is reported");
+  assertEquals(response.status, 200, "the patient has a record, so the call succeeds");
+  const json = await response.json();
+  assertEquals(json.created, false, "the existing row is returned, not a new one");
+  assertEquals(json.patient.id, "patient-1", "the row the overlapping call wrote");
   assertEquals(db.deletedUsers.length, 0, "the account is kept when a row exists");
 });
 

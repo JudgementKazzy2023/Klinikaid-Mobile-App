@@ -427,7 +427,17 @@ export function createCreatePatientRecordHandler(
 
     if (insertError) {
       console.error(`Patient insert failed for ${user.id}: ${insertError.message}`);
-      return await handleInsertFailure(deps, user, insertError.message, now());
+
+      // An overlapping call can insert the row between the lookup above and
+      // this insert; with the unique index on patients.profile_id the second
+      // insert then fails. The patient has a record, so that is a success.
+      const racedResult = await findPatientByProfileId(serviceClient, user.id);
+      const raced = racedResult.error ? null : racedResult.data?.[0] ?? null;
+      if (raced) {
+        return jsonResponse({ success: true, patient: raced, created: false }, 200);
+      }
+
+      return await handleInsertFailure(deps, user, now());
     }
 
     return jsonResponse({ success: true, patient, created: true }, 200);
@@ -442,14 +452,13 @@ export function createCreatePatientRecordHandler(
 async function handleInsertFailure(
   deps: HandlerDeps,
   user: AuthUser,
-  insertMessage: string,
   now: Date,
 ): Promise<Response> {
   const serviceClient = deps.serviceClient;
 
   if (!isBrandNewAccount(user, now)) {
     return jsonResponse(
-      { error: "patient_insert_failed", message: `Patient provisioning failed: ${insertMessage}` },
+      { error: "patient_insert_failed", message: "Patient provisioning failed." },
       500,
     );
   }
@@ -457,7 +466,7 @@ async function handleInsertFailure(
   const stillMissing = await findPatientByProfileId(serviceClient, user.id);
   if (stillMissing.error || (stillMissing.data?.length ?? 0) > 0) {
     return jsonResponse(
-      { error: "patient_insert_failed", message: `Patient provisioning failed: ${insertMessage}` },
+      { error: "patient_insert_failed", message: "Patient provisioning failed." },
       500,
     );
   }
@@ -468,14 +477,14 @@ async function handleInsertFailure(
     return jsonResponse(
       {
         error: "cleanup_failed",
-        message: `Patient provisioning failed and cleanup failed: ${deleteError.message}`,
+        message: "Patient provisioning failed and cleanup failed.",
       },
       500,
     );
   }
 
   return jsonResponse(
-    { error: "patient_insert_failed", message: `Patient provisioning failed: ${insertMessage}` },
+    { error: "patient_insert_failed", message: "Patient provisioning failed." },
     500,
   );
 }
