@@ -114,6 +114,8 @@ class RecordEntryProvider extends ChangeNotifier {
           (r) => r.parameter == paramName,
           orElse: () => throw Exception('Reference range not found for $paramName.'),
         );
+        final plausibilityError = labPlausibilityError(range, parsedVal);
+        if (plausibilityError != null) throw Exception(plausibilityError);
 
         final isFemale = _patient!.gender.toLowerCase() == 'female';
         final refMin = isFemale ? range.femaleMin : range.maleMin;

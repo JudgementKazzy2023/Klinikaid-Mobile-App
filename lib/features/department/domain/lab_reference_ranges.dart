@@ -8,6 +8,11 @@ class LabReferenceRange {
   final double femaleMin;
   final double femaleMax;
 
+  /// Outside this range the value is not a measurement (a typo or wrong unit),
+  /// so it is refused rather than saved as flagged. Mirrors web `plausibleMin/Max`.
+  final double plausibleMin;
+  final double plausibleMax;
+
   const LabReferenceRange({
     required this.parameter,
     required this.unit,
@@ -15,8 +20,20 @@ class LabReferenceRange {
     required this.maleMax,
     required this.femaleMin,
     required this.femaleMax,
+    this.plausibleMin = double.negativeInfinity,
+    this.plausibleMax = double.infinity,
   });
 }
+
+/// The refusal message for a value outside [range]'s plausible bounds, or null.
+String? labPlausibilityError(LabReferenceRange range, double value) {
+  if (value >= range.plausibleMin && value <= range.plausibleMax) return null;
+  return '${range.parameter}: ${_fmt(value)} ${range.unit} is outside the possible range '
+      '(${_fmt(range.plausibleMin)}–${_fmt(range.plausibleMax)} ${range.unit}). '
+      'Check the value and its unit.';
+}
+
+String _fmt(double v) => v == v.roundToDouble() ? v.toInt().toString() : v.toString();
 
 const List<LabReferenceRange> kLabReferenceRanges = [
   LabReferenceRange(
@@ -26,6 +43,8 @@ const List<LabReferenceRange> kLabReferenceRanges = [
     maleMax: 17.5,
     femaleMin: 12.0,
     femaleMax: 15.5,
+    plausibleMin: 1,
+    plausibleMax: 25,
   ),
   LabReferenceRange(
     parameter: 'White Blood Cells (WBC)',
@@ -34,6 +53,8 @@ const List<LabReferenceRange> kLabReferenceRanges = [
     maleMax: 11.0,
     femaleMin: 4.5,
     femaleMax: 11.0,
+    plausibleMin: 0,
+    plausibleMax: 1000,
   ),
   LabReferenceRange(
     parameter: 'Platelets',
@@ -42,6 +63,8 @@ const List<LabReferenceRange> kLabReferenceRanges = [
     maleMax: 450.0,
     femaleMin: 150.0,
     femaleMax: 450.0,
+    plausibleMin: 0,
+    plausibleMax: 5000,
   ),
   LabReferenceRange(
     parameter: 'Fasting Blood Sugar (FBS)',
@@ -50,6 +73,8 @@ const List<LabReferenceRange> kLabReferenceRanges = [
     maleMax: 100.0,
     femaleMin: 70.0,
     femaleMax: 100.0,
+    plausibleMin: 5,
+    plausibleMax: 3000,
   ),
   LabReferenceRange(
     parameter: 'Creatinine',
@@ -58,6 +83,8 @@ const List<LabReferenceRange> kLabReferenceRanges = [
     maleMax: 1.2,
     femaleMin: 0.5,
     femaleMax: 1.1,
+    plausibleMin: 0.1,
+    plausibleMax: 40,
   ),
   LabReferenceRange(
     parameter: 'Cholesterol',
@@ -66,6 +93,8 @@ const List<LabReferenceRange> kLabReferenceRanges = [
     maleMax: 200.0,
     femaleMin: 100.0,
     femaleMax: 200.0,
+    plausibleMin: 20,
+    plausibleMax: 2000,
   ),
 ];
 

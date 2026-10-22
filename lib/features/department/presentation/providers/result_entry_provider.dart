@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../core/errors/failures.dart';
+import '../../../../core/utils/lab_validators.dart';
 import '../../data/department_repository.dart';
 import '../../domain/flag_calculator.dart';
 import '../../domain/lab_reference_ranges.dart';
@@ -170,9 +171,19 @@ class ResultEntryProvider extends ChangeNotifier {
         if (valStr.isNotEmpty) {
           enteredCount++;
           final parsed = double.tryParse(valStr);
-          if (parsed == null) {
+          if (parsed == null || validateLabValue(valStr) != null) {
             _isLoading = false;
             _errorMessage = 'Invalid numeric input for "$param". Please enter numbers only.';
+            notifyListeners();
+            return false;
+          }
+          final plausibilityError = kLabReferenceRanges
+              .where((r) => r.parameter == param)
+              .map((r) => labPlausibilityError(r, parsed))
+              .firstOrNull;
+          if (plausibilityError != null) {
+            _isLoading = false;
+            _errorMessage = plausibilityError;
             notifyListeners();
             return false;
           }
@@ -212,7 +223,7 @@ class ResultEntryProvider extends ChangeNotifier {
           department: 'laboratory',
           testType: _selectedLabGroup,
           testName: param,
-          testValue: val.toString(),
+          testValue: valStr, // as entered, like web (not "95.0")
           unit: range.unit,
           referenceRangeMin: resolvedMin,
           referenceRangeMax: resolvedMax,
