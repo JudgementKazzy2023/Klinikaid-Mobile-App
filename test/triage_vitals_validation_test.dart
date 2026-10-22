@@ -197,6 +197,10 @@ void main() {
       final bpField = find.byKey(const Key('bp_input_field'));
       expect(bpField, findsOneWidget);
       await tester.enterText(bpField, '120');
+      // Let the focused field relayout settle before scrolling the action row
+      // into view, otherwise the field's own "keep the caret visible" scroll
+      // races with ensureVisible and the tap lands off-screen.
+      await tester.pumpAndSettle();
 
       // Tap Confirm Routing
       final confirmBtn = find.text('Confirm Routing');
@@ -249,6 +253,9 @@ void main() {
       await tester.enterText(find.byKey(const Key('bp_input_field')), '120/80');
       await tester.enterText(find.byKey(const Key('weight_input_field')), '70.5');
       await tester.enterText(find.byKey(const Key('temp_input_field')), '36.5');
+      // Let the focused field relayout settle before scrolling the action row
+      // into view (see the invalid-vitals case above).
+      await tester.pumpAndSettle();
 
       // Tap Confirm Routing
       final confirmBtn = find.text('Confirm Routing');
@@ -282,6 +289,9 @@ void main() {
       await tester.pumpAndSettle();
       final field = find.byKey(const Key('bp_input_field'));
       await tester.enterText(field, '80/120');
+      // Let the focused field relayout settle before scrolling the action row
+      // into view (see the invalid-vitals case above).
+      await tester.pumpAndSettle();
       final confirm = find.text('Confirm Routing');
       await tester.ensureVisible(confirm);
       await tester.tap(confirm);
@@ -289,6 +299,7 @@ void main() {
       expect(calls, 0);
       expect(find.text('Systolic must be higher than diastolic.'), findsOneWidget);
       await tester.enterText(field, '120/80');
+      await tester.pumpAndSettle();
       await tester.ensureVisible(confirm);
       await tester.tap(confirm);
       await tester.pumpAndSettle();
