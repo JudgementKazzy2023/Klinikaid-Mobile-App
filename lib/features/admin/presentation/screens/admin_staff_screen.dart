@@ -121,14 +121,10 @@ class _AdminStaffScreenState extends State<AdminStaffScreen> {
         provider.isRbacLoaded || catalogueFailed || !canReadRoles;
     final roleFilterSelected = _roleFilter != kStaffFilterAll;
 
-    // A role the catalogue does not know is dropped, so the registry shows
-    // every staff member instead of an unexplained empty list.
-    final catalogueKnowsRole =
-        provider.rbacRoles.any((role) => role.id == _roleFilter);
-    final effectiveRoleFilter =
-        provider.isRbacLoaded && roleFilterSelected && !catalogueKnowsRole
-            ? kStaffFilterAll
-            : _roleFilter;
+    // A role the catalogue does not know (deleted on the web while it was
+    // selected) keeps its filter, the way the web keeps it: "no match" is
+    // truer than quietly showing every staff member under that role's name.
+    final effectiveRoleFilter = _roleFilter;
 
     final roleFilterPending = roleFilterSelected && !catalogueSettled;
     final roleFilterUnavailable =
@@ -289,7 +285,11 @@ class _AdminStaffScreenState extends State<AdminStaffScreen> {
       roleItems.add(DropdownMenuItem<String>(
         value: effectiveRoleFilter,
         child: Text(
-          catalogueFailed ? 'Role unavailable' : 'Loading roles...',
+          catalogueFailed
+              ? 'Role unavailable'
+              : provider.isRbacLoaded
+                  ? 'Unknown role'
+                  : 'Loading roles...',
           overflow: TextOverflow.ellipsis,
         ),
       ));

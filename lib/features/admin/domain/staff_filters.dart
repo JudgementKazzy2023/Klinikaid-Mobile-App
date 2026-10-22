@@ -132,9 +132,9 @@ StaffStatusFilter? parseStaffStatusFilter(String? raw) {
 
 /// Resolves a role id against the live catalogue.
 ///
-/// A role the catalogue does not know is dropped: the rows that carry it are
-/// not rows this registry holds, and a filter that keeps nothing would read
-/// as an empty clinic rather than as a filter nobody can satisfy.
+/// An id the catalogue does not know keeps its filter, as on the web
+/// (`resolveRoleFilter`): the rows that carry it are not rows this registry
+/// holds, and "no match" is truer than quietly dropping the chosen filter.
 StaffRoleFilter? resolveStaffRoleFilter(String? roleId, List<AdminRole> catalogue) {
   final id = (roleId ?? '').trim();
   if (id.isEmpty || id == kStaffFilterAll) return null;
@@ -142,7 +142,7 @@ StaffRoleFilter? resolveStaffRoleFilter(String? roleId, List<AdminRole> catalogu
     if (role.id != id) continue;
     return StaffRoleFilter(id: id, legacyName: role.isSystem ? role.name : null);
   }
-  return null;
+  return StaffRoleFilter(id: id, legacyName: null);
 }
 
 /// The filter the table applies: the chosen dimensions with the role id

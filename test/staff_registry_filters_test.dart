@@ -167,16 +167,16 @@ void main() {
       );
     });
 
-    test('a role the catalogue does not know is dropped', () {
+    test('a role the catalogue does not know keeps its filter, like the web', () {
       final filters = buildStaffFilters(
         roleId: kUnknownRoleId,
         catalogue: kCatalogue.roles,
       );
 
-      // The filter is dropped, so the registry shows everything instead of an
-      // unexplained empty list.
-      expect(filters.role, isNull);
-      expect(filterStaff(kRegistry, filters), hasLength(kRegistry.length));
+      // The filter is kept and matches no row of this registry.
+      expect(filters.role?.id, kUnknownRoleId);
+      expect(filters.role?.legacyName, isNull);
+      expect(filterStaff(kRegistry, filters), isEmpty);
     });
   });
 
@@ -505,7 +505,7 @@ void main() {
     provider.dispose();
   });
 
-  testWidgets('a role the catalogue does not know is dropped', (tester) async {
+  testWidgets('a role deleted from the catalogue keeps its filter as "Unknown role"', (tester) async {
     final repository = useRepository();
     final provider = useProvider(repository);
     await provider.loadStaff();
@@ -521,8 +521,9 @@ void main() {
     expect(find.text('Showing 1 of 5 personnel'), findsOneWidget);
 
     // The custom role is gone from the catalogue (it was deleted on the
-    // web). The selection is dropped, so the registry shows everything
-    // instead of an unexplained empty list.
+    // web). The selection is kept, as on the web: it is labelled
+    // "Unknown role" and still matches by role_id, so the profile that
+    // carries the deleted id is the one row it keeps.
     repository.catalogue = AdminRbacCatalog(
       roles: kCatalogue.roles
           .where((role) => role.id != kCustomRoleId)
@@ -532,7 +533,8 @@ void main() {
     await provider.loadRbacCatalog();
     await tester.pumpAndSettle();
 
-    expect(find.text('Showing 5 of 5 personnel'), findsOneWidget);
+    expect(find.text('Unknown role'), findsWidgets);
+    expect(find.text('Showing 1 of 5 personnel'), findsOneWidget);
     expect(find.text('Dan Custom'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
