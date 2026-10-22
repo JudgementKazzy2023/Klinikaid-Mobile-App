@@ -54,12 +54,27 @@ class AdminProvider extends ChangeNotifier {
   List<PatientQueue> _deptQueueEntries = [];
 
   bool _isLogsLoading = false;
+  bool _isLogsLoadingMore = false;
   String? _logsError;
+  String? _logsMoreError;
   List<SystemLog> _systemEvents = [];
+  int _systemEventsTotal = 0;
+
+  // The filters of the list on screen, so "load more" repeats the same read.
+  String? _logsEventType;
+  String? _logsUserId;
+  DateTime? _logsStartDate;
+  DateTime? _logsEndDate;
+  String? _logsTextSearch;
+  String? _logsUserSearchError;
+  List<Profile> _logUserOptions = [];
   
   bool _isChatbotLoading = false;
+  bool _isChatbotLoadingMore = false;
   String? _chatbotError;
+  String? _chatbotMoreError;
   List<ChatbotLog> _chatbotLogs = [];
+  int _chatbotTotal = 0;
   int _todayQueries = 0;
   int _todayTokens = 0;
   double _todayCost = 0.0;
@@ -81,6 +96,9 @@ class AdminProvider extends ChangeNotifier {
   bool get isStaffLoading => _isStaffLoading;
   String? get staffError => _staffError;
   List<Profile> get staffList => _staffList;
+
+  /// The exact number of staff the server counted.
+  int get staffTotal => _staffList.length;
 
   bool get isRbacLoading => _isRbacLoading;
   String? get rbacError => _rbacError;
@@ -104,9 +122,40 @@ class AdminProvider extends ChangeNotifier {
   String? get logsError => _logsError;
   List<SystemLog> get systemEvents => _systemEvents;
 
+  /// True while a "load more" page is on its way.
+  bool get isLogsLoadingMore => _isLogsLoadingMore;
+
+  /// The error of the last failed "load more"; the rows on screen stay.
+  String? get logsMoreError => _logsMoreError;
+
+  /// The exact number of events the current filter matched.
+  int get systemEventsTotal => _systemEventsTotal;
+
+  /// The error of the last failed user lookup of the log filter.
+  String? get logsUserSearchError => _logsUserSearchError;
+
+  /// The users the picker of the log filter offers.
+  List<Profile> get logUserOptions => _logUserOptions;
+
+  /// True when the list holds fewer events than the server counted.
+  bool get hasMoreSystemEvents => _systemEvents.length < _systemEventsTotal;
+
   bool get isChatbotLoading => _isChatbotLoading;
   String? get chatbotError => _chatbotError;
   List<ChatbotLog> get chatbotLogs => _chatbotLogs;
+
+  /// True while a "load more" page is on its way.
+  bool get isChatbotLoadingMore => _isChatbotLoadingMore;
+
+  /// The error of the last failed "load more"; the rows on screen stay.
+  String? get chatbotMoreError => _chatbotMoreError;
+
+  /// The exact number of chatbot logs the server counted.
+  int get chatbotTotal => _chatbotTotal;
+
+  /// True when the list holds fewer logs than the server counted.
+  bool get hasMoreChatbotLogs => _chatbotLogs.length < _chatbotTotal;
+
   int get todayQueries => _todayQueries;
   int get todayTokens => _todayTokens;
   double get todayCost => _todayCost;
@@ -244,23 +293,31 @@ class AdminProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> loadSystemEvents({String? eventType, String? userSearch, DateTime? startDate, DateTime? endDate, String? textSearch,}) async {
+  Future<void> loadSystemEvents({String? eventType, String? userId, DateTime? startDate, DateTime? endDate, String? textSearch,}) async {
     final request = ++_logsRequest;
     final isRefresh = _logsHadSuccess;
     _isLogsLoading = true;
     _logsError = null;
+    _logsMoreError = null;
     logsState = AdminReadState.loading;
     notifyListeners();
     try {
-      final events = await _repository.getSystemEvents(eventType: eventType, userSearch: userSearch, startDate: startDate, endDate: endDate, textSearch: textSearch);
+      final page = await _repository.getSystemEventsPage(eventType: eventType, userId: userId, startDate: startDate, endDate: endDate, textSearch: textSearch);
       if (request != _logsRequest) return;
-      _systemEvents = events;
+      _systemEvents = page.logs;
+      _systemEventsTotal = page.total;
+      // The filters of the list on screen, so "load more" repeats this read.
+      _logsEventType = eventType;
+      _logsUserId = userId;
+      _logsStartDate = startDate;
+      _logsEndDate = endDate;
+      _logsTextSearch = textSearch;
       _logsHadSuccess = true;
       logsState = AdminReadState.loaded;
     } catch (e) {
       if (request != _logsRequest) return;
       // Initial failures have no prior payload; refresh failures must discard it.
-      if (isRefresh) { _systemEvents = []; }
+      if (isRefresh) { _systemEvents = []; _systemEventsTotal = 0; }
       _logsError = 'Could not load system events. Check your connection or access and retry.';
       logsState = AdminReadState.failed;
     } finally {
@@ -271,27 +328,82 @@ class AdminProvider extends ChangeNotifier {
     }
   }
 
+  /// The users whose name matches [term], at most a bounded number of them.
+  ///
+  /// The picker of the log filter needs a list to choose from, and the log
+  /// query itself takes the id of the chosen user.
+  Future<void> searchLogUsers(String term) async {
+    try {
+      _logUserOptions = await _repository.searchLogUsers(term);
+      _logsUserSearchError = null;
+    } catch (e) {
+      _logUserOptions = [];
+      _logsUserSearchError =
+          'Could not load the user list. Check your connection and retry.';
+    }
+    notifyListeners();
+  }
+
+  /// Forgets the offered users, so the picker closes after a choice.
+  void clearLogUserOptions() {
+    if (_logUserOptions.isEmpty) return;
+    _logUserOptions = [];
+    notifyListeners();
+  }
+
+  /// Appends the next page of the system event list.
+  ///
+  /// The same filters and the same order are used, so the page continues
+  /// where the last one stopped.
+  Future<void> loadMoreSystemEvents() async {
+    if (_isLogsLoading || _isLogsLoadingMore) return;
+    if (!hasMoreSystemEvents) return;
+    final request = _logsRequest;
+    _isLogsLoadingMore = true;
+    _logsMoreError = null;
+    notifyListeners();
+    try {
+      final page = await _repository.getSystemEventsPage(
+        eventType: _logsEventType,
+        userId: _logsUserId,
+        startDate: _logsStartDate,
+        endDate: _logsEndDate,
+        textSearch: _logsTextSearch,
+        offset: _systemEvents.length,
+      );
+      if (request != _logsRequest) return;
+      _systemEvents = [..._systemEvents, ...page.logs];
+    } catch (e) {
+      if (request != _logsRequest) return;
+      _logsMoreError = 'Could not load more events. Check your connection and retry.';
+    } finally {
+      _isLogsLoadingMore = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> loadChatbotAudit() async {
     final request = ++_chatbotRequest;
     final isRefresh = _chatbotHadSuccess;
     _isChatbotLoading = true;
     _chatbotError = null;
+    _chatbotMoreError = null;
     chatbotState = AdminReadState.loading;
     notifyListeners();
     try {
-      final data = await _repository.getChatbotAudit();
+      final page = await _repository.getChatbotAuditPage();
       if (request != _chatbotRequest) return;
-      final logs = data['logs'] as List<ChatbotLog>;
-      final queries = data['todayQueries'] as int;
-      final tokens = data['todayTokens'] as int;
-      final cost = data['todayCost'] as double;
-      _chatbotLogs = logs; _todayQueries = queries; _todayTokens = tokens; _todayCost = cost;
+      _chatbotLogs = page.logs;
+      _chatbotTotal = page.total;
+      _todayQueries = page.todayQueries;
+      _todayTokens = page.todayTokens;
+      _todayCost = page.todayCost;
       _chatbotHadSuccess = true;
       chatbotState = AdminReadState.loaded;
     } catch (e) {
       if (request != _chatbotRequest) return;
       // Initial failures have no prior payload; refresh failures must discard it.
-      if (isRefresh) { _chatbotLogs = []; _todayQueries = 0; _todayTokens = 0; _todayCost = 0; }
+      if (isRefresh) { _chatbotLogs = []; _chatbotTotal = 0; _todayQueries = 0; _todayTokens = 0; _todayCost = 0; }
       _chatbotError = 'Could not load chatbot audit. Check your connection or access and retry.';
       chatbotState = AdminReadState.failed;
     } finally {
@@ -299,6 +411,27 @@ class AdminProvider extends ChangeNotifier {
         _isChatbotLoading = false;
         notifyListeners();
       }
+    }
+  }
+
+  /// Appends the next page of the chatbot audit.
+  Future<void> loadMoreChatbotAudit() async {
+    if (_isChatbotLoading || _isChatbotLoadingMore) return;
+    if (!hasMoreChatbotLogs) return;
+    final request = _chatbotRequest;
+    _isChatbotLoadingMore = true;
+    _chatbotMoreError = null;
+    notifyListeners();
+    try {
+      final page = await _repository.getChatbotAuditPage(offset: _chatbotLogs.length);
+      if (request != _chatbotRequest) return;
+      _chatbotLogs = [..._chatbotLogs, ...page.logs];
+    } catch (e) {
+      if (request != _chatbotRequest) return;
+      _chatbotMoreError = 'Could not load more logs. Check your connection and retry.';
+    } finally {
+      _isChatbotLoadingMore = false;
+      notifyListeners();
     }
   }
 

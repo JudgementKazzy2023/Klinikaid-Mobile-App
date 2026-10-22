@@ -156,6 +156,19 @@ class _SpecialistDirectoryScreenState extends State<SpecialistDirectoryScreen> {
                 ),
                 const SizedBox(height: 16),
 
+                // Roster count: the exact number of patients the server holds,
+                // and how many of them the current search keeps.
+                Text(
+                  provider.searchResults.length == provider.directoryTotal
+                      ? '${provider.directoryTotal} patient${provider.directoryTotal == 1 ? '' : 's'}'
+                      : '${provider.searchResults.length} of ${provider.directoryTotal} patients match',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
                 // Directory List Roster
                 Expanded(
                   child: provider.isLoading && provider.directoryPatients.isEmpty

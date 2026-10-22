@@ -38,6 +38,10 @@ class SpecialistProvider extends ChangeNotifier {
   List<Map<String, dynamic>> get criticalFlaggedResults => _criticalFlaggedResults;
   List<SpecialistPatient> get recentlyUpdatedPatients => _recentlyUpdatedPatients;
 
+  /// The exact number of private patients the server counted, not the number
+  /// that happened to fit in one response.
+  int get directoryTotal => _directoryPatients.length;
+
   /// Loads the private patient directory.
   Future<void> loadDirectory() async {
     _isLoading = true;
@@ -84,7 +88,8 @@ class SpecialistProvider extends ChangeNotifier {
     final records = rawData['records'] as List<SpecialistRecord>;
     final rawRecords = rawData['raw_records'] as List<dynamic>;
 
-    _totalPatients = patients.length;
+    // The server's exact count, so the tile does not report the size of one page.
+    _totalPatients = rawData['total_patients'] as int? ?? patients.length;
 
     // Flagged results in last 7 days
     final sevenDaysAgo = DateTime.now().subtract(const Duration(days: 7));
