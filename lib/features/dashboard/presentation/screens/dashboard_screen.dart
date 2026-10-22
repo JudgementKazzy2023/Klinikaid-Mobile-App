@@ -313,7 +313,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   ],
                                 )
                               : Text(
-                                  'Not currently in triage queue.',
+                                  // Mirror of the web patient dashboard's
+                                  // "Not In Queue": only a row still waiting
+                                  // or in progress counts as the queue, so a
+                                  // finished visit lands here instead of
+                                  // being shown as the current queue.
+                                  'Not In Queue',
                                   style: TextStyle(
                                     color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
                                     fontSize: 14,

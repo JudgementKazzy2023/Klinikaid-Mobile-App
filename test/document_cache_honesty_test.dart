@@ -702,7 +702,7 @@ void main() {
       expect(find.text('Pending Submissions'), findsNothing);
       expect(find.text('Latest Lab Result'), findsNothing);
       expect(find.text('No clinical records found.'), findsNothing);
-      expect(find.text('Not currently in triage queue.'), findsNothing);
+      expect(find.text('Not In Queue'), findsNothing);
     });
   });
 }
