@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../data/templates_repository.dart';
+import '../../document_templates.dart';
+import '../../template_answers.dart';
 import '../../../submissions/document_dedup.dart';
 
 class TemplatesProvider extends ChangeNotifier {
@@ -9,14 +11,78 @@ class TemplatesProvider extends ChangeNotifier {
   String? _errorMessage;
   bool _success = false;
 
+  /// The consent fields the patient declined in the last submission.
+  List<String> _declinedConsentFields = const <String>[];
+
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   bool get success => _success;
+
+  /// The consent fields the patient declined in the last submission.
+  ///
+  /// A declined form consent is a valid answer, not a failure: the form is
+  /// submitted and reception reviews the decline. It is kept apart from the
+  /// account's data-privacy consent, which the auth provider tracks on its
+  /// own — declining a clinic form never withdraws the account consent and
+  /// never trips the account consent gate.
+  List<String> get lastDeclinedConsentFields => _declinedConsentFields;
 
   void resetState() {
     _isLoading = false;
     _errorMessage = null;
     _success = false;
+    _declinedConsentFields = const <String>[];
+  }
+
+  /// The consent fields of [templateId] the patient declined in [formValues].
+  List<String> declinedFormConsentFields(
+    String templateId,
+    Map<String, dynamic> formValues,
+  ) {
+    final template = clinicTemplateById(templateId);
+    if (template == null) return const <String>[];
+    return declinedConsentFields(template, formValues)
+        .map((field) => field.key)
+        .toList();
+  }
+
+  /// The metadata stored with a template submission.
+  ///
+  /// Answers are stored trimmed, the way the shared rules count them, and a
+  /// declined consent is stored as the declined answer it is: the patient may
+  /// decline a clinic form, and reception reviews it. Only the form's own
+  /// questions are stored, so the shared review on the other client sees the
+  /// same fields the patient answered.
+  Map<String, dynamic> buildExtractedMetadata({
+    required String templateId,
+    required String templateName,
+    required Map<String, dynamic> formValues,
+    required String patientName,
+    String? dob,
+    String? contactNumber,
+    String? address,
+  }) {
+    final Map<String, dynamic> answers = {
+      for (final entry in formValues.entries)
+        entry.key: entry.value.toString().trim(),
+    };
+
+    final Map<String, dynamic> extractedMetadata = {
+      'template_id': templateId,
+      'template_name': templateName,
+      'submission_type': 'template',
+      'submitted_at': DateTime.now().toUtc().toIso8601String(),
+      'patient_name': patientName,
+      ...answers,
+    };
+
+    if (templateId == 'patient-intake') {
+      extractedMetadata['date_of_birth'] = dob ?? '';
+      extractedMetadata['contact_number'] = contactNumber ?? '';
+      extractedMetadata['address'] = address ?? '';
+    }
+
+    return extractedMetadata;
   }
 
   Future<bool> submitTemplate({
@@ -52,20 +118,19 @@ class TemplatesProvider extends ChangeNotifier {
         // the cause of the failure is.
         throw Exception("Could not check for a pending [$label] submission. Please check your connection and try again.");
       }
-      final Map<String, dynamic> extractedMetadata = {
-        'template_id': templateId,
-        'template_name': templateName,
-        'submission_type': 'template',
-        'submitted_at': DateTime.now().toUtc().toIso8601String(),
-        'patient_name': patientName,
-        ...formValues,
-      };
+      final extractedMetadata = buildExtractedMetadata(
+        templateId: templateId,
+        templateName: templateName,
+        formValues: formValues,
+        patientName: patientName,
+        dob: dob,
+        contactNumber: contactNumber,
+        address: address,
+      );
 
-      if (templateId == 'patient-intake') {
-        extractedMetadata['date_of_birth'] = dob ?? '';
-        extractedMetadata['contact_number'] = contactNumber ?? '';
-        extractedMetadata['address'] = address ?? '';
-      }
+      // A declined consent travels with the form; it never blocks the
+      // submission and it never touches the account's privacy consent.
+      _declinedConsentFields = declinedFormConsentFields(templateId, formValues);
 
       await _repository.submitTemplateDocument(
         patientId: patientId,
