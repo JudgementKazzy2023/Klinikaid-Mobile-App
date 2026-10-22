@@ -1,3 +1,10 @@
+/// Terms and Conditions content for KlinikAid Mobile.
+///
+/// Displayed in-app via a modal, following the same pattern as
+/// PrivacyPolicyContent. Defense-scope text; production deployment
+/// should have this reviewed by legal counsel before public release.
+///
+/// Points flagged for production legal review are marked in comments.
 class TermsAndConditionsContent {
   static const String termsText = '''
 KlinikAid Mobile — Terms and Conditions
