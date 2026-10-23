@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import '../../../../core/errors/failures.dart';
 import '../../../../core/supabase/supabase_client.dart';
 import '../templates/document_templates.dart';
@@ -123,7 +124,7 @@ Future<DuplicateCheckResult> checkPendingDuplicate(String patientId, String cate
     }
     return const DuplicateCheckResult.clear();
   } catch (e, stack) {
-    print("checkPendingDuplicate error: $e\n$stack");
+    debugPrint("checkPendingDuplicate error: $e\n$stack");
     return DuplicateCheckResult.failed(e);
   }
 }

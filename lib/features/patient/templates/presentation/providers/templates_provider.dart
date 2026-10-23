@@ -1,22 +1,73 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import '../../../../../core/patient_submission_containment.dart';
+import '../../../../../core/utils/uuid_generator.dart';
 import '../../data/templates_repository.dart';
 import '../../document_templates.dart';
 import '../../template_answers.dart';
 import '../../../submissions/document_dedup.dart';
 
+enum TemplateRemediation { none, signIn, verifyEmail, consent, changePassword }
+
 class TemplatesProvider extends ChangeNotifier {
-  final _repository = TemplatesRepository();
+  final TemplatesRepository _repository;
+  final Future<String?> Function(String, String) _checkDuplicate;
+  TemplatesProvider({
+    TemplatesRepository? repository,
+    Future<String?> Function(String, String)? checkDuplicate,
+  }) : _repository = repository ?? TemplatesRepository(),
+       _checkDuplicate =
+           checkDuplicate ??
+           ((patientId, category) async =>
+               (await checkPendingDuplicate(patientId, category)).duplicateDate);
 
   bool _isLoading = false;
-  String? _errorMessage;
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
   bool _success = false;
+  String? _errorMessage;
+  TemplateSubmissionError? _error;
+  TemplateSubmissionSuccess? _result;
+  String? _requestId;
+  String? _draftOwner;
+  String? _draftTemplate;
+  Map<String, String> _answers = {};
+  String? _advisoryMessage;
+  final Map<String, String> _fieldErrors = {};
+  TemplateRemediation _remediation = TemplateRemediation.none;
 
   /// The consent fields the patient declined in the last submission.
   List<String> _declinedConsentFields = const <String>[];
 
   bool get isLoading => _isLoading;
-  String? get errorMessage => _errorMessage;
   bool get success => _success;
+  String? get errorMessage => _errorMessage;
+  String? get requestId => _requestId;
+  String? get errorCode => _error?.code;
+  String? get duplicateDocumentId =>
+      _error?.code == 'DUPLICATE_PENDING' ? _error?.documentId : null;
+  TemplateSubmissionSuccess? get result => _result;
+  Map<String, String> get fieldErrors => Map.unmodifiable(_fieldErrors);
+  String? get advisoryMessage => _advisoryMessage;
+  TemplateRemediation get remediation => _remediation;
+  bool get outcomeUnknown => _error?.code == 'SERVER_ERROR';
+  bool get canSubmit =>
+      !_isLoading &&
+      !_success &&
+      (_error == null ||
+          outcomeUnknown ||
+          _error?.code == 'FIELD_REQUIRED' ||
+          _error?.code == 'FIELD_INVALID');
 
   /// The consent fields the patient declined in the last submission.
   ///
@@ -28,10 +79,20 @@ class TemplatesProvider extends ChangeNotifier {
   List<String> get lastDeclinedConsentFields => _declinedConsentFields;
 
   void resetState() {
-    _isLoading = false;
+    // UI status resets must not erase an uncertain request's identity.
+    if (_isLoading ||
+        outcomeUnknown ||
+        _error?.code == 'IDEMPOTENCY_CONFLICT' ||
+        _error?.code == 'RECONCILIATION_REQUIRED') {
+      return;
+    }
+    _error = null;
     _errorMessage = null;
     _success = false;
     _declinedConsentFields = const <String>[];
+    _result = null;
+    _fieldErrors.clear();
+    _remediation = TemplateRemediation.none;
   }
 
   /// The consent fields of [templateId] the patient declined in [formValues].
@@ -46,43 +107,65 @@ class TemplatesProvider extends ChangeNotifier {
         .toList();
   }
 
-  /// The metadata stored with a template submission.
-  ///
-  /// Answers are stored trimmed, the way the shared rules count them, and a
-  /// declined consent is stored as the declined answer it is: the patient may
-  /// decline a clinic form, and reception reviews it. Only the form's own
-  /// questions are stored, so the shared review on the other client sees the
-  /// same fields the patient answered.
-  Map<String, dynamic> buildExtractedMetadata({
-    required String templateId,
-    required String templateName,
-    required Map<String, dynamic> formValues,
-    required String patientName,
-    String? dob,
-    String? contactNumber,
-    String? address,
-  }) {
-    final Map<String, dynamic> answers = {
-      for (final entry in formValues.entries)
-        entry.key: entry.value.toString().trim(),
-    };
-
-    final Map<String, dynamic> extractedMetadata = {
-      'template_id': templateId,
-      'template_name': templateName,
-      'submission_type': 'template',
-      'submitted_at': DateTime.now().toUtc().toIso8601String(),
-      'patient_name': patientName,
-      ...answers,
-    };
-
-    if (templateId == 'patient-intake') {
-      extractedMetadata['date_of_birth'] = dob ?? '';
-      extractedMetadata['contact_number'] = contactNumber ?? '';
-      extractedMetadata['address'] = address ?? '';
+  void answersChanged(Map<String, String> answers) {
+    if (mapEquals(_answers, answers)) return;
+    _answers = Map.unmodifiable(answers);
+    _requestId = UuidGenerator.generateV4();
+    _fieldErrors.clear();
+    // Reconciliation errors remain blocked even if the patient edits.
+    if (_error?.code == 'FIELD_REQUIRED' ||
+        _error?.code == 'FIELD_INVALID' ||
+        outcomeUnknown) {
+      _error = null;
+      _errorMessage = null;
     }
+    notifyListeners();
+  }
 
-    return extractedMetadata;
+  void resumeAfterAccountFlow() {
+    if (_remediation == TemplateRemediation.none) return;
+    _error = null;
+    _errorMessage = null;
+    _remediation = TemplateRemediation.none;
+    notifyListeners();
+  }
+
+  void _applyError(TemplateSubmissionError error, String templateName) {
+    _error = error;
+    _errorMessage = error.message;
+    switch (error.code) {
+      case 'FIELD_REQUIRED':
+      case 'FIELD_INVALID':
+        if (error.field != null) _fieldErrors[error.field!] = error.message;
+      case 'DUPLICATE_PENDING':
+        _errorMessage = 'You already have a pending $templateName';
+      case 'IDEMPOTENCY_CONFLICT':
+      case 'RECONCILIATION_REQUIRED':
+        _errorMessage =
+            'Please contact the clinic before submitting again. '
+            'Your answers are still here.';
+      case 'UNAUTHENTICATED':
+        _remediation = TemplateRemediation.signIn;
+      case 'EMAIL_NOT_CONFIRMED':
+        _remediation = TemplateRemediation.verifyEmail;
+      case 'CONSENT_REQUIRED':
+        _remediation = TemplateRemediation.consent;
+      case 'PASSWORD_CHANGE_REQUIRED':
+        _remediation = TemplateRemediation.changePassword;
+      case 'UNKNOWN_TEMPLATE':
+      case 'UNKNOWN_FIELD':
+      case 'METHOD_NOT_ALLOWED':
+        _errorMessage = 'This app version is out of date.';
+      case 'PATIENT_ACCOUNT_REQUIRED':
+      case 'NO_PATIENT_RECORD':
+      case 'PROFILE_INACTIVE':
+      case 'SERVER_DATA_INVALID':
+      case 'AGE_REQUIREMENT_NOT_MET':
+        break; // Preserve the server's safe message; no retry.
+      default:
+        _error = TemplateSubmissionError.unknown;
+        _errorMessage = TemplateSubmissionError.unknown.message;
+    }
   }
 
   Future<bool> submitTemplate({
@@ -91,64 +174,90 @@ class TemplatesProvider extends ChangeNotifier {
     required String templateId,
     required String templateName,
     required Map<String, dynamic> formValues,
-    required String patientName,
+    // Retained for existing containment callers; never transmitted or injected.
+    String? patientName,
     String? dob,
     String? contactNumber,
     String? address,
   }) async {
-    _isLoading = true;
-    _errorMessage = null;
-    _success = false;
-    notifyListeners();
-
-    try {
-      final duplicateCheck = await checkPendingDuplicate(patientId, templateId);
-      final label = getCategoryLabel(templateId);
-      if (duplicateCheck.state == DuplicateCheckState.duplicate) {
-        throw Exception("You already have a pending [$label] submitted on ${duplicateCheck.duplicateDate}. You can submit a new one once it's reviewed.");
-      }
-      if (duplicateCheck.state == DuplicateCheckState.failed) {
-        // The existing documents could not be read, so the duplicate status is
-        // unknown. Do not submit as if it were unique: ask the patient to
-        // retry.
-        //
-        // Unlike the document upload path, template submissions have no
-        // offline queue to fall back on (TemplatesRepository only inserts the
-        // row in Postgres), so a failed check blocks the submission whatever
-        // the cause of the failure is.
-        throw Exception("Could not check for a pending [$label] submission. Please check your connection and try again.");
-      }
-      final extractedMetadata = buildExtractedMetadata(
-        templateId: templateId,
-        templateName: templateName,
-        formValues: formValues,
-        patientName: patientName,
-        dob: dob,
-        contactNumber: contactNumber,
-        address: address,
-      );
-
-      // A declined consent travels with the form; it never blocks the
-      // submission and it never touches the account's privacy consent.
-      _declinedConsentFields = declinedFormConsentFields(templateId, formValues);
-
-      await _repository.submitTemplateDocument(
-        patientId: patientId,
-        uploaderId: uploaderId,
-        templateId: templateId,
-        templateName: templateName,
-        extractedMetadata: extractedMetadata,
-      );
-
-      _success = true;
+    if (PatientSubmissionContainment.isActive) {
       _isLoading = false;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      _errorMessage = e.toString().replaceAll('Exception: ', '');
-      _isLoading = false;
+      _success = false;
+      _errorMessage = PatientSubmissionContainment.message;
       notifyListeners();
       return false;
     }
+    if (_isLoading) return false;
+    final owner = '$uploaderId/$patientId';
+    if (_draftOwner != owner || _draftTemplate != templateId) {
+      if (_draftOwner != null &&
+          (outcomeUnknown ||
+              _error?.code == 'IDEMPOTENCY_CONFLICT' ||
+              _error?.code == 'RECONCILIATION_REQUIRED')) {
+        return false;
+      }
+      _draftOwner = owner;
+      _draftTemplate = templateId;
+      _requestId = null;
+      _answers = {};
+      resetState();
+    }
+    // Answers are stored trimmed, the way the shared rules count them.
+    final answers = Map<String, String>.fromEntries(
+      formValues.entries.map(
+        (entry) => MapEntry(entry.key, entry.value.toString().trim()),
+      ),
+    );
+    answersChanged(answers);
+    _requestId ??= UuidGenerator.generateV4();
+    if (!canSubmit) return false;
+    final retry = outcomeUnknown;
+    final requestId = _requestId!;
+    final snapshot = Map<String, String>.unmodifiable(answers);
+    // A declined consent travels with the form as the declined answer it is;
+    // it never blocks the submission and it never touches the account's
+    // privacy consent.
+    _declinedConsentFields = declinedFormConsentFields(templateId, snapshot);
+    _isLoading = true;
+    _error = null;
+    _errorMessage = null;
+    _fieldErrors.clear();
+    _remediation = TemplateRemediation.none;
+    _advisoryMessage = null;
+    notifyListeners();
+    try {
+      // Advisory only: it must never mask a replay or the authoritative result.
+      if (!retry && templateId != 'other') {
+        try {
+          final duplicate = await _checkDuplicate(patientId, templateId);
+          if (duplicate != null) {
+            _advisoryMessage =
+                'You may already have a pending $templateName. '
+                'Checking with the clinic server.';
+            notifyListeners();
+          }
+        } catch (_) {
+          /* The submission endpoint remains authoritative. */
+        }
+      }
+      final result = await _repository.submitTemplateDocument(
+        requestId: requestId,
+        templateId: templateId,
+        fields: snapshot,
+      );
+      switch (result) {
+        case TemplateSubmissionSuccess():
+          _result = result;
+          _success = true;
+        case TemplateSubmissionError():
+          _applyError(result, templateName);
+      }
+    } catch (_) {
+      _applyError(TemplateSubmissionError.unknown, templateName);
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+    return _success;
   }
 }

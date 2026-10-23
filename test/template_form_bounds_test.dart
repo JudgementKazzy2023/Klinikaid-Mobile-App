@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
+import 'package:klinikaid_mobile/core/patient_submission_containment.dart';
 import 'package:klinikaid_mobile/core/utils/manila_time.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 import 'package:klinikaid_mobile/features/patient/templates/document_templates.dart';
@@ -54,6 +55,11 @@ Widget _app(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  // The submission flows open only when the containment is lifted, and must
+  // restore it afterwards.
+  setUp(() => PatientSubmissionContainment.activeForTesting = false);
+  tearDown(() => PatientSubmissionContainment.activeForTesting = true);
 
   const sharedPreferencesChannel =
       MethodChannel('plugins.flutter.io/shared_preferences');
@@ -303,25 +309,17 @@ void main() {
       }
     });
 
-    test('A declined consent is stored as the declined answer', () {
+    test('A declined consent travels as the declined answer', () {
       final provider = TemplatesProvider();
 
-      final metadata = provider.buildExtractedMetadata(
-        templateId: 'procedure-consent',
-        templateName: 'Consent Form',
-        formValues: {
-          'procedure': 'Venipuncture',
-          'consent_given': 'No',
-          'consent_date': '2026-10-18',
-        },
-        patientName: 'Juan Dela Cruz',
-      );
-
-      expect(metadata['consent_given'], 'No');
+      // The client no longer builds the stored metadata: the submission
+      // endpoint stores the patient's own answers verbatim, and the declined
+      // consent is recognised as the declined answer it is.
       expect(
         provider.declinedFormConsentFields('procedure-consent', {
           'procedure': 'Venipuncture',
           'consent_given': 'No',
+          'consent_date': '2026-10-18',
         }),
         ['consent_given'],
       );
@@ -337,16 +335,11 @@ void main() {
       final auth = _StubAuthProvider();
       final provider = TemplatesProvider();
 
-      provider.buildExtractedMetadata(
-        templateId: 'procedure-consent',
-        templateName: 'Consent Form',
-        formValues: {
-          'procedure': 'Venipuncture',
-          'consent_given': 'No',
-          'consent_date': '2026-10-18',
-        },
-        patientName: 'Juan Dela Cruz',
-      );
+      provider.declinedFormConsentFields('procedure-consent', {
+        'procedure': 'Venipuncture',
+        'consent_given': 'No',
+        'consent_date': '2026-10-18',
+      });
 
       // The account's data-privacy consent is untouched by a form decline.
       expect(auth.hasConsented, isTrue);
@@ -354,24 +347,17 @@ void main() {
     });
 
     test('The stored answers carry no account-consent state', () {
-      final provider = TemplatesProvider();
-
-      final metadata = provider.buildExtractedMetadata(
-        templateId: 'procedure-consent',
-        templateName: 'Consent Form',
-        formValues: {
-          'procedure': 'Venipuncture',
-          'consent_given': 'No',
-          'consent_date': '2026-10-18',
-        },
-        patientName: 'Juan Dela Cruz',
-      );
+      // Only the form's own questions travel with the submission; the client
+      // no longer builds the stored metadata itself.
+      final keys = clinicTemplateById('procedure-consent')!
+          .fields
+          .map((field) => field.key);
 
       expect(
-        metadata.keys.where((key) => key.toLowerCase().contains('privacy')),
+        keys.where((key) => key.toLowerCase().contains('privacy')),
         isEmpty,
       );
-      expect(metadata.keys.where((key) => key.toLowerCase().contains('terms')),
+      expect(keys.where((key) => key.toLowerCase().contains('terms')),
           isEmpty);
     });
   });
