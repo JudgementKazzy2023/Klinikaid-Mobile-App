@@ -9,7 +9,6 @@ import 'package:klinikaid_mobile/core/cache/local_database.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 import 'package:klinikaid_mobile/core/routing/app_router.dart';
 import 'package:klinikaid_mobile/features/auth/data/session_activity_service.dart';
-import 'package:klinikaid_mobile/features/auth/presentation/screens/login_screen.dart';
 
 class MockSessionActivityService extends SessionActivityService {
   @override
@@ -24,7 +23,7 @@ class MockSessionActivityService extends SessionActivityService {
 
 class MockSupabaseClient extends SupabaseClient {
   MockSupabaseClient()
-      : super('https://onzeyejlfydvvbkejvwf.supabase.co', 'mock-anon-key');
+      : super('https://example.invalid', 'mock-anon-key');
 }
 
 void main() {
@@ -43,8 +42,8 @@ void main() {
   setUpAll(() async {
     try {
       await Supabase.initialize(
-        url: 'https://onzeyejlfydvvbkejvwf.supabase.co',
-        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9uemV5ZWpsZnlkdnZia2VqdndmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNjcxMjYsImV4cCI6MjA5NDk0MzEyNn0.FJNbbuBZ2LdutVNrloYsxOLGZWbP-oLLTLJaKBOFkMM',
+        url: 'https://example.invalid',
+        anonKey: 'synthetic-test-key',
         authOptions: const FlutterAuthClientOptions(
           localStorage: EmptyLocalStorage(),
         ),

@@ -18,6 +18,10 @@ import 'package:klinikaid_mobile/features/department/presentation/providers/depa
 import 'package:klinikaid_mobile/features/department/presentation/screens/department_queue_screen.dart';
 
 class MockAuthProvider extends AuthProvider {
+  // These screen tests start after staff MFA verification.
+  @override
+  bool get isAal2 => !_mockIsAal1Pending;
+
   bool _mockIsAuthenticated = false;
   bool _mockHasConsented = false;
   bool _mockIsOnboarded = false;
@@ -137,8 +141,8 @@ void main() {
   setUpAll(() async {
     try {
       await supabase.Supabase.initialize(
-        url: 'https://onzeyejlfydvvbkejvwf.supabase.co',
-        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9uemV5ZWpsZnlkdnZia2VqdndmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNjcxMjYsImV4cCI6MjA5NDk0MzEyNn0.FJNbbuBZ2LdutVNrloYsxOLGZWbP-oLLTLJaKBOFkMM',
+        url: 'https://example.invalid',
+        anonKey: 'synthetic-test-key',
         authOptions: const supabase.FlutterAuthClientOptions(
           localStorage: supabase.EmptyLocalStorage(),
         ),

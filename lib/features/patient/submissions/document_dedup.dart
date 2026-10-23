@@ -1,8 +1,13 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/foundation.dart';
 import '../../../../core/errors/failures.dart';
 import '../../../../core/supabase/supabase_client.dart';
 import '../templates/document_templates.dart';
 
-String resolveDocumentCategory(String fileType, Map<String, dynamic>? metadata) {
+String resolveDocumentCategory(
+  String fileType,
+  Map<String, dynamic>? metadata,
+) {
   if (fileType == 'template') {
     return metadata?['template_id'] as String? ?? 'other';
   } else {
@@ -68,23 +73,23 @@ class DuplicateCheckResult {
 
   /// A pending document in the same category exists, submitted on [date].
   const DuplicateCheckResult.duplicate(String date)
-      : this._(DuplicateCheckState.duplicate, date, null, false);
+    : this._(DuplicateCheckState.duplicate, date, null, false);
 
   /// The read succeeded and no pending document in the category exists.
   const DuplicateCheckResult.clear()
-      : this._(DuplicateCheckState.clear, null, null, false);
+    : this._(DuplicateCheckState.clear, null, null, false);
 
   /// The read failed with [error]; the duplicate status is unknown.
   ///
   /// [isNetworkFailure] reports whether the read failed because the device was
   /// offline rather than because the server refused or returned bad data.
   DuplicateCheckResult.failed(Object error)
-      : this._(
-          DuplicateCheckState.failed,
-          null,
-          error,
-          FailureMapper.isNetworkFailure(error),
-        );
+    : this._(
+        DuplicateCheckState.failed,
+        null,
+        error,
+        FailureMapper.isNetworkFailure(error),
+      );
 }
 
 /// Checks whether the patient already has a pending document in [category].
@@ -99,9 +104,13 @@ class DuplicateCheckResult {
 /// [DuplicateCheckResult.isNetworkFailure] so the caller can take the same
 /// offline branch it takes for a failed upload instead of blocking the
 /// submission.
-Future<DuplicateCheckResult> checkPendingDuplicate(String patientId, String category) async {
+Future<DuplicateCheckResult> checkPendingDuplicate(
+  String patientId,
+  String category, {
+  SupabaseClient? client,
+}) async {
   try {
-    final response = await SupabaseService.client
+    final response = await (client ?? SupabaseService.client)
         .from('documents')
         .select('file_type, status, extracted_metadata, created_at')
         .eq('patient_id', patientId)
@@ -116,14 +125,28 @@ Future<DuplicateCheckResult> checkPendingDuplicate(String patientId, String cate
       if (status == 'pending' && resolvedCategory == category) {
         final createdAtStr = doc['created_at'] as String;
         final date = DateTime.parse(createdAtStr).toLocal();
-        final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        final formattedDate = "${months[date.month - 1]} ${date.day.toString().padLeft(2, '0')}, ${date.year}";
+        final months = [
+          'Jan',
+          'Feb',
+          'Mar',
+          'Apr',
+          'May',
+          'Jun',
+          'Jul',
+          'Aug',
+          'Sep',
+          'Oct',
+          'Nov',
+          'Dec',
+        ];
+        final formattedDate =
+            "${months[date.month - 1]} ${date.day.toString().padLeft(2, '0')}, ${date.year}";
         return DuplicateCheckResult.duplicate(formattedDate);
       }
     }
     return const DuplicateCheckResult.clear();
   } catch (e, stack) {
-    print("checkPendingDuplicate error: $e\n$stack");
+    debugPrint("checkPendingDuplicate error: $e\n$stack");
     return DuplicateCheckResult.failed(e);
   }
 }

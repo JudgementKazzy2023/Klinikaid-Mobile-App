@@ -70,7 +70,7 @@ String extractVitalsSummary(String? rawTriageNotes) {
         }
         final temp = vitals['temperature_c'];
         if (temp != null) {
-          parts.add('Temp: ${temp}°C');
+          parts.add('Temp: $temp°C');
         }
         if (parts.isEmpty) return '—';
         return parts.join(' | ');

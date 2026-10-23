@@ -14,8 +14,6 @@ import 'package:klinikaid_mobile/core/models/patient.dart';
 import 'package:klinikaid_mobile/core/repositories/profiles_repository.dart';
 import 'package:klinikaid_mobile/core/repositories/patients_repository.dart';
 import 'package:klinikaid_mobile/features/auth/data/session_activity_service.dart';
-import 'package:klinikaid_mobile/features/auth/presentation/screens/login_screen.dart';
-import 'package:klinikaid_mobile/features/dashboard/presentation/screens/dashboard_screen.dart';
 import 'package:klinikaid_mobile/features/auth/domain/login_outcome.dart';
 
 class MockGoTrueClient extends GoTrueClient {
@@ -58,7 +56,7 @@ class MockSupabaseClient extends SupabaseClient {
   final MockGoTrueClient mockAuth;
 
   MockSupabaseClient(this.mockAuth)
-      : super('https://onzeyejlfydvvbkejvwf.supabase.co', 'mock-anon-key');
+      : super('https://example.invalid', 'mock-anon-key');
 
   @override
   GoTrueClient get auth => mockAuth;
@@ -118,8 +116,8 @@ void main() {
   setUpAll(() async {
     try {
       await Supabase.initialize(
-        url: 'https://onzeyejlfydvvbkejvwf.supabase.co',
-        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9uemV5ZWpsZnlkdnZia2VqdndmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNjcxMjYsImV4cCI6MjA5NDk0MzEyNn0.FJNbbuBZ2LdutVNrloYsxOLGZWbP-oLLTLJaKBOFkMM',
+        url: 'https://example.invalid',
+        anonKey: 'synthetic-test-key',
         authOptions: const FlutterAuthClientOptions(
           localStorage: EmptyLocalStorage(),
         ),
@@ -224,7 +222,7 @@ void main() {
 
       router.router.go('/department/queue');
       await tester.pumpAndSettle();
-      expect(router.router.state!.matchedLocation, '/department/queue');
+      expect(router.router.state.matchedLocation, '/department/queue');
 
       mockProfilesRepo.mockProfile = Profile(
         id: 'user-active-1',
@@ -242,7 +240,7 @@ void main() {
       router.router.go('/department/result-entry/some-patient');
       await tester.pumpAndSettle();
 
-      expect(router.router.state!.matchedLocation, '/login');
+      expect(router.router.state.matchedLocation, '/login');
     });
   });
 }

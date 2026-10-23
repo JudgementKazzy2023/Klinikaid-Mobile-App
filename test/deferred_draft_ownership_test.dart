@@ -1,839 +1,150 @@
-import 'dart:async';
 import 'dart:io';
-
-import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:klinikaid_mobile/core/patient_submission_containment.dart';
 
-import 'package:klinikaid_mobile/core/cache/local_database.dart';
-import 'package:klinikaid_mobile/core/models/patient.dart';
-import 'package:klinikaid_mobile/core/supabase/supabase_client.dart';
-import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
-import 'package:klinikaid_mobile/features/documents/presentation/providers/document_submission_provider.dart';
 import 'package:klinikaid_mobile/features/documents/presentation/screens/submit_document_screen.dart';
-
-// ---------------------------------------------------------------------------
-// Mock auth identity: settable current user plus a pushable auth-change stream.
-// ---------------------------------------------------------------------------
-class MockAuthIdentity extends Fake implements GoTrueClient {
-  @override
-  User? currentUser;
-  @override
-  Session? currentSession;
-
-  final StreamController<AuthState> _events =
-      StreamController<AuthState>.broadcast();
-
-  @override
-  Stream<AuthState> get onAuthStateChange => _events.stream;
-
-  /// Signed in as [userId], emitting the auth event a real client would emit.
-  void signInAs(String userId) {
-    currentUser = _mockUser(userId);
-    _events.add(AuthState(AuthChangeEvent.signedIn, null));
-  }
-
-  /// Signed out, emitting the auth event a real client would emit.
-  void emitSignedOut() {
-    currentUser = null;
-    _events.add(AuthState(AuthChangeEvent.signedOut, null));
-  }
-
-  /// Identity change with no auth event at all (worst case for invalidation).
-  void switchTo(String userId) {
-    currentUser = _mockUser(userId);
-  }
-
-  User _mockUser(String userId) => User(
-        id: userId,
-        appMetadata: const <String, dynamic>{},
-        userMetadata: const <String, dynamic>{},
-        aud: 'authenticated',
-        createdAt: DateTime.now().toUtc().toIso8601String(),
-      );
-}
-
-// ---------------------------------------------------------------------------
-// Mock storage: records uploads and can stall an upload mid-flight.
-// ---------------------------------------------------------------------------
-class MockStorageApi extends Fake implements StorageFileApi {
-  final List<String> uploads = [];
-  Completer<void>? uploadStarted;
-  Completer<void>? uploadGate;
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) {
-    if (invocation.memberName == #upload) {
-      return _upload(invocation.positionalArguments.first as String);
-    }
-    return super.noSuchMethod(invocation);
-  }
-
-  Future<String> _upload(String path) async {
-    if (uploadStarted != null && !uploadStarted!.isCompleted) {
-      uploadStarted!.complete();
-    }
-    if (uploadGate != null) {
-      await uploadGate!.future;
-    }
-    uploads.add(path);
-    return path;
-  }
-}
-
-class MockStorageClient extends Fake implements SupabaseStorageClient {
-  MockStorageClient(this.api);
-  final MockStorageApi api;
-
-  @override
-  StorageFileApi from(String id) => api;
-}
-
-// ---------------------------------------------------------------------------
-// Mock documents table: records insert payloads for insert(...).select().single()
-// ---------------------------------------------------------------------------
-/// When [gate] is set, the awaited `insert(...).select().single()` future
-/// stalls until it completes, so a test can interleave an identity switch
-/// with a pending insert.
-class InsertGate {
-  Completer<void>? started;
-  Completer<void>? gate;
-}
-
-class MockSingle extends Fake implements PostgrestTransformBuilder<PostgrestMap> {
-  MockSingle(this._row, {this.insertGate});
-  final PostgrestMap _row;
-  final InsertGate? insertGate;
-
-  Future<void> _gateInsert() async {
-    final started = insertGate?.started;
-    final gate = insertGate?.gate;
-    if (started != null && !started.isCompleted) started.complete();
-    if (gate != null) await gate.future;
-  }
-
-  @override
-  Future<S> then<S>(FutureOr<S> Function(PostgrestMap value) onValue,
-      {Function? onError}) {
-    return _gateInsert().then(
-        (_) => Future<PostgrestMap>.value(_row).then(onValue, onError: onError));
-  }
-
-  @override
-  Future<PostgrestMap> timeout(Duration timeLimit,
-      {FutureOr<PostgrestMap> Function()? onTimeout}) {
-    return Future<PostgrestMap>.value(_row).timeout(timeLimit,
-        onTimeout: onTimeout);
-  }
-
-  @override
-  Future<PostgrestMap> catchError(Function onError,
-      {bool Function(Object error)? test}) {
-    return Future<PostgrestMap>.value(_row).catchError(onError, test: test);
-  }
-
-  @override
-  Future<PostgrestMap> whenComplete(FutureOr<void> Function() action) {
-    return Future<PostgrestMap>.value(_row).whenComplete(action);
-  }
-
-  @override
-  Stream<PostgrestMap> asStream() => Stream<PostgrestMap>.value(_row);
-}
-
-class MockSelect extends Fake implements PostgrestTransformBuilder<PostgrestList> {
-  MockSelect(this._row, {this.insertGate});
-  final PostgrestMap _row;
-  final InsertGate? insertGate;
-
-  @override
-  PostgrestTransformBuilder<PostgrestMap> single() =>
-      MockSingle(_row, insertGate: insertGate);
-}
-
-class MockInsert extends Fake implements PostgrestFilterBuilder<dynamic> {
-  MockInsert(this._row, {this.insertGate});
-  final PostgrestMap _row;
-  final InsertGate? insertGate;
-
-  @override
-  PostgrestTransformBuilder<PostgrestList> select([String columns = '*']) =>
-      MockSelect(_row, insertGate: insertGate);
-}
-
-/// The pending-document read of the duplicate check.
-///
-/// The mock answers with an empty result: the signed-in account has no
-/// pending document, so the duplicate check is clear and the submit continues
-/// to the file check this file gates. A failed read is no longer treated as
-/// "no duplicate" (see #34), so the mock has to model the read explicitly.
-class MockPendingDocumentsQuery extends Fake
-    implements PostgrestFilterBuilder<PostgrestList> {
-  @override
-  PostgrestFilterBuilder<PostgrestList> eq(String column, Object value) => this;
-
-  @override
-  Future<S> then<S>(FutureOr<S> Function(PostgrestList value) onValue,
-      {Function? onError}) {
-    return Future<PostgrestList>.value(<PostgrestMap>[])
-        .then(onValue, onError: onError);
-  }
-
-  @override
-  Future<PostgrestList> timeout(Duration timeLimit,
-      {FutureOr<PostgrestList> Function()? onTimeout}) {
-    return Future<PostgrestList>.value(<PostgrestMap>[])
-        .timeout(timeLimit, onTimeout: onTimeout);
-  }
-
-  @override
-  Future<PostgrestList> catchError(Function onError,
-      {bool Function(Object error)? test}) {
-    return Future<PostgrestList>.value(<PostgrestMap>[])
-        .catchError(onError, test: test);
-  }
-
-  @override
-  Future<PostgrestList> whenComplete(FutureOr<void> Function() action) {
-    return Future<PostgrestList>.value(<PostgrestMap>[]).whenComplete(action);
-  }
-
-  @override
-  Stream<PostgrestList> asStream() =>
-      Future<PostgrestList>.value(<PostgrestMap>[]).asStream();
-}
-
-class MockDocumentsTable extends Fake implements SupabaseQueryBuilder {
-  final List<PostgrestMap> inserted = [];
-  final InsertGate insertGate = InsertGate();
-
-  @override
-  PostgrestFilterBuilder<PostgrestList> select([String columns = '*']) =>
-      MockPendingDocumentsQuery();
-
-  @override
-  PostgrestFilterBuilder<dynamic> insert(Object values,
-      {bool defaultToNull = true}) {
-    final row = PostgrestMap.from(values as Map);
-    inserted.add(row);
-    return MockInsert(row, insertGate: insertGate);
-  }
-}
-
-/// A real [File] whose [exists] call can be stalled. Injected through
-/// dart:io's own `IOOverrides` seam so the concrete `File(...)` constructed
-/// by the provider is gated without any production FS abstraction.
-class GatedExistsFile extends Fake implements File {
-  GatedExistsFile(this._real, this.started, this.gate);
-  final File _real;
-  final Completer<void> started;
-  final Completer<void> gate;
-
-  @override
-  Future<bool> exists() async {
-    if (!started.isCompleted) started.complete();
-    await gate.future;
-    return _real.exists();
-  }
-}
-
-class MockSupabaseClient extends Fake implements SupabaseClient {
-  MockSupabaseClient(this.auth);
-
-  @override
-  final MockAuthIdentity auth;
-  @override
-  final MockStorageClient storage = MockStorageClient(MockStorageApi());
-  final MockDocumentsTable docsTable = MockDocumentsTable();
-
-  MockStorageApi get storageApi => storage.api;
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) {
-    if (invocation.memberName == #from) {
-      return docsTable;
-    }
-    return super.noSuchMethod(invocation);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Local database doubles.
-// ---------------------------------------------------------------------------
-/// Owner-scoped read behind an explicit gate (first call only), to interleave
-/// an identity switch with an awaited queue load while later reloads proceed.
-class GatedQueueDb extends LocalDatabase {
-  GatedQueueDb() : super(NativeDatabase.memory());
-
-  final Completer<void> readStarted = Completer<void>();
-  final Completer<void> readGate = Completer<void>();
-  bool _firstReadPending = true;
-
-  @override
-  Future<List<OfflineDocument>> getQueuedDocuments([String? uploaderId]) async {
-    if (_firstReadPending) {
-      _firstReadPending = false;
-      if (!readStarted.isCompleted) readStarted.complete();
-      await readGate.future;
-    }
-    final all = await select(offlineDocumentsQueue).get();
-    if (uploaderId == null) return all;
-    return all.where((d) => d.uploaderId == uploaderId).toList();
-  }
-}
-
-/// Queue reads fail (own-item load failure path).
-class FailingQueueDb extends LocalDatabase {
-  FailingQueueDb() : super(NativeDatabase.memory());
-
-  @override
-  Future<List<OfflineDocument>> getQueuedDocuments([String? uploaderId]) =>
-      Future<List<OfflineDocument>>.error(StateError('queue read failed'));
-}
-
-/// Queue deletes fail (own-item delete failure path).
-class FailingDeleteDb extends LocalDatabase {
-  FailingDeleteDb() : super(NativeDatabase.memory());
-
-  @override
-  Future<int> removeQueuedDocument(String id, [String? uploaderId]) =>
-      Future<int>.error(StateError('queue delete failed'));
-}
-
-// ---------------------------------------------------------------------------
-// AuthProvider double for the screen test.
-// ---------------------------------------------------------------------------
-class StaticPatientAuthProvider extends AuthProvider {
-  StaticPatientAuthProvider(this._patient, {super.client});
-  final Patient _patient;
-
-  @override
-  Patient? get patient => _patient;
-  @override
-  bool get isLoading => false;
-  @override
-  bool get isAuthenticated => true;
-}
-
-Patient _patient({String profileId = 'profile-uuid-1'}) => Patient(
-      id: 'patient-uuid-1',
-      profileId: profileId,
-      firstName: 'Alice',
-      lastName: 'Nguyen',
-      dateOfBirth: DateTime(1995, 4, 12),
-      gender: Gender.female,
-      contactNumber: '09170000000',
-      address: 'Manila, PH',
-      createdAt: DateTime.now(),
-      updatedAt: DateTime.now(),
-    );
+import 'support/upload_fixture.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-
-  const prefsChannel = MethodChannel('plugins.flutter.io/shared_preferences');
-  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-      .setMockMethodCallHandler(prefsChannel, (MethodCall methodCall) async {
-    if (methodCall.method == 'getAll') return <String, Object>{};
-    return true;
-  });
-
-  const userA = 'user-a';
-  const userB = 'user-b';
-
-  late MockSupabaseClient client;
-  late MockAuthIdentity auth;
-  late LocalDatabase db;
-  late Directory tempDir;
-
+  late UploadFixture f;
   setUp(() async {
-    auth = MockAuthIdentity();
-    client = MockSupabaseClient(auth);
-    SupabaseService.mockClient = client;
-    db = LocalDatabase(NativeDatabase.memory());
-    tempDir = await Directory.systemTemp.createTemp('deferred_drafts');
+    PatientSubmissionContainment.activeForTesting = false;
+    f = UploadFixture();
+    await f.init();
   });
-
   tearDown(() async {
-    SupabaseService.mockClient = null;
-    await db.close();
-    if (tempDir.existsSync()) {
-      tempDir.deleteSync(recursive: true);
+    try {
+      await f.close();
+    } finally {
+      PatientSubmissionContainment.activeForTesting = true;
     }
   });
-
-  String draftPath(String id) => '${tempDir.path}/$id.jpg';
-
-  Future<void> seedDraft(String id, String uploader, {bool withFile = true}) {
-    if (withFile) {
-      File(draftPath(id)).writeAsStringSync('draft bytes for $id');
-    }
-    return db.queueOfflineDocument(OfflineDocument(
-      id: id,
-      patientId: 'patient-uuid-1',
-      uploaderId: uploader,
-      fileName: '$id.jpg',
-      localFilePath: draftPath(id),
-      fileType: 'jpg',
-      ocrText: 'ocr $id',
-      extractedMetadata: null,
-      createdAt: DateTime.now(),
-    ));
-  }
-
-  Future<List<String>> queuedIds() async =>
-      (await db.select(db.offlineDocumentsQueue).get())
-          .map((d) => d.id)
-          .toList();
-
-  // -------------------------------------------------------------------------
-  // Original failure: foreign draft metadata rendered on the signed-in
-  // account's screen.
-  // -------------------------------------------------------------------------
+  test(
+    'another account cannot see, resolve, sync or delete an owner draft',
+    () async {
+      await f.seed('owner-draft', UploadFixture.owner);
+      await f.signIn(UploadFixture.other);
+      expect(f.provider.queuedSubmissions, isEmpty);
+      expect(await f.provider.resolveQueuedDraft('owner-draft'), false);
+      await f.provider.removeQueuedItem('owner-draft');
+      await f.provider.syncOfflineQueue();
+      expect(await f.drafts(), hasLength(1));
+      expect(f.requests, isEmpty);
+      expect(await f.file.exists(), true);
+    },
+  );
+  test('same-owner delete and bulk sync retain all drafts and files', () async {
+    await f.seed('one', UploadFixture.owner);
+    await f.seed('two', UploadFixture.owner);
+    await f.provider.removeQueuedItem('one');
+    await f.provider.syncOfflineQueue();
+    expect(await f.drafts(), hasLength(2));
+    expect(f.requests, isEmpty);
+    expect(await f.file.exists(), true);
+  });
+  test(
+    'account switch hides old rows immediately and restores them on owner login',
+    () async {
+      await f.seed('one', UploadFixture.owner);
+      await f.seed('two', UploadFixture.other);
+      await f.signIn(UploadFixture.other);
+      expect(f.provider.queuedSubmissions.map((d) => d.id), ['two']);
+      await f.signIn(UploadFixture.owner);
+      expect(f.provider.queuedSubmissions.map((d) => d.id), ['one']);
+      expect(f.requests, isEmpty);
+    },
+  );
+  test(
+    'unknown draft survives reopen with every field and stable request ID',
+    () async {
+      f.respond = (r) async => r.url.path.endsWith('/upload')
+          ? f.json({'error_code': 'SERVER_ERROR', 'message': 'unknown'}, 503)
+          : f.defaults(r);
+      await f.submit();
+      final before = (await f.drafts()).single;
+      final bytes = await File(before.localFilePath).readAsBytes();
+      await f.reopen();
+      expect((await f.drafts()).single, before);
+      expect(await File(before.localFilePath).readAsBytes(), bytes);
+      final count = f.requests.length;
+      expect(await f.submit(), false);
+      expect(f.requests.length, count);
+      expect(await f.drafts(), hasLength(1));
+      f.respond = (r) async =>
+          f.json({'error_code': 'SERVER_ERROR', 'message': 'unknown'}, 503);
+      expect(await f.provider.resolveQueuedDraft(before.id), false);
+      expect(f.requests.length, count + 1);
+      expect(f.requests.last.url.path, endsWith('/upload/status'));
+    },
+  );
+  test(
+    'missing files are retained, never silently removed by sync or explicit review',
+    () async {
+      await f.seed('missing', UploadFixture.owner);
+      await f.file.delete();
+      await f.provider.syncOfflineQueue();
+      expect(await f.provider.resolveQueuedDraft('missing'), false);
+      expect(await f.drafts(), hasLength(1));
+      expect(f.requests, hasLength(1));
+      expect(f.requests.single.url.path, endsWith('/upload/status'));
+    },
+  );
+  test(
+    'explicit owner action submits exactly one legacy draft and leaves the other untouched',
+    () async {
+      await f.seed('one', UploadFixture.owner);
+      await f.seed('two', UploadFixture.owner);
+      await f.seed('foreign', UploadFixture.other);
+      final original = (await f.drafts()).first;
+      expect(await f.provider.resolveQueuedDraft('one'), true);
+      expect((await f.drafts()).single.id, 'two');
+      expect((await f.drafts(UploadFixture.other)).single.id, 'foreign');
+      expect(
+        f.requests.where((r) => r.url.path.endsWith('/upload')),
+        hasLength(1),
+      );
+      expect(await f.file.exists(), true);
+      expect(original.requestId, isNotNull);
+      expect(f.requests.first.url.path, endsWith('/upload/status'));
+    },
+  );
   testWidgets(
-      'submit screen signed in as B does not render A\'s queued draft metadata',
-      (tester) async {
-    db = FailingDeleteDb();
-    await seedDraft('draft-a', userA);
-    await seedDraft('draft-b', userB);
-    auth.switchTo(userB);
-
-    final provider = DocumentSubmissionProvider(db);
-    await tester.runAsync(() => pumpEventQueue());
-
-    await tester.pumpWidget(
-      MultiProvider(
-        providers: [
-          ChangeNotifierProvider<AuthProvider>.value(
-            value: StaticPatientAuthProvider(_patient(), client: client),
-          ),
-          ChangeNotifierProvider<DocumentSubmissionProvider>.value(
-            value: provider,
-          ),
-        ],
-        child: const MaterialApp(home: SubmitDocumentScreen()),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('Offline Sync Queue'), findsOneWidget,
-        reason: 'the account\'s own queue section is still shown');
-    expect(find.text('draft-b.jpg'), findsOneWidget,
-        reason: 'B sees its own draft');
-    expect(find.text('draft-a.jpg'), findsNothing,
-        reason: 'another account\'s draft metadata must not be rendered');
-    expect(find.text('Account Mismatch (Submit blocked)'), findsNothing,
-        reason: 'foreign rows are no longer surfaced as a queue state');
-
-    provider.dispose();
-  });
-
-  // -------------------------------------------------------------------------
-  // Original failure: cross-account deletion.
-  // -------------------------------------------------------------------------
-  test('removeQueuedItem for A\'s draft is a no-op while signed in as B',
-      () async {
-    await seedDraft('draft-a', userA);
-    await seedDraft('draft-b', userB);
-    auth.switchTo(userB);
-
-    final provider = DocumentSubmissionProvider(db);
-    await pumpEventQueue();
-
-    await provider.removeQueuedItem('draft-a');
-
-    expect(await queuedIds(), containsAll(<String>['draft-a', 'draft-b']),
-        reason: 'B must not delete A\'s queued draft');
-  });
-
-  test('removeQueuedItem is a no-op while signed out', () async {
-    await seedDraft('draft-a', userA);
-    auth.currentUser = null;
-
-    final provider = DocumentSubmissionProvider(db);
-    await pumpEventQueue();
-
-    await provider.removeQueuedItem('draft-a');
-
-    expect(await queuedIds(), contains('draft-a'),
-        reason: 'an unauthenticated caller must not delete queued drafts');
-    expect(provider.queuedSubmissions, isEmpty,
-        reason: 'an unauthenticated caller must not see queued drafts');
-  });
-
-  // -------------------------------------------------------------------------
-  // Original failure: identity switched while the queue read is awaited.
-  // -------------------------------------------------------------------------
-  test('identity change during the awaited queue load applies no stale results',
-      () async {
-    final gatedDb = GatedQueueDb();
-    db = gatedDb;
-    await seedDraft('draft-a', userA);
-    await seedDraft('draft-b', userB);
-    auth.switchTo(userA);
-
-    final provider = DocumentSubmissionProvider(db);
-    await gatedDb.readStarted.future;
-    auth.switchTo(userB);
-    gatedDb.readGate.complete();
-    await pumpEventQueue();
-
-    expect(provider.queuedSubmissions, isEmpty,
-        reason: 'results read for A must not be applied once identity is B');
-    expect(await queuedIds(), containsAll(<String>['draft-a', 'draft-b']),
-        reason: 'a discarded read deletes nothing');
-
-    auth.signInAs(userB);
-    await pumpEventQueue();
-    expect(provider.queuedSubmissions.map((d) => d.id).toList(),
-        <String>['draft-b'],
-        reason: 'after sign-in B only B\'s draft is visible');
-  });
-
-  // -------------------------------------------------------------------------
-  // Original failure: identity switched while the sync upload is awaited.
-  // -------------------------------------------------------------------------
-  test('identity change during the awaited sync upload writes and deletes nothing',
-      () async {
-    await seedDraft('draft-a', userA);
-    auth.switchTo(userA);
-
-    final provider = DocumentSubmissionProvider(db);
-    await pumpEventQueue();
-    expect(provider.queuedSubmissions.map((d) => d.id).toList(),
-        <String>['draft-a']);
-
-    final started = Completer<void>();
-    final gate = Completer<void>();
-    client.storageApi.uploadStarted = started;
-    client.storageApi.uploadGate = gate;
-
-    final sync = provider.syncOfflineQueue();
-    await started.future;
-    auth.switchTo(userB);
-    gate.complete();
-    await sync;
-
-    expect(client.docsTable.inserted, isEmpty,
-        reason: 'no document row may be written after the identity changed');
-    expect(client.storageApi.uploads, hasLength(1),
-        reason: 'the already-dispatched upload itself cannot be recalled');
-    expect(await queuedIds(), contains('draft-a'),
-        reason: 'A\'s queued draft must not be deleted under identity B');
-  });
-
-  // -------------------------------------------------------------------------
-  // Acceptance: only the signed-in account's metadata is visible.
-  // -------------------------------------------------------------------------
-  test('sign in as B reveals only B\'s queued drafts', () async {
-    await seedDraft('draft-a', userA);
-    await seedDraft('draft-b', userB);
-    auth.switchTo(userB);
-
-    final provider = DocumentSubmissionProvider(db);
-    await pumpEventQueue();
-
-    expect(provider.queuedSubmissions.map((d) => d.id).toList(),
-        <String>['draft-b']);
-    expect(await queuedIds(), containsAll(<String>['draft-a', 'draft-b']),
-        reason: 'visibility scoping never drops the other account\'s rows');
-  });
-
-  test('A\'s drafts are restored on the next A login', () async {
-    await seedDraft('draft-a', userA);
-    await seedDraft('draft-b', userB);
-    auth.switchTo(userB);
-
-    final provider = DocumentSubmissionProvider(db);
-    await pumpEventQueue();
-    expect(provider.queuedSubmissions.map((d) => d.id).toList(),
-        <String>['draft-b']);
-
-    auth.signInAs(userA);
-    await pumpEventQueue();
-
-    expect(provider.queuedSubmissions.map((d) => d.id).toList(),
-        <String>['draft-a'],
-        reason: 'A\'s deferred draft comes back after A signs in again');
-    expect(await queuedIds(), containsAll(<String>['draft-a', 'draft-b']),
-        reason: 'the draft rows themselves were preserved meanwhile');
-  });
-
-  test('signed-out state reveals, deletes and syncs nothing', () async {
-    await seedDraft('draft-a', userA);
-    auth.currentUser = null;
-
-    final provider = DocumentSubmissionProvider(db);
-    await pumpEventQueue();
-
-    expect(provider.queuedSubmissions, isEmpty);
-    await provider.removeQueuedItem('draft-a');
-    await provider.syncOfflineQueue();
-
-    expect(client.storageApi.uploads, isEmpty);
-    expect(client.docsTable.inserted, isEmpty);
-    expect(await queuedIds(), contains('draft-a'),
-        reason: 'signing out preserves the queued draft');
-    expect(File(draftPath('draft-a')).existsSync(), isTrue,
-        reason: 'the queued file itself is preserved');
-  });
-
-  test('logout preserves A\'s draft rows and files while revealing none',
-      () async {
-    await seedDraft('draft-a', userA);
-    auth.switchTo(userA);
-
-    final provider = DocumentSubmissionProvider(db);
-    await pumpEventQueue();
-    expect(provider.queuedSubmissions.map((d) => d.id).toList(),
-        <String>['draft-a']);
-
-    auth.emitSignedOut();
-    await pumpEventQueue();
-
-    expect(provider.queuedSubmissions, isEmpty);
-    expect(await queuedIds(), contains('draft-a'));
-    expect(File(draftPath('draft-a')).existsSync(), isTrue);
-  });
-
-  test('account mismatch preserves the other account\'s draft', () async {
-    await seedDraft('draft-a', userA);
-    await seedDraft('draft-b', userB);
-    auth.switchTo(userB);
-
-    final provider = DocumentSubmissionProvider(db);
-    await pumpEventQueue();
-
-    expect(provider.queuedSubmissions.map((d) => d.id).toList(),
-        <String>['draft-b']);
-    expect(await queuedIds(), contains('draft-a'),
-        reason: 'A\'s row survives the account mismatch untouched');
-    expect(File(draftPath('draft-a')).existsSync(), isTrue);
-  });
-
-  // -------------------------------------------------------------------------
-  // Acceptance: B's sync can never upload or delete A's draft.
-  // -------------------------------------------------------------------------
-  test('B\'s sync uploads B\'s draft only and never touches A\'s', () async {
-    await seedDraft('draft-a', userA);
-    await seedDraft('draft-b', userB);
-    auth.switchTo(userB);
-
-    final provider = DocumentSubmissionProvider(db);
-    await pumpEventQueue();
-
-    await provider.syncOfflineQueue();
-
-    expect(client.storageApi.uploads, hasLength(1));
-    expect(client.storageApi.uploads.single, startsWith('$userB/'),
-        reason: 'only B\'s storage path is written');
-    expect(client.docsTable.inserted, hasLength(1));
-    expect(client.docsTable.inserted.single['uploader_id'], userB);
-    expect(await queuedIds(), contains('draft-a'),
-        reason: 'A\'s draft is neither uploaded nor deleted by B\'s sync');
-    expect(await queuedIds(), isNot(contains('draft-b')),
-        reason: 'B\'s own draft completes normally');
-  });
-
-  // -------------------------------------------------------------------------
-  // Failure paths and same-owner normal operations.
-  // -------------------------------------------------------------------------
-  test('failed queue read reveals nothing and does not throw', () async {
-    db = FailingQueueDb();
-    await seedDraft('draft-a', userA);
-    auth.switchTo(userA);
-
-    final provider = DocumentSubmissionProvider(db);
-    await pumpEventQueue();
-
-    expect(provider.queuedSubmissions, isEmpty);
-    expect(await queuedIds(), contains('draft-a'),
-        reason: 'a failed read deletes nothing');
-  });
-
-  test('failed queue delete keeps the row and does not throw', () async {
-    db = FailingDeleteDb();
-    await seedDraft('draft-a', userA);
-    auth.switchTo(userA);
-
-    final provider = DocumentSubmissionProvider(db);
-    await pumpEventQueue();
-    expect(provider.queuedSubmissions.map((d) => d.id).toList(),
-        <String>['draft-a']);
-
-    await provider.removeQueuedItem('draft-a');
-
-    expect(await queuedIds(), contains('draft-a'),
-        reason: 'a failed delete leaves the owner\'s draft in place');
-  });
-
-  // -------------------------------------------------------------------------
-  // Round 2: stale-identity guards proven missing at fd0e6da.
-  // -------------------------------------------------------------------------
+    'opening and resuming the contained screen never replays or exposes removal controls',
+    (tester) async {
+      await f.seed('one', UploadFixture.owner);
+      PatientSubmissionContainment.activeForTesting = true;
+      await tester.pumpWidget(
+        ChangeNotifierProvider.value(
+          value: f.provider,
+          child: const MaterialApp(home: SubmitDocumentScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.text(PatientSubmissionContainment.message), findsOneWidget);
+      expect(f.requests, isEmpty);
+      expect(find.byIcon(Icons.delete_outline_rounded), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
   test(
-      'F1: identity change while the sync file check awaits dispatches no upload',
-      () async {
-    await seedDraft('draft-a', userA);
-    auth.switchTo(userA);
-
-    final provider = DocumentSubmissionProvider(db);
-    await pumpEventQueue();
-    expect(provider.queuedSubmissions.map((d) => d.id).toList(),
-        <String>['draft-a']);
-
-    final started = Completer<void>();
-    final gate = Completer<void>();
-    final realFile = File(draftPath('draft-a'));
-    final sync = IOOverrides.runZoned(
-      () => provider.syncOfflineQueue(),
-      createFile: (path) => GatedExistsFile(realFile, started, gate),
-    );
-    await started.future; // the concrete File.exists() call is pending now
-    auth.switchTo(userB); // identity changes while the FS call awaits
-    gate.complete();
-    await sync;
-
-    expect(client.storageApi.uploads, isEmpty,
-        reason: 'the A-path upload must not be dispatched under identity B');
-    expect(client.docsTable.inserted, isEmpty);
-    expect(await queuedIds(), contains('draft-a'),
-        reason: 'A\'s queued row is preserved');
-    expect(realFile.existsSync(), isTrue,
-        reason: 'A\'s queued file is preserved');
-  });
-
-  test(
-      'F2: identity change while the sync insert awaits deletes no queued row',
-      () async {
-    await seedDraft('draft-a', userA);
-    auth.switchTo(userA);
-
-    final provider = DocumentSubmissionProvider(db);
-    await pumpEventQueue();
-
-    client.docsTable.insertGate.started = Completer<void>();
-    client.docsTable.insertGate.gate = Completer<void>();
-
-    final sync = provider.syncOfflineQueue();
-    await client.docsTable.insertGate.started!.future; // insert is pending now
-    auth.switchTo(userB); // identity changes while the insert awaits
-    client.docsTable.insertGate.gate!.complete();
-    await sync;
-
-    expect(await queuedIds(), contains('draft-a'),
-        reason:
-            'A\'s queued row must survive, not be deleted under identity B');
-    expect(client.storageApi.uploads, hasLength(1),
-        reason: 'the already-dispatched upload cannot be recalled (limit)');
-    expect(client.docsTable.inserted, hasLength(1),
-        reason: 'the already-dispatched insert cannot be recalled (limit)');
-  });
-
-  test('F3: a stale queue read is discarded without erasing B\'s loaded list',
-      () async {
-    final gatedDb = GatedQueueDb();
-    db = gatedDb;
-    await seedDraft('draft-a', userA);
-    await seedDraft('draft-b', userB);
-    auth.switchTo(userA);
-
-    final provider = DocumentSubmissionProvider(db);
-    await gatedDb.readStarted.future; // A's read is in flight
-
-    auth.signInAs(userB); // auth change: clears and reloads for B
-    await pumpEventQueue();
-    expect(provider.queuedSubmissions.map((d) => d.id).toList(),
-        <String>['draft-b'],
-        reason: 'B\'s list is fully loaded before the stale read resolves');
-
-    gatedDb.readGate.complete(); // the stale A read resolves now
-    await pumpEventQueue();
-
-    expect(provider.queuedSubmissions.map((d) => d.id).toList(),
-        <String>['draft-b'],
-        reason: 'the discarded stale read must not erase B\'s loaded list');
-    expect(await queuedIds(), containsAll(<String>['draft-a', 'draft-b']));
-  });
-
-  test('F4: a pending queue read cannot notify or apply state after dispose',
-      () async {
-    final gatedDb = GatedQueueDb();
-    db = gatedDb;
-    await seedDraft('draft-a', userA);
-    auth.switchTo(userA);
-
-    final provider = DocumentSubmissionProvider(db);
-    await gatedDb.readStarted.future; // read in flight
-
-    var notifications = 0;
-    provider.addListener(() => notifications++);
-    provider.dispose();
-    final notifiedAtDispose = notifications;
-
-    gatedDb.readGate.complete(); // read finishes after dispose
-    await pumpEventQueue();
-
-    expect(provider.queuedSubmissions, isEmpty,
-        reason: 'a read that finishes after dispose applies no state');
-    expect(notifications, notifiedAtDispose,
-        reason: 'no listener notification may happen after dispose');
-  });
-
-  test(
-      'F1b: identity change while the submit file check awaits dispatches no upload',
-      () async {
-    auth.switchTo(userA);
-    final filePath = draftPath('submit-a');
-    File(filePath).writeAsStringSync('submit bytes');
-
-    final provider = DocumentSubmissionProvider(db);
-    await pumpEventQueue();
-
-    final started = Completer<void>();
-    final gate = Completer<void>();
-    final realFile = File(filePath);
-    final submitted = IOOverrides.runZoned(
-      () => provider.submitDocument(
-        localFilePath: filePath,
-        originalFileName: 'submit-a.jpg',
-        fileExtension: 'jpg',
-        patient: _patient(profileId: userA),
-        documentType: 'laboratory',
-      ),
-      createFile: (path) => GatedExistsFile(realFile, started, gate),
-    );
-    await started.future; // the concrete File.exists() call is pending now
-    auth.switchTo(userB); // identity changes while the FS call awaits
-    gate.complete();
-
-    expect(await submitted, isFalse,
-        reason: 'the submit is abandoned, not completed under the new session');
-    expect(client.storageApi.uploads, isEmpty,
-        reason: 'no A-path upload may be dispatched under identity B');
-    expect(client.docsTable.inserted, isEmpty);
-    expect(await queuedIds(), isEmpty,
-        reason: 'an abandoned submit queues nothing');
-
-    provider.dispose();
-  });
-
-  test('same-owner delete removes only the owner\'s row', () async {
-    await seedDraft('draft-a', userA);
-    await seedDraft('draft-b', userB);
-    auth.switchTo(userA);
-
-    final provider = DocumentSubmissionProvider(db);
-    await pumpEventQueue();
-    expect(provider.queuedSubmissions.map((d) => d.id).toList(),
-        <String>['draft-a']);
-
-    await provider.removeQueuedItem('draft-a');
-
-    expect(await queuedIds(), <String>['draft-b'],
-        reason: 'the owner can delete their own draft, nothing else');
-    expect(provider.queuedSubmissions, isEmpty);
-  });
+    'malformed saved metadata is preserved for clinic review without network',
+    () async {
+      await f.seed('malformed', UploadFixture.owner);
+      await f.db.customStatement(
+        'UPDATE offline_documents_queue SET extracted_metadata = ? WHERE id = ? AND uploader_id = ?',
+        ['not valid JSON', 'malformed', UploadFixture.owner],
+      );
+      expect(await f.provider.resolveQueuedDraft('malformed'), false);
+      expect(f.provider.errorCode, 'SERVER_DATA_INVALID');
+      expect(f.requests, isEmpty);
+      expect((await f.drafts()).single.extractedMetadata, 'not valid JSON');
+      expect(await f.file.exists(), true);
+    },
+  );
 }

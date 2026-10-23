@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
-import 'package:go_router/go_router.dart';
 import 'package:klinikaid_mobile/features/reception/data/reception_repository.dart';
 import 'package:klinikaid_mobile/features/reception/domain/submission.dart';
 import 'package:klinikaid_mobile/features/reception/domain/submission_detail.dart';
@@ -16,10 +15,8 @@ import 'package:klinikaid_mobile/features/reception/presentation/providers/recep
 import 'package:klinikaid_mobile/features/reception/presentation/screens/reception_queue_screen.dart';
 import 'package:klinikaid_mobile/features/reception/presentation/screens/reception_dashboard_screen.dart';
 import 'package:klinikaid_mobile/features/reception/presentation/screens/document_validation_screen.dart';
-import 'package:klinikaid_mobile/features/reception/presentation/reception_shell.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 import 'package:klinikaid_mobile/core/routing/app_router.dart';
-import 'package:klinikaid_mobile/features/dashboard/presentation/screens/profile_screen.dart';
 
 // ─── Journey Mock Repository ────────────────────────────────────────────────
 
@@ -189,6 +186,10 @@ class MockReceptionJourneyRepository extends ReceptionRepository {
 // ─── Journey Mock AuthProvider ──────────────────────────────────────────────
 
 class MockJourneyAuthProvider extends AuthProvider {
+  // These screen tests start after staff MFA verification.
+  @override
+  bool get isAal2 => true;
+
   bool _mockIsAuthenticated = false;
   Profile? _mockProfile;
 
@@ -228,9 +229,8 @@ void main() {
 
   setUpAll(() async {
     await supabase.Supabase.initialize(
-      url: 'https://onzeyejlfydvvbkejvwf.supabase.co',
-      anonKey:
-          'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9uemV5ZWpsZnlkdnZia2VqdndmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNjcxMjYsImV4cCI6MjA5NDk0MzEyNn0.FJNbbuBZ2LdutVNrloYsxOLGZWbP-oLLTLJaKBOFkMM',
+      url: 'https://example.invalid',
+      anonKey: 'synthetic-test-key',
       authOptions: const supabase.FlutterAuthClientOptions(
         localStorage: supabase.EmptyLocalStorage(),
       ),

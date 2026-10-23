@@ -15,6 +15,10 @@ import 'package:klinikaid_mobile/core/models/profile.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
 class MockAuthProvider extends AuthProvider {
+  // These screen tests start after staff MFA verification.
+  @override
+  bool get isAal2 => true;
+
   Profile? _mockProfile;
 
   MockAuthProvider() : super();
@@ -86,8 +90,8 @@ void main() {
 
   setUpAll(() async {
     await supabase.Supabase.initialize(
-      url: 'https://onzeyejlfydvvbkejvwf.supabase.co',
-      anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9uemV5ZWpsZnlkdnZia2VqdndmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNjcxMjYsImV4cCI6MjA5NDk0MzEyNn0.FJNbbuBZ2LdutVNrloYsxOLGZWbP-oLLTLJaKBOFkMM',
+      url: 'https://example.invalid',
+      anonKey: 'synthetic-test-key',
       authOptions: const supabase.FlutterAuthClientOptions(
         localStorage: supabase.EmptyLocalStorage(),
       ),
