@@ -1,0 +1,22 @@
+name: Flutter checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  analyze-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.0
+          channel: stable
+          cache: true
+      # env.dart is gitignored; the example holds placeholders only, so tests make no real backend calls.
+      - run: cp lib/core/config/env.dart.example lib/core/config/env.dart
+      - run: flutter pub get --enforce-lockfile
+      - run: flutter analyze --no-fatal-infos
+      - run: flutter test --no-pub

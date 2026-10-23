@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
@@ -34,7 +35,7 @@ Future<bool> saveCsvToDownloads({
 
     return result != null;
   } catch (e) {
-    print('[saveCsvToDownloads] Error saving via MediaStore: $e');
+    debugPrint('[saveCsvToDownloads] Error saving via MediaStore: $e');
     return false;
   }
 }
