@@ -218,11 +218,13 @@ class ReceptionRepository {
     }
 
     try {
-      // Require a returned row: RLS can silently hide a document from UPDATE.
+      // Require a returned row: RLS can silently hide a document from UPDATE,
+      // and a document another receptionist already decided is not pending.
       await _client
           .from('documents')
           .update({'status': 'approved'})
           .eq('id', documentId)
+          .eq('status', 'pending')
           .select('id')
           .single();
     } catch (e) {
@@ -242,13 +244,24 @@ class ReceptionRepository {
     required String reason,
   }) async {
     try {
+      // Same guard as approval: no row back means nothing was rejected.
       await _client
           .from('documents')
           .update({
             'status': 'rejected',
             'rejection_reason': reason,
           })
-          .eq('id', documentId);
+          .eq('id', documentId)
+          .eq('status', 'pending')
+          .select('id')
+          .single();
+    } on PostgrestException catch (e) {
+      if (e.code == 'PGRST116') {
+        throw const DatabaseFailure(
+          'This document is no longer pending. Refresh to see its current status.',
+        );
+      }
+      throw FailureMapper.fromException(e);
     } catch (e) {
       throw FailureMapper.fromException(e);
     }

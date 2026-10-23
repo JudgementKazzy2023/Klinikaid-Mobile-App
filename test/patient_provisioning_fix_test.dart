@@ -77,6 +77,8 @@ class MockProfilesRepository extends ProfilesRepository {
 
 class ThrowingPatientsRepository extends PatientsRepository {
   int createPatientCalls = 0;
+  Patient? existingPatient;
+  bool lookupFails = false;
 
   @override
   Future<Patient> createPatient(Patient patient) async {
@@ -85,7 +87,10 @@ class ThrowingPatientsRepository extends PatientsRepository {
   }
 
   @override
-  Future<Patient?> getPatientByProfileId(String profileId) async => null;
+  Future<Patient?> getPatientByProfileId(String profileId) async {
+    if (lookupFails) throw StateError('synthetic lookup failure');
+    return existingPatient;
+  }
 }
 
 class FakeVerificationService implements VerificationService {
@@ -260,6 +265,68 @@ void main() {
       expect(verificationService.deletePendingUserCalled, true);
       expect(auth.signOutCalled, true);
       expect(patientsRepo.createPatientCalls, 0);
+    });
+    test('network failure after the row was created keeps the account and continues', () async {
+      final auth = MockGoTrueClient();
+      final patientsRepo = ThrowingPatientsRepository()..existingPatient = patient();
+      final verificationService = FakeVerificationService();
+      final provisioningService = MockPatientProvisioningService()
+        ..shouldFail = true
+        ..functionRan = false;
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: patientsRepo,
+        verificationService: verificationService,
+        provisioningService: provisioningService,
+      );
+
+      final success = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(success, true);
+      expect(verificationService.deletePendingUserCalled, false);
+      expect(auth.signOutCalled, false);
+      expect(provider.patient?.id, 'patient-row-1');
+      expect(verificationService.sendCodeCalled, true);
+    });
+
+    test('network failure with an unreadable outcome never deletes the account', () async {
+      final auth = MockGoTrueClient();
+      final patientsRepo = ThrowingPatientsRepository()..lookupFails = true;
+      final verificationService = FakeVerificationService();
+      final provisioningService = MockPatientProvisioningService()
+        ..shouldFail = true
+        ..functionRan = false;
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: patientsRepo,
+        verificationService: verificationService,
+        provisioningService: provisioningService,
+      );
+
+      final success = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(success, false);
+      expect(verificationService.deletePendingUserCalled, false);
+      expect(auth.signOutCalled, true);
+      expect(provider.errorMessage, contains('Try signing in'));
     });
   });
 }

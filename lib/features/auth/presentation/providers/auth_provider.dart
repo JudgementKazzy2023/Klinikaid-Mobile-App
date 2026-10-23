@@ -733,9 +733,18 @@ class AuthProvider extends ChangeNotifier {
             updatedAt: DateTime.now(),
           );
     } on PatientProvisioningException catch (e) {
-      _errorMessage = e.message;
+      var message = e.message;
       if (!e.functionRan) {
-        await _verificationService.deletePendingUser();
+        // A timeout or dropped connection can follow a commit on the server.
+        // Delete the new login only when a read proves no patient row exists.
+        final outcome = await _patientRowAfterUncertainProvisioning();
+        if (outcome.patient != null) return outcome.patient;
+        if (outcome.confirmedAbsent) {
+          await _verificationService.deletePendingUser();
+        } else {
+          message =
+              '${e.message} Your account may already exist. Try signing in before registering again.';
+        }
       }
       await _client.auth.signOut().catchError((_) {});
       _user = null;
@@ -747,8 +756,25 @@ class AuthProvider extends ChangeNotifier {
       _hasConsented = false;
       _isOnboarded = false;
       _isLoading = false;
+      // After `_user = null`, whose identity reset clears the error.
+      _errorMessage = message;
       notifyListeners();
       return null;
+    }
+  }
+
+  /// Without a session RLS hides the row, so absence proves nothing then.
+  Future<({Patient? patient, bool confirmedAbsent})>
+      _patientRowAfterUncertainProvisioning() async {
+    final userId = _user?.id;
+    if (userId == null || _session == null) {
+      return (patient: null, confirmedAbsent: false);
+    }
+    try {
+      final existing = await _patientsRepo.getPatientByProfileId(userId);
+      return (patient: existing, confirmedAbsent: existing == null);
+    } catch (_) {
+      return (patient: null, confirmedAbsent: false);
     }
   }
 
