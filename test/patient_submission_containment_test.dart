@@ -1,3 +1,4 @@
+import 'package:klinikaid_mobile/features/documents/data/uploads_repository.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:drift/native.dart';
@@ -31,59 +32,90 @@ void main() {
   late Directory temp;
   late File savedFile;
   // Every row, all owners: getQueuedDocuments is owner-scoped (#27).
-  Future<List<OfflineDocument>> allQueued() => db.select(db.offlineDocumentsQueue).get();
+  Future<List<OfflineDocument>> allQueued() =>
+      db.select(db.offlineDocumentsQueue).get();
   final requests = <http.Request>[];
   final now = DateTime.utc(2026, 10, 20);
   final document = Document(
-    id: 'doc', uploaderId: 'owner', fileName: 'fixture.txt',
-    filePath: 'owner/fixture.txt', fileType: 'txt',
-    status: DocumentStatus.pending, createdAt: now, updatedAt: now,
+    id: 'doc',
+    uploaderId: 'owner',
+    fileName: 'fixture.txt',
+    filePath: 'owner/fixture.txt',
+    fileType: 'txt',
+    status: DocumentStatus.pending,
+    createdAt: now,
+    updatedAt: now,
   );
   final patient = Patient(
-    id: 'patient', firstName: 'Fixture', lastName: 'Patient',
-    dateOfBirth: DateTime(1990), gender: Gender.other, contactNumber: '',
-    address: '', createdAt: now, updatedAt: now,
+    id: 'patient',
+    firstName: 'Fixture',
+    lastName: 'Patient',
+    dateOfBirth: DateTime(1990),
+    gender: Gender.other,
+    contactNumber: '',
+    address: '',
+    createdAt: now,
+    updatedAt: now,
   );
 
   setUp(() async {
     requests.clear();
-    client = SupabaseClient('https://example.invalid', 'fake-key',
+    client = SupabaseClient(
+      'https://example.invalid',
+      'fake-key',
       authOptions: const AuthClientOptions(autoRefreshToken: false),
       httpClient: MockClient((request) async {
         requests.add(request);
         if (request.method != 'GET') {
           throw StateError('Unexpected network write: ${request.url.path}');
         }
-        return http.Response(jsonEncode([document.toJson()]), 200,
+        return http.Response(
+          jsonEncode([document.toJson()]),
+          200,
           request: request,
-          headers: {'content-type': 'application/json'});
+          headers: {'content-type': 'application/json'},
+        );
       }),
     );
     // setInitialSession is a local-only assignment; never sign in or refresh.
-    await client.auth.setInitialSession(jsonEncode({
-      'access_token': '${base64Url.encode(utf8.encode('{"alg":"HS256"}'))}.'
-          '${base64Url.encode(utf8.encode(jsonEncode({
-            'sub': 'owner',
-            'exp': DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch ~/ 1000,
-          })))}.fixture',
-      'refresh_token': 'fixture-refresh',
-      'token_type': 'bearer', 'expires_in': 3600,
-      'user': {'id': 'owner', 'app_metadata': {}, 'user_metadata': {},
-        'aud': 'authenticated', 'created_at': now.toIso8601String()},
-    }));
+    await client.auth.setInitialSession(
+      jsonEncode({
+        'access_token':
+            '${base64Url.encode(utf8.encode('{"alg":"HS256"}'))}.'
+            '${base64Url.encode(utf8.encode(jsonEncode({'sub': 'owner', 'exp': DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch ~/ 1000})))}.fixture',
+        'refresh_token': 'fixture-refresh',
+        'token_type': 'bearer',
+        'expires_in': 3600,
+        'user': {
+          'id': 'owner',
+          'app_metadata': {},
+          'user_metadata': {},
+          'aud': 'authenticated',
+          'created_at': now.toIso8601String(),
+        },
+      }),
+    );
     temp = await Directory.systemTemp.createTemp('containment-test-');
     savedFile = File('${temp.path}/draft.txt');
     await savedFile.writeAsString('Synthetic draft fixture');
     db = LocalDatabase(NativeDatabase(File('${temp.path}/queue.sqlite')));
     for (final id in ['saved', 'missing', 'other-owner']) {
-      await db.queueOfflineDocument(OfflineDocument(
-        id: id, patientId: 'patient',
-        uploaderId: id == 'other-owner' ? 'another-owner' : 'owner',
-        fileName: '$id.txt',
-        localFilePath: id == 'missing' ? '${temp.path}/absent.txt' : savedFile.path,
-        fileType: 'txt', ocrText: 'Fixture OCR',
-        extractedMetadata: '{"document_type":"lab-request"}', createdAt: now,
-      ));
+      await db.queueOfflineDocument(
+        OfflineDocument(
+          uploadState: 'draft',
+          id: id,
+          patientId: 'patient',
+          uploaderId: id == 'other-owner' ? 'another-owner' : 'owner',
+          fileName: '$id.txt',
+          localFilePath: id == 'missing'
+              ? '${temp.path}/absent.txt'
+              : savedFile.path,
+          fileType: 'txt',
+          ocrText: 'Fixture OCR',
+          extractedMetadata: '{"document_type":"lab-request"}',
+          createdAt: now,
+        ),
+      );
     }
     uploads = DocumentSubmissionProvider(db, client: client);
     await Future<void>.delayed(Duration.zero);
@@ -99,12 +131,31 @@ void main() {
 
   test('repository writes are blocked; patient reads still work', () async {
     final repo = DocumentsRepository(client: client);
-    await expectLater(repo.insertDocument(document), throwsStateError);
-    await expectLater(repo.updatePendingDocument(document), throwsStateError);
-    await expectLater(TemplatesRepository(client: client).submitTemplateDocument(
-      patientId: 'patient', uploaderId: 'owner', templateId: 'lab-request',
-      templateName: 'Lab', extractedMetadata: {},
-    ), throwsStateError);
+    await expectLater(
+      UploadsRepository(client: client).submit(
+        owner: 'owner',
+        requestId: 'request',
+        assessmentId: 'assessment',
+        documentType: 'other',
+      ),
+      throwsStateError,
+    );
+    await expectLater(
+      UploadsRepository(
+        client: client,
+      ).lookup(owner: 'owner', requestId: 'request'),
+      throwsStateError,
+    );
+    await expectLater(
+      TemplatesRepository(client: client).submitTemplateDocument(
+        patientId: 'patient',
+        uploaderId: 'owner',
+        templateId: 'lab-request',
+        templateName: 'Lab',
+        extractedMetadata: {},
+      ),
+      throwsStateError,
+    );
     expect(requests, isEmpty);
     expect((await repo.getDocumentsForPatient('owner')).single.id, 'doc');
     expect(requests.single.method, 'GET');
@@ -114,10 +165,17 @@ void main() {
   test('template guard retains input and never reports success', () async {
     final provider = TemplatesProvider();
     final values = <String, dynamic>{'tests_requested': 'Fixture'};
-    expect(await provider.submitTemplate(
-      patientId: 'patient', uploaderId: 'owner', templateId: 'lab-request',
-      templateName: 'Lab', formValues: values, patientName: 'Fixture',
-    ), isFalse);
+    expect(
+      await provider.submitTemplate(
+        patientId: 'patient',
+        uploaderId: 'owner',
+        templateId: 'lab-request',
+        templateName: 'Lab',
+        formValues: values,
+        patientName: 'Fixture',
+      ),
+      isFalse,
+    );
     expect(values, {'tests_requested': 'Fixture'});
     expect(provider.success, isFalse);
     expect(provider.isLoading, isFalse);
@@ -126,26 +184,36 @@ void main() {
     provider.dispose();
   });
 
-  test('upload blocks before Storage or offline fallback, retaining metadata', () async {
-    final before = await allQueued();
-    uploads.setTestDetectionStateForTest(
-      ocrText: 'Fixture OCR', preScreenMetadata: {'document_type': 'lab-request'},
-    );
-    for (final offline in [false, true]) {
-      expect(await uploads.submitDocument(
-        localFilePath: savedFile.path, originalFileName: 'draft.txt',
-        fileExtension: 'txt', patient: patient, documentType: 'lab-request',
-        isTest: offline,
-      ), isFalse);
-    }
-    expect(uploads.errorMessage, PatientSubmissionContainment.message);
-    expect(uploads.isLoading, isFalse);
-    expect(uploads.extractedOcrText, 'Fixture OCR');
-    expect(uploads.preScreenMetadata, {'document_type': 'lab-request'});
-    expect(await allQueued(), before);
-    expect(await savedFile.readAsString(), 'Synthetic draft fixture');
-    expect(requests, isEmpty);
-  });
+  test(
+    'upload blocks before Storage or offline fallback, retaining metadata',
+    () async {
+      final before = await allQueued();
+      uploads.setTestDetectionStateForTest(
+        ocrText: 'Fixture OCR',
+        preScreenMetadata: {'document_type': 'lab-request'},
+      );
+      for (final offline in [false, true]) {
+        expect(
+          await uploads.submitDocument(
+            localFilePath: savedFile.path,
+            originalFileName: 'draft.txt',
+            fileExtension: 'txt',
+            patient: patient,
+            documentType: 'lab-request',
+            isTest: offline,
+          ),
+          isFalse,
+        );
+      }
+      expect(uploads.errorMessage, PatientSubmissionContainment.message);
+      expect(uploads.isLoading, isFalse);
+      expect(uploads.extractedOcrText, 'Fixture OCR');
+      expect(uploads.preScreenMetadata, {'document_type': 'lab-request'});
+      expect(await allQueued(), before);
+      expect(await savedFile.readAsString(), 'Synthetic draft fixture');
+      expect(requests, isEmpty);
+    },
+  );
 
   test('manual sync holds every row and file across database reopen', () async {
     final before = await allQueued();
@@ -165,11 +233,16 @@ void main() {
     expect(requests, isEmpty);
   });
 
-  testWidgets('opening and resuming upload never replays drafts', (tester) async {
+  testWidgets('opening and resuming upload never replays drafts', (
+    tester,
+  ) async {
     final before = await allQueued();
-    await tester.pumpWidget(ChangeNotifierProvider.value(
-      value: uploads, child: const MaterialApp(home: SubmitDocumentScreen()),
-    ));
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: uploads,
+        child: const MaterialApp(home: SubmitDocumentScreen()),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.text(PatientSubmissionContainment.message), findsOneWidget);
     expect(find.text('Submit Request'), findsNothing);
@@ -187,11 +260,18 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('all template routes prevent form entry with persistent notice', (tester) async {
+  testWidgets('all template routes prevent form entry with persistent notice', (
+    tester,
+  ) async {
     for (final template in clinicTemplates) {
-      await tester.pumpWidget(MaterialApp(home: TemplateFormRendererScreen(
-        key: ValueKey(template.id), templateId: template.id,
-      )));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TemplateFormRendererScreen(
+            key: ValueKey(template.id),
+            templateId: template.id,
+          ),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(find.text(PatientSubmissionContainment.message), findsOneWidget);
       expect(find.byType(Form), findsNothing);

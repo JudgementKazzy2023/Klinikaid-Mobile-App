@@ -6,12 +6,15 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/cache/local_database.dart';
 import '../../../../core/patient_submission_containment.dart';
-import '../../../../core/errors/failures.dart';
-import '../../../../core/models/document.dart';
+import 'package:crypto/crypto.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
+import '../../data/uploads_repository.dart';
+
 import '../../../../core/models/patient.dart';
 import '../../../../core/supabase/supabase_client.dart';
 import '../../../../core/utils/uuid_generator.dart';
-import '../../../../core/repositories/documents_repository.dart';
+
 import '../../clinic_test_catalog.dart';
 import '../../../ocr/data/document_quality_service.dart';
 import '../../../ocr/domain/quality_assessment.dart';
@@ -20,14 +23,15 @@ import '../../../patient/submissions/document_dedup.dart';
 
 class DocumentSubmissionProvider extends ChangeNotifier {
   final LocalDatabase _localDb;
-  final DocumentsRepository _docsRepo;
+  final UploadsRepository _uploads;
+  final Directory? _draftDirectory;
   final SupabaseClient? _injectedClient;
   SupabaseClient get _client => _injectedClient ?? SupabaseService.client;
   final _qualityService = DocumentQualityService();
-  
+
   bool _isLoading = false;
   String? _errorMessage;
-  
+
   // OCR processing states
   bool _isProcessing = false;
   bool _isProcessingOcr = false;
@@ -35,20 +39,24 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   Map<String, dynamic>? _preScreenMetadata;
   String? _selectedImagePath;
   List<ClinicTest> _detectedTests = [];
-  
+
   // Offline sync states
   List<OfflineDocument> _queuedSubmissions = [];
-  final Map<String, int> _retryCounts = {};
+
   StreamSubscription<AuthState>? _authSubscription;
   bool _disposed = false;
 
-  DocumentSubmissionProvider(this._localDb, {SupabaseClient? client})
-      : _injectedClient = client,
-        _docsRepo = DocumentsRepository(client: client) {
+  DocumentSubmissionProvider(
+    this._localDb, {
+    SupabaseClient? client,
+    Directory? draftDirectory,
+  }) : _draftDirectory = draftDirectory,
+       _injectedClient = client,
+       _uploads = UploadsRepository(client: client) {
     _loadQueuedSubmissions();
     _watchAuthIdentityChanges();
   }
-  
+
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   bool get isProcessing => _isProcessing;
@@ -57,13 +65,16 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   Map<String, dynamic>? get preScreenMetadata => _preScreenMetadata;
   String? get selectedImagePath => _selectedImagePath;
   List<ClinicTest> get detectedTests => List.unmodifiable(_detectedTests);
-  
+
   /// Returns true if there is a processed document ready for review.
-  bool get hasCachedSubmission => _selectedImagePath != null && _preScreenMetadata != null;
-  
+  bool get hasCachedSubmission =>
+      _selectedImagePath != null && _preScreenMetadata != null;
+
   /// Queued submissions owned by the signed-in identity only. Rows queued by
   /// another account are never exposed here.
-  List<OfflineDocument> get queuedSubmissions => _queuedSubmissions;
+  List<OfflineDocument> get queuedSubmissions => List.unmodifiable(
+    _queuedSubmissions.where((d) => d.uploaderId == _currentUserId()),
+  );
 
   /// Signed-in user id, or null when it cannot be established.
   /// Fails closed: an unreadable auth client counts as unauthenticated.
@@ -75,16 +86,13 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     }
   }
 
-  /// Owner id used by the simulated-offline test hook in [submitDocument].
-  static const _testOwnerId = 'user-uuid-123';
-
   /// Newest [submitDocument] call. A superseded operation must never write
   /// state that a newer operation owns.
   int _submitGeneration = 0;
 
   /// True while [owner] is still the signed-in identity. Fails closed with
   /// [_currentUserId]: an unreadable auth client is a different session.
-  bool _ownerStill(String? owner) => _currentUserId() == owner;
+  bool _ownerStill(String? owner) => !_disposed && _currentUserId() == owner;
 
   /// Applies this submit's completion state while it is still the newest
   /// operation; a superseded one writes nothing, so a newer operation's
@@ -103,34 +111,10 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   /// dispatched, no success is reported and no newer state is touched.
   bool _abandonSubmit(int generation) {
     _completeSubmit(
-        generation, errorMessage: 'Session changed. Please try again.');
+      generation,
+      errorMessage: 'Session changed. Please try again.',
+    );
     return false;
-  }
-
-  /// Completes the offline fallback shared by both network-failure branches:
-  /// queues the owner-attributed draft, then re-checks ownership after each
-  /// local await. A session that changed while the write or the reload waited
-  /// is abandoned — never told the submit succeeded — and the draft already
-  /// written stays attributed to its owner, never rewritten or deleted for
-  /// the newer identity.
-  Future<bool> _completeOfflineFallback({
-    required int generation,
-    required OfflineDocument doc,
-    required bool Function() stillOwned,
-    required String message,
-  }) async {
-    await _localDb.queueOfflineDocument(doc);
-    // The local write resumed after an await: a session that changed while it
-    // waited is abandoned. The row just written stays owned by the account
-    // that started the submit and is never rewritten for the newer identity.
-    if (!stillOwned()) return _abandonSubmit(generation);
-
-    await _loadQueuedSubmissions();
-    // The reload resumed after an await: the same switch during that read.
-    if (!stillOwned()) return _abandonSubmit(generation);
-
-    _completeSubmit(generation, errorMessage: message);
-    return true;
   }
 
   /// Invalidates queue visibility on every auth change so getters can never
@@ -138,8 +122,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   /// identity.
   void _watchAuthIdentityChanges() {
     try {
-      _authSubscription =
-          _client.auth.onAuthStateChange.listen((_) {
+      _authSubscription = _client.auth.onAuthStateChange.listen((_) {
         if (_disposed) return;
         _queuedSubmissions = [];
         notifyListeners();
@@ -184,23 +167,29 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     }
   }
 
-  /// Deletes a queued offline document owned by the signed-in identity.
-  /// Foreign ids and signed-out calls are a no-op: the owner-scoped delete
-  /// matches no row, so other accounts' drafts are never removed.
-  Future<void> removeQueuedItem(String id) async {
-    if (PatientSubmissionContainment.isActive) return;
-    final ownerId = _currentUserId();
-    if (ownerId == null) return;
-    try {
-      await _localDb.removeQueuedDocument(id, ownerId);
-      await _loadQueuedSubmissions();
-    } catch (e) {
-      debugPrint('Error removing queued document: $e');
-    }
+  Future<void> selectPdf(String filePath) async {
+    PatientSubmissionContainment.requireAvailable();
+    final file = File(filePath);
+    if (await file.length() > 5 * 1024 * 1024)
+      throw const FormatException('Files must be at most 5 MB.');
+    _selectedImagePath = filePath;
+    _extractedOcrText = '';
+    _detectedTests = [];
+    _preScreenMetadata = {
+      'quality_assessment': DocumentQualityService.fallbackAssessment.toJson(),
+      'submitted_with_warnings': true,
+    };
+    notifyListeners();
   }
 
-  /// Processes text recognition on-device with ML Kit.
+  Future<void> removeQueuedItem(String id) async {
+    if (PatientSubmissionContainment.isActive) return;
+    _errorMessage = 'Drafts are kept until the clinic confirms the outcome.';
+    notifyListeners();
+  }
+
   Future<String> processOnDeviceOcr(String imagePath, Patient patient) async {
+    PatientSubmissionContainment.requireAvailable();
     _isProcessing = true;
     _isProcessingOcr = true;
     _errorMessage = null;
@@ -209,32 +198,40 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     _detectedTests = [];
     _selectedImagePath = imagePath;
     notifyListeners();
-    
+
     TextRecognizer? textRecognizer;
     try {
       textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
-      final RecognizedText recognizedText = await textRecognizer.processImage(InputImage.fromFilePath(imagePath));
+      final RecognizedText recognizedText = await textRecognizer.processImage(
+        InputImage.fromFilePath(imagePath),
+      );
       final String ocrText = recognizedText.text;
-      
+
       _extractedOcrText = ocrText;
       _detectedTests = detectRequestedTests(ocrText);
-      
+
       // Perform AI Quality Assessment (Path A) via Edge Function
       final QualityAssessment assessment = await _qualityService.assess(
         ocrText: ocrText,
         patientName: '${patient.firstName} ${patient.lastName}',
       );
-      
-      final bool identityMatch = checkPatientName(ocrText, patient.firstName, patient.lastName);
-      final bool submittedWithWarnings = assessment.score < QualityThresholds.minOcrPassScore || !identityMatch;
-      
+
+      final bool identityMatch = checkPatientName(
+        ocrText,
+        patient.firstName,
+        patient.lastName,
+      );
+      final bool submittedWithWarnings =
+          assessment.score < QualityThresholds.minOcrPassScore ||
+          !identityMatch;
+
       _preScreenMetadata = {
         'ocr_text': ocrText,
         'quality_assessment': assessment.toJson(),
         'identity_match': identityMatch,
         'submitted_with_warnings': submittedWithWarnings,
       };
-      
+
       _isProcessingOcr = false;
       notifyListeners();
       return ocrText;
@@ -277,7 +274,11 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   /// Note: The original hardcoded date pattern, doctor token, and keyword checks
   /// (sub-tasks 4.6, 4.7, 4.9) are commented out/removed for Path A. They are replaced
   /// by the Edge-Function-based quality assessment.
-  Map<String, dynamic> preScreenOcrText(String ocrText, String firstName, String lastName) {
+  Map<String, dynamic> preScreenOcrText(
+    String ocrText,
+    String firstName,
+    String lastName,
+  ) {
     /*
     final text = ocrText.toLowerCase();
     
@@ -297,10 +298,10 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     final matchedKeywords = keywords.where((kw) => text.contains(kw)).toList();
     final hasKeywords = matchedKeywords.isNotEmpty;
     */
-    
+
     final bool identityMatch = checkPatientName(ocrText, firstName, lastName);
     final fallback = DocumentQualityService.fallbackAssessment;
-    
+
     return {
       'ocr_text': ocrText,
       'quality_assessment': fallback.toJson(),
@@ -320,12 +321,118 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     _detectedTests = detectedTests ?? detectRequestedTests(ocrText);
   }
 
-  /// Submits a document. Uploads directly online, or queues in local SQLite if offline.
-  ///
-  /// The signed-in owner is captured before the first await and re-checked at
-  /// every awaited boundary, so an account switch mid-flight can never write
-  /// this patient's document under another uploader, report a stale success or
-  /// overwrite the state of a newer operation.
+  String? _advisoryMessage;
+  String? get advisoryMessage => _advisoryMessage;
+  String? _activeDraftId;
+  UploadFailure? _submissionError;
+  String? _documentId;
+  String? get submittedDocumentId => _documentId;
+  String? get duplicateDocumentId =>
+      _submissionError?.code == 'DUPLICATE_PENDING'
+      ? _submissionError?.documentId
+      : null;
+  String? get errorCode => _submissionError?.code;
+  Map<String, String> get fieldErrors => _submissionError?.field == null
+      ? {}
+      : {_submissionError!.field!: _errorMessage ?? _submissionError!.message};
+  bool get canSubmit => !_isLoading && !_blocked;
+  bool _blocked = false;
+  String? get remediationRoute => switch (_submissionError?.code) {
+    'UNAUTHENTICATED' => '/login',
+    'EMAIL_NOT_CONFIRMED' => '/verify',
+    'CONSENT_REQUIRED' => '/consent',
+    'PASSWORD_CHANGE_REQUIRED' => 'change-password',
+    _ => null,
+  };
+
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
+  void resumeAfterAccountFlow() {
+    if (remediationRoute != null) {
+      _blocked = false;
+      notifyListeners();
+    }
+  }
+
+  void _applyUploadFailure(UploadFailure error, String category) {
+    _advisoryMessage = null;
+    _submissionError = error;
+    _blocked = ![
+      'FIELD_REQUIRED',
+      'FIELD_INVALID',
+      'SERVER_ERROR',
+    ].contains(error.code);
+    _errorMessage = switch (error.code) {
+      'DUPLICATE_PENDING' =>
+        'You already have a pending ${getCategoryLabel(category)}',
+      'IDEMPOTENCY_CONFLICT' ||
+      'RECONCILIATION_REQUIRED' ||
+      'ASSESSMENT_NOT_FOUND' =>
+        'Please contact the clinic before submitting again. Your file and answers are still here.',
+      'UNKNOWN_FIELD' ||
+      'METHOD_NOT_ALLOWED' => 'This app version is out of date.',
+      'UNAUTHENTICATED' ||
+      'EMAIL_NOT_CONFIRMED' ||
+      'CONSENT_REQUIRED' ||
+      'PASSWORD_CHANGE_REQUIRED' ||
+      'PATIENT_ACCOUNT_REQUIRED' ||
+      'NO_PATIENT_RECORD' ||
+      'PROFILE_INACTIVE' ||
+      'SERVER_DATA_INVALID' ||
+      'FIELD_REQUIRED' ||
+      'FIELD_INVALID' => error.message,
+      _ => UploadFailure.unknown.message,
+    };
+    if (error.code == 'SERVER_ERROR' ||
+        ![
+          'DUPLICATE_PENDING',
+          'IDEMPOTENCY_CONFLICT',
+          'RECONCILIATION_REQUIRED',
+          'ASSESSMENT_NOT_FOUND',
+          'UNKNOWN_FIELD',
+          'METHOD_NOT_ALLOWED',
+          'UNAUTHENTICATED',
+          'EMAIL_NOT_CONFIRMED',
+          'CONSENT_REQUIRED',
+          'PASSWORD_CHANGE_REQUIRED',
+          'PATIENT_ACCOUNT_REQUIRED',
+          'NO_PATIENT_RECORD',
+          'PROFILE_INACTIVE',
+          'SERVER_DATA_INVALID',
+          'FIELD_REQUIRED',
+          'FIELD_INVALID',
+        ].contains(error.code)) {
+      _submissionError = UploadFailure.unknown;
+      _blocked = false;
+    }
+  }
+
+  /// The server confirmed this submission, so the app's private copy of the
+  /// medical document is no longer needed on the device. Only files inside the
+  /// owner's submission-drafts folder are touched, never the patient's original.
+  Future<void> _deleteDraftCopy(String filePath, String owner) async {
+    try {
+      final root = _draftDirectory ?? await getApplicationDocumentsDirectory();
+      final folder = path.join(root.path, 'submission-drafts', owner);
+      if (!path.isWithin(folder, filePath)) return;
+      final file = File(filePath);
+      if (await file.exists()) await file.delete();
+    } catch (_) {
+      // The submission is confirmed; a leftover copy is not worth failing it.
+    }
+  }
+
+  /// This compatibility entry never replays a queue, even with containment off.
+  Future<void> syncOfflineQueue() async {
+    if (PatientSubmissionContainment.isActive) return;
+    await _loadQueuedSubmissions();
+    _errorMessage = 'Review and submit one saved draft at a time.';
+    notifyListeners();
+  }
+
   Future<bool> submitDocument({
     required String localFilePath,
     required String originalFileName,
@@ -341,342 +448,349 @@ class DocumentSubmissionProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
-    // Capture the operation owner before the first async boundary: everything
-    // below is judged against the identity that started this submit, never
-    // against whichever account happens to be signed in when an await ends.
-    final ownerId = isTest ? _testOwnerId : _currentUserId();
-    final generation = ++_submitGeneration;
-
-    _isLoading = true;
-    _errorMessage = null;
-    notifyListeners();
-
-    if (ownerId == null) {
-      _completeSubmit(
-          generation, errorMessage: 'Session expired. Please log in again.');
+    if (_isLoading || _disposed) return false;
+    final owner = _currentUserId();
+    if (owner == null || patient.profileId != owner) {
+      _errorMessage = 'Session changed. Please log in again.';
+      notifyListeners();
       return false;
     }
-
-    // A patient object belongs to the profile that loaded it. Submitted under
-    // another session it would be written with that session as uploader, so it
-    // is rejected instead. Test mode has no real profile to compare.
-    if (!isTest && patient.profileId != ownerId) {
-      return _abandonSubmit(generation);
+    final owned = await _localDb.getQueuedDocuments(owner);
+    if (!_ownerStill(owner)) return false;
+    final matching = owned.where(
+      (d) => d.id == _activeDraftId || d.localFilePath == localFilePath,
+    );
+    final existing = matching.isEmpty ? null : matching.first;
+    if (existing == null && owned.any((d) => d.uploadState == 'unknown')) {
+      _errorMessage =
+          'Please check the uncertain saved draft below before starting another submission.';
+      notifyListeners();
+      return false;
     }
+    return _runUpload(
+      owner: owner,
+      existing: existing,
+      localFilePath: localFilePath,
+      fileName: originalFileName,
+      fileExtension: fileExtension,
+      patientId: patient.id,
+      category: documentType,
+      ocr: _extractedOcrText ?? '',
+      selected: selectedTestIds,
+    );
+  }
 
-    // Re-checked at every awaited boundary below. Test mode drives a synthetic
-    // owner with no session that could switch.
-    bool stillOwned() => isTest || _ownerStill(ownerId);
+  /// Explicit owner action. No screen/lifecycle callback invokes this method.
+  Future<bool> resolveQueuedDraft(String id) async {
+    if (PatientSubmissionContainment.isActive || _isLoading || _disposed)
+      return false;
+    final owner = _currentUserId();
+    if (owner == null) return false;
+    final rows = await _localDb.getQueuedDocuments(owner);
+    if (!_ownerStill(owner)) return false;
+    final matches = rows.where((d) => d.id == id);
+    if (matches.isEmpty) return false;
+    final doc = matches.single;
+    try {
+      final metadata = doc.extractedMetadata == null
+          ? <String, dynamic>{}
+          : Map<String, dynamic>.from(jsonDecode(doc.extractedMetadata!));
+      final saved = doc.submissionContent == null
+          ? null
+          : Map<String, dynamic>.from(jsonDecode(doc.submissionContent!));
+      final selected = saved != null
+          ? (saved['selected'] == null
+                ? null
+                : List<String>.from(saved['selected']))
+          : metadata['selected_tests'] is List
+          ? (metadata['selected_tests'] as List)
+                .map((t) => (t as Map)['id'] as String)
+                .toList()
+          : null;
+      return await _runUpload(
+        owner: owner,
+        existing: doc,
+        localFilePath: doc.localFilePath,
+        fileName: doc.fileName,
+        fileExtension: doc.fileType,
+        patientId: doc.patientId,
+        category:
+            saved?['category'] as String? ??
+            metadata['document_type'] as String? ??
+            'other',
+        ocr: doc.ocrText ?? '',
+        selected: selected,
+      );
+    } catch (_) {
+      _applyUploadFailure(
+        const UploadFailure(
+          'SERVER_DATA_INVALID',
+          'This saved draft needs clinic review. Your draft and file are still here.',
+        ),
+        'other',
+      );
+      notifyListeners();
+      return false;
+    }
+  }
 
-    // Check duplicate
-    Object? offlineCheckFailure;
-    if (!isTest) {
-      final duplicateCheck = await checkPendingDuplicate(patient.id, documentType);
-      // The lookup was awaited: if the account changed while it waited, this
-      // patient object belongs to a different linked profile than the session
-      // now holding it, so nothing further is read or written on its behalf.
-      if (!stillOwned()) return _abandonSubmit(generation);
-      final label = getCategoryLabel(documentType);
-      if (duplicateCheck.state == DuplicateCheckState.duplicate) {
-        _completeSubmit(
-            generation,
-            errorMessage:
-                "You already have a pending [$label] submitted on ${duplicateCheck.duplicateDate}. You can submit a new one once it's reviewed.");
+  Future<bool> _runUpload({
+    required String owner,
+    required OfflineDocument? existing,
+    required String localFilePath,
+    required String fileName,
+    required String fileExtension,
+    required String? patientId,
+    required String category,
+    required String ocr,
+    List<String>? selected,
+  }) async {
+    if (_isLoading) return false;
+    final generation = ++_submitGeneration;
+    _isLoading = true;
+    _submissionError = null;
+    _errorMessage = null;
+    _blocked = false;
+    notifyListeners();
+    OfflineDocument? draft = existing;
+    try {
+      if (draft != null && draft.uploadState.startsWith('blocked:')) {
+        _applyUploadFailure(
+          UploadFailure(
+            draft.uploadState.substring(8),
+            'Contact the clinic before trying again.',
+          ),
+          category,
+        );
         return false;
       }
-      if (duplicateCheck.state == DuplicateCheckState.failed) {
-        final checkError = duplicateCheck.error;
-        if (duplicateCheck.isNetworkFailure && checkError != null) {
-          // The device is offline: the server was never reached, so the check
-          // says nothing about duplicates. Keep the document on the device and
-          // queue it for sync, exactly like a failed upload does. The upload
-          // is not attempted, because the network is known to be down.
-          offlineCheckFailure = checkError;
-        } else {
-          // The existing documents could not be read, so the duplicate status
-          // is unknown. Do not upload as if it were unique: ask the patient to
-          // retry.
-          _completeSubmit(
-              generation,
-              errorMessage:
-                  "Could not check for a pending [$label] submission. Please check your connection and try again.");
-          return false;
+      if (draft?.uploadState == 'unknown' || draft?.uploadState == 'legacy') {
+        final known = await _uploads.lookup(
+          owner: owner,
+          requestId: draft!.requestId!,
+        );
+        if (!_ownerStill(owner)) return _abandonSubmit(generation);
+        switch (known) {
+          case UploadLookup(state: 'committed'):
+            _documentId = known.documentId;
+            await _localDb.removeQueuedDocument(draft.id, owner);
+            await _deleteDraftCopy(draft.localFilePath, owner);
+            if (!_ownerStill(owner)) return _abandonSubmit(generation);
+            return true;
+          case UploadLookup(state: 'not_found'):
+            draft = draft.copyWith(uploadState: 'draft');
+            await _localDb.updateUploadDraft(draft, owner);
+          case UploadLookup():
+            _applyUploadFailure(
+              const UploadFailure(
+                'RECONCILIATION_REQUIRED',
+                'Contact the clinic.',
+              ),
+              category,
+            );
+            await _localDb.updateUploadDraft(
+              draft.copyWith(uploadState: 'blocked:RECONCILIATION_REQUIRED'),
+              owner,
+            );
+            return false;
+          case UploadFailure():
+            _applyUploadFailure(known, category);
+            return false;
+          case UploadSuccess():
+            _applyUploadFailure(UploadFailure.unknown, category);
+            return false;
         }
       }
-    }
-    
-    final uuid = UuidGenerator.generateV4();
-    // Use clear test prefix directory in storage paths to support testing cleanup
-    final storagePath = isTest 
-        ? '$ownerId/__test__/${uuid}_$originalFileName'
-        : '$ownerId/${uuid}_$originalFileName';
-        
-    final ocrText = _extractedOcrText ?? '';
-    final Map<String, dynamic> metadata = Map<String, dynamic>.from(
-      _preScreenMetadata ?? preScreenOcrText(ocrText, patient.firstName, patient.lastName),
-    );
-    metadata['document_type'] = documentType;
-    if (_detectedTests.isNotEmpty) {
-      metadata.addAll(buildTestDetectionMetadata(
-        detectedTests: _detectedTests,
-        selectedTestIds: selectedTestIds ?? _detectedTests.map((test) => test.id).toList(),
-      ));
-    }
-
-    if (offlineCheckFailure != null) {
-      // The duplicate check could not reach the server, so the document is
-      // queued locally instead of being uploaded.
-      return _queueOfflineSubmission(
-        generation: generation,
-        uuid: uuid,
-        patient: patient,
-        ownerId: ownerId,
-        localFilePath: localFilePath,
-        originalFileName: originalFileName,
-        fileExtension: fileExtension,
-        ocrText: ocrText,
-        metadata: metadata,
-        error: offlineCheckFailure,
-        stillOwned: stillOwned,
-      );
-    }
-
-    try {
-      if (isTest) {
-        throw const SocketException('Simulated offline exception for testing');
-      }
-
-      // 1. Upload file to Supabase Storage private bucket
-      final File file = File(localFilePath);
+      if (!_ownerStill(owner)) return _abandonSubmit(generation);
+      final file = File(localFilePath);
       if (!await file.exists()) {
-        throw Exception('Captured image file does not exist locally.');
+        _errorMessage =
+            'The saved file is missing. Your draft is kept; contact the clinic.';
+        return false;
       }
-
-      // The file check resumed after an await: stop before the dispatched
-      // upload rather than writing under a newer session.
-      if (!stillOwned()) return _abandonSubmit(generation);
-      
-      await _client.storage
-          .from('patient-documents')
-          .upload(storagePath, file);
-
-      // The upload resumed after an await: the dispatched upload itself cannot
-      // be recalled, but no document row is written for a changed session.
-      if (!stillOwned()) return _abandonSubmit(generation);
-          
-      // 2. Insert metadata document row to Supabase Postgres
-      final docPayload = Document(
-        id: uuid,
-        patientId: patient.id,
-        uploaderId: ownerId,
-        fileName: originalFileName,
-        filePath: storagePath,
-        fileType: fileExtension,
-        status: DocumentStatus.pending,
-        ocrText: ocrText,
-        extractedMetadata: metadata,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-      );
-      
-      await _docsRepo.insertDocument(docPayload);
-
-      // The insert resumed after an await: it cannot be recalled either, but a
-      // changed session must not be told this submit succeeded.
-      if (!stillOwned()) return _abandonSubmit(generation);
-
-      _completeSubmit(generation);
-      return true;
-    } on SocketException catch (e) {
-      // Offline fallback: Queue submission details locally in SQLite cache.
-      // An account that changed while the upload failed must not be told the
-      // submit succeeded, and nothing new is done on its behalf.
-      if (!stillOwned()) return _abandonSubmit(generation);
-      return _queueOfflineSubmission(
-        generation: generation,
-        uuid: uuid,
-        patient: patient,
-        ownerId: ownerId,
-        localFilePath: localFilePath,
-        originalFileName: originalFileName,
-        fileExtension: fileExtension,
-        ocrText: ocrText,
-        metadata: metadata,
-        error: e,
-        stillOwned: stillOwned,
-      );
-    } catch (e) {
-      final Failure failure = FailureMapper.fromException(e);
-      // Map other network failures to offline queueing as well
-      if (failure is NetworkFailure) {
-        if (!stillOwned()) return _abandonSubmit(generation);
-        return _queueOfflineSubmission(
-          generation: generation,
-          uuid: uuid,
-          patient: patient,
-          ownerId: ownerId,
-          localFilePath: localFilePath,
-          originalFileName: originalFileName,
-          fileExtension: fileExtension,
-          ocrText: ocrText,
-          metadata: metadata,
-          error: e,
-          stillOwned: stillOwned,
+      final bytes = await file.readAsBytes();
+      if (!_ownerStill(owner)) return _abandonSubmit(generation);
+      final mime = UploadsRepository.mimeFor(fileExtension);
+      final fileProblem = mime.isEmpty
+          ? 'This file type is not supported. Choose a PDF, JPEG or PNG file.'
+          : bytes.isEmpty
+          ? 'This file is empty. Choose the file again.'
+          : bytes.length > 5 * 1024 * 1024
+          ? 'This file is larger than 5 MB. Choose a smaller file.'
+          : null;
+      if (fileProblem != null) {
+        _applyUploadFailure(
+          UploadFailure('FIELD_INVALID', fileProblem, field: 'file'),
+          category,
         );
+        return false;
       }
-      
-      _completeSubmit(generation, errorMessage: failure.message);
-      return false;
-    }
-  }
-
-  /// Keeps the submission on the device and queues it for a later sync.
-  ///
-  /// This is the single offline path of [submitDocument]: a socket error means
-  /// the device is offline, any other connectivity error means the connection
-  /// failed. Both keep the document in the local queue; only the message
-  /// differs.
-  ///
-  /// The queued row is attributed to the account that started the submit
-  /// ([ownerId]) and the ownership is re-checked after every local await, so an
-  /// account switch while the row is written never reports success for the
-  /// newer session and never rewrites the row for it.
-  Future<bool> _queueOfflineSubmission({
-    required int generation,
-    required String uuid,
-    required Patient patient,
-    required String ownerId,
-    required String localFilePath,
-    required String originalFileName,
-    required String fileExtension,
-    required String ocrText,
-    required Map<String, dynamic> metadata,
-    required Object error,
-    required bool Function() stillOwned,
-  }) async {
-    return _completeOfflineFallback(
-      generation: generation,
-      doc: OfflineDocument(
-        id: uuid,
-        patientId: patient.id,
-        uploaderId: ownerId,
-        fileName: originalFileName,
+      if (patientId == null) {
+        _applyUploadFailure(
+          const UploadFailure(
+            'NO_PATIENT_RECORD',
+            'Patient account is incomplete. Contact the clinic.',
+          ),
+          category,
+        );
+        return false;
+      }
+      final normalizedSelected = selected == null
+          ? null
+          : (selected.toSet().toList()..sort());
+      final content = jsonEncode({
+        'hash': sha256.convert(bytes).toString(),
+        'category': category,
+        'selected': normalizedSelected,
+        'name': fileName,
+        'mime': mime,
+        'ocr': ocr,
+        'patient': patientId,
+      });
+      final changed =
+          draft?.submissionContent != null &&
+          draft!.submissionContent != content;
+      // Reaching here, an earlier attempt for this draft has no committed or
+      // in-RPC submit: blocked states returned above, and unknown ones were
+      // looked up (the lookup lock covers submits that reached the RPC).
+      final superseded = changed && draft.assessmentId != null
+          ? (id: draft.assessmentId!, mime: UploadsRepository.mimeFor(draft.fileType))
+          : null;
+      draft = OfflineDocument(
+        id: draft?.id ?? UuidGenerator.generateV4(),
+        patientId: patientId,
+        uploaderId: owner,
+        fileName: fileName,
         localFilePath: localFilePath,
         fileType: fileExtension,
-        ocrText: ocrText,
-        extractedMetadata: jsonEncode(metadata),
-        createdAt: DateTime.now(),
-      ),
-      stillOwned: stillOwned,
-      message: error is SocketException
-          ? 'You are currently offline. Document queued for sync.'
-          : 'Network connection failed. Document queued for sync.',
-    );
-  }
-
-  /// Triggers background queue uploads syncing when online.
-  ///
-  /// Only rows owned by the identity that started the sync are uploaded or
-  /// deleted. When the identity changes mid-flight the loop stops before any
-  /// further write: a request already dispatched to the backend cannot be
-  /// recalled from the client, but nothing new is written and no queued row
-  /// is deleted under the newer identity.
-  Future<void> syncOfflineQueue() async {
-    // Hold every row, including missing-file and other-owner drafts, unchanged.
-    if (PatientSubmissionContainment.isActive) return;
-    await _loadQueuedSubmissions();
-    final ownerId = _currentUserId();
-    if (ownerId == null || _queuedSubmissions.isEmpty) return;
-
-    final toSync = List<OfflineDocument>.from(_queuedSubmissions);
-
-    for (final doc in toSync) {
-      // Ownership: only this identity's rows are ever uploaded or deleted.
-      if (doc.uploaderId != ownerId) continue;
-      if (_currentUserId() != ownerId) {
-        debugPrint('Sync stopped before touching ${doc.id}: identity changed.');
-        return;
+        ocrText: ocr,
+        extractedMetadata:
+            draft?.extractedMetadata ?? jsonEncode({'document_type': category}),
+        createdAt: draft?.createdAt ?? DateTime.now(),
+        requestId: draft == null || changed
+            ? UuidGenerator.generateV4()
+            : draft.requestId,
+        assessmentId: draft == null || changed
+            ? UuidGenerator.generateV4()
+            : draft.assessmentId,
+        uploadState: 'draft',
+        submissionContent: content,
+      );
+      if (existing == null) {
+        final root =
+            _draftDirectory ?? await getApplicationDocumentsDirectory();
+        if (!_ownerStill(owner)) return _abandonSubmit(generation);
+        final folder = Directory(
+          path.join(root.path, 'submission-drafts', owner),
+        );
+        await folder.create(recursive: true);
+        if (!_ownerStill(owner)) return _abandonSubmit(generation);
+        final durable = await file.copy(
+          path.join(folder.path, '${draft.id}.${fileExtension.toLowerCase()}'),
+        );
+        draft = draft.copyWith(localFilePath: durable.path);
       }
-
-      final retryCount = _retryCounts[doc.id] ?? 0;
-      if (retryCount >= 3) {
-        // Capped retries reached, skip this item (surfaced via UI warning list)
-        continue;
+      _activeDraftId = draft.id;
+      if (existing == null) {
+        await _localDb.queueOfflineDocument(draft);
+      } else {
+        await _localDb.updateUploadDraft(draft, owner);
       }
-      
-      try {
-        final File file = File(doc.localFilePath);
-        if (!await file.exists()) {
-          // File deleted locally, remove from sync queue to avoid infinite loops
-          if (_currentUserId() != ownerId) {
-            debugPrint('Sync stopped before deleting ${doc.id}: identity changed.');
-            return;
+      if (!_ownerStill(owner)) return _abandonSubmit(generation);
+      // Only after the new draft is saved, so nothing the patient has is lost.
+      if (superseded != null) {
+        await _uploads.discardAssessment(
+          owner: owner,
+          assessmentId: superseded.id,
+          mime: superseded.mime,
+        );
+        if (!_ownerStill(owner)) return _abandonSubmit(generation);
+      }
+      if (category != 'other' && existing?.uploadState != 'unknown') {
+        final advisory = await checkPendingDuplicate(
+          patientId,
+          category,
+          client: _client,
+        );
+        if (!_ownerStill(owner)) return _abandonSubmit(generation);
+        if (advisory.state != DuplicateCheckState.clear) {
+          _advisoryMessage = advisory.state == DuplicateCheckState.duplicate
+              ? 'A pending document may already exist. The server will check.'
+              : 'The pending-record check is unavailable. The server will check this submission.';
+          notifyListeners();
+        }
+      }
+      await _uploads.prepare(
+        owner: owner,
+        patientId: patientId,
+        assessmentId: draft.assessmentId!,
+        fileName: fileName,
+        mime: mime,
+        bytes: bytes,
+        ocrText: ocr,
+      );
+      if (!_ownerStill(owner)) return _abandonSubmit(generation);
+      // Persist uncertainty BEFORE dispatch, so app termination cannot turn a
+      // possibly committed submission into an apparently never-sent draft.
+      draft = draft.copyWith(uploadState: 'unknown');
+      await _localDb.updateUploadDraft(draft, owner);
+      if (!_ownerStill(owner)) return _abandonSubmit(generation);
+      final result = await _uploads.submit(
+        owner: owner,
+        requestId: draft.requestId!,
+        assessmentId: draft.assessmentId!,
+        documentType: category,
+        selectedTestIds: normalizedSelected,
+      );
+      if (!_ownerStill(owner)) return _abandonSubmit(generation);
+      switch (result) {
+        case UploadSuccess():
+          _documentId = result.documentId;
+          await _localDb.removeQueuedDocument(draft.id, owner);
+          await _deleteDraftCopy(draft.localFilePath, owner);
+          // A replay means a slow first attempt committed while this resend
+          // re-inserted the pending row; that copy is unused now.
+          if (result.replayed) {
+            await _uploads.discardAssessment(
+              owner: owner,
+              assessmentId: draft.assessmentId!,
+              mime: mime,
+            );
           }
-          await _localDb.removeQueuedDocument(doc.id, ownerId);
-          continue;
-        }
-
-        // The file check resumed after an await: re-check identity before
-        // dispatching the write. A dispatched upload cannot be recalled
-        // from the client, so nothing new may be sent under a new session.
-        if (_currentUserId() != ownerId) {
-          debugPrint('Sync stopped before uploading ${doc.id}: identity changed.');
-          return;
-        }
-
-        // 1. Upload file
-        final storagePath = '$ownerId/${doc.id}_${doc.fileName}';
-        await _client.storage
-            .from('patient-documents')
-            .upload(storagePath, file);
-
-        // Stop before the next write once the identity changed: the dispatched
-        // upload itself cannot be cancelled without backend support.
-        if (_currentUserId() != ownerId) {
-          debugPrint('Sync stopped before writing ${doc.id}: identity changed.');
-          return;
-        }
-            
-        // 2. Insert record
-        final metadata = doc.extractedMetadata != null 
-            ? jsonDecode(doc.extractedMetadata!) as Map<String, dynamic>
-            : null;
-            
-        final docPayload = Document(
-          id: doc.id,
-          patientId: doc.patientId,
-          uploaderId: doc.uploaderId,
-          fileName: doc.fileName,
-          filePath: storagePath,
-          fileType: doc.fileType,
-          status: DocumentStatus.pending,
-          ocrText: doc.ocrText,
-          extractedMetadata: metadata,
-          createdAt: doc.createdAt,
-          updatedAt: DateTime.now(),
-        );
-        
-        await _docsRepo.insertDocument(docPayload);
-
-        // The insert await resumed after an identity change: the dispatched
-        // insert itself cannot be recalled or reconciled from the client,
-        // but no queued row is deleted under the newer identity.
-        if (_currentUserId() != ownerId) {
-          debugPrint('Sync stopped before deleting ${doc.id}: identity changed.');
-          return;
-        }
-
-        // Success: remove from local SQLite queue
-        await _localDb.removeQueuedDocument(doc.id, ownerId);
-        _retryCounts.remove(doc.id);
-        
-      } catch (e) {
-        // Increment retry attempts count
-        _retryCounts[doc.id] = retryCount + 1;
-        debugPrint('Failed sync attempt for document ${doc.id}: $e');
+          if (!_ownerStill(owner)) return _abandonSubmit(generation);
+          return true;
+        case UploadFailure():
+          _applyUploadFailure(result, category);
+          final state = errorCode == 'SERVER_ERROR'
+              ? 'unknown'
+              : [
+                  'IDEMPOTENCY_CONFLICT',
+                  'RECONCILIATION_REQUIRED',
+                  'ASSESSMENT_NOT_FOUND',
+                ].contains(errorCode)
+              ? 'blocked:$errorCode'
+              : 'error:$errorCode';
+          await _localDb.updateUploadDraft(
+            draft.copyWith(uploadState: state),
+            owner,
+          );
+          return false;
+        case UploadLookup():
+          _applyUploadFailure(UploadFailure.unknown, category);
+          return false;
+      }
+    } catch (_) {
+      if (!_ownerStill(owner)) return _abandonSubmit(generation);
+      _applyUploadFailure(UploadFailure.unknown, category);
+      // No new submission was dispatched on a preparation failure. Retain the
+      // existing draft state and never delete the draft or original file.
+      return false;
+    } finally {
+      if (!_disposed && generation == _submitGeneration) {
+        _isLoading = false;
+        if (_ownerStill(owner)) await _loadQueuedSubmissions();
+        notifyListeners();
       }
     }
-    
-    await _loadQueuedSubmissions();
   }
 }
