@@ -110,7 +110,7 @@ class _AdminRagScreenState extends State<AdminRagScreen> {
               child: const Row(
                 children: [
                   Icon(Icons.info_outline, size: 20, color: Colors.blue),
-                  const SizedBox(width: 10),
+                  SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       'Uploads are managed on the web portal.',

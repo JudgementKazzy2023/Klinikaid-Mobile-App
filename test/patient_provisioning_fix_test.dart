@@ -12,8 +12,6 @@ import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provi
 
 class MockGoTrueClient extends GoTrueClient {
   bool signOutCalled = false;
-  // Email-confirmation signups return no session: RLS then hides the row.
-  bool returnSession = true;
 
   MockGoTrueClient() : super(autoRefreshToken: false);
 
@@ -43,7 +41,7 @@ class MockGoTrueClient extends GoTrueClient {
       tokenType: 'bearer',
       user: user,
     );
-    return AuthResponse(user: user, session: returnSession ? session : null);
+    return AuthResponse(user: user, session: session);
   }
 
   @override
@@ -79,8 +77,21 @@ class MockProfilesRepository extends ProfilesRepository {
 
 class ThrowingPatientsRepository extends PatientsRepository {
   int createPatientCalls = 0;
-  Patient? existingPatient;
-  bool lookupFails = false;
+
+  @override
+  Future<Patient> createPatient(Patient patient) async {
+    createPatientCalls++;
+    throw StateError('Direct patients insert should not be called from registration.');
+  }
+
+  @override
+  Future<Patient?> getPatientByProfileId(String profileId) async => null;
+}
+
+/// Simulates a device that cannot read the patients table at all.
+class OfflinePatientsRepository extends PatientsRepository {
+  int createPatientCalls = 0;
+  int lookupCalls = 0;
 
   @override
   Future<Patient> createPatient(Patient patient) async {
@@ -90,9 +101,47 @@ class ThrowingPatientsRepository extends PatientsRepository {
 
   @override
   Future<Patient?> getPatientByProfileId(String profileId) async {
-    if (lookupFails) throw StateError('synthetic lookup failure');
-    return existingPatient;
+    lookupCalls++;
+    throw StateError('Lookup failed: device is offline.');
   }
+}
+
+/// Fails every provisioning call with the outcome of its call index
+/// (the last one repeats), so a first attempt and its retry can differ.
+class SequencedProvisioningService implements PatientProvisioningService {
+  SequencedProvisioningService(this.outcomes);
+
+  final List<PatientProvisioningOutcome> outcomes;
+  int callCount = 0;
+
+  @override
+  Future<Patient?> createPatientRecord({
+    required String firstName,
+    required String lastName,
+    required DateTime dateOfBirth,
+    required Gender gender,
+    required String contactNumber,
+    required String email,
+    required String address,
+  }) async {
+    final outcome = outcomes[callCount < outcomes.length ? callCount : outcomes.length - 1];
+    callCount++;
+    throw PatientProvisioningException(
+      outcome == PatientProvisioningOutcome.rejected
+          ? 'Patient provisioning failed.'
+          : 'Network failure.',
+      outcome: outcome,
+    );
+  }
+}
+
+class FakePatientsRepository extends PatientsRepository {
+  final Patient? patient;
+
+  FakePatientsRepository(this.patient);
+
+  @override
+  Future<Patient?> getPatientByProfileId(String profileId) async => patient;
 }
 
 class FakeVerificationService implements VerificationService {
@@ -122,7 +171,7 @@ class FakeVerificationService implements VerificationService {
 
 AuthProvider buildProvider({
   required MockGoTrueClient auth,
-  required ThrowingPatientsRepository patientsRepo,
+  required PatientsRepository patientsRepo,
   required FakeVerificationService verificationService,
   required PatientProvisioningService provisioningService,
 }) {
@@ -213,7 +262,7 @@ void main() {
       final verificationService = FakeVerificationService();
       final provisioningService = MockPatientProvisioningService()
         ..shouldFail = true
-        ..functionRan = true;
+        ..outcome = PatientProvisioningOutcome.rejected;
       final provider = buildProvider(
         auth: auth,
         patientsRepo: patientsRepo,
@@ -236,15 +285,17 @@ void main() {
       expect(auth.signOutCalled, true);
       expect(verificationService.deletePendingUserCalled, false);
       expect(patientsRepo.createPatientCalls, 0);
+      expect(provider.errorMessage, 'Patient provisioning failed.');
     });
 
-    test('invoke network failure calls deletePendingUser before local sign out', () async {
+    test('a 400 field rejection deletes the pending user and shows the error', () async {
       final auth = MockGoTrueClient();
       final patientsRepo = ThrowingPatientsRepository();
       final verificationService = FakeVerificationService();
       final provisioningService = MockPatientProvisioningService()
         ..shouldFail = true
-        ..functionRan = false;
+        ..outcome = PatientProvisioningOutcome.rejected
+        ..status = 400;
       final provider = buildProvider(
         auth: auth,
         patientsRepo: patientsRepo,
@@ -266,15 +317,17 @@ void main() {
       expect(success, false);
       expect(verificationService.deletePendingUserCalled, true);
       expect(auth.signOutCalled, true);
-      expect(patientsRepo.createPatientCalls, 0);
+      expect(provisioningService.callCount, 1);
+      expect(provider.errorMessage, 'Patient provisioning failed.');
     });
-    test('network failure after the row was created keeps the account and continues', () async {
+
+    test('uncertain outcome keeps the account and uses the existing patient row', () async {
       final auth = MockGoTrueClient();
-      final patientsRepo = ThrowingPatientsRepository()..existingPatient = patient();
+      final patientsRepo = FakePatientsRepository(patient());
       final verificationService = FakeVerificationService();
       final provisioningService = MockPatientProvisioningService()
         ..shouldFail = true
-        ..functionRan = false;
+        ..outcome = PatientProvisioningOutcome.uncertain;
       final provider = buildProvider(
         auth: auth,
         patientsRepo: patientsRepo,
@@ -295,18 +348,50 @@ void main() {
 
       expect(success, true);
       expect(verificationService.deletePendingUserCalled, false);
+      expect(provider.patient?.profileId, 'auth-user-1');
+      expect(provisioningService.callCount, 1);
       expect(auth.signOutCalled, false);
-      expect(provider.patient?.id, 'patient-row-1');
-      expect(verificationService.sendCodeCalled, true);
     });
 
-    test('network failure with an unreadable outcome never deletes the account', () async {
+    test('uncertain outcome retries the idempotent function when no row exists', () async {
       final auth = MockGoTrueClient();
-      final patientsRepo = ThrowingPatientsRepository()..lookupFails = true;
+      final patientsRepo = ThrowingPatientsRepository();
+      final verificationService = FakeVerificationService();
+      final provisioningService = MockPatientProvisioningService()
+        ..outcome = PatientProvisioningOutcome.uncertain
+        ..failFirstCalls = 1
+        ..patient = patient();
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: patientsRepo,
+        verificationService: verificationService,
+        provisioningService: provisioningService,
+      );
+
+      final success = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(success, true);
+      expect(provisioningService.callCount, 2);
+      expect(verificationService.deletePendingUserCalled, false);
+      expect(provider.patient?.profileId, 'auth-user-1');
+    });
+
+    test('invoke network failure never deletes the pending user', () async {
+      final auth = MockGoTrueClient();
+      final patientsRepo = ThrowingPatientsRepository();
       final verificationService = FakeVerificationService();
       final provisioningService = MockPatientProvisioningService()
         ..shouldFail = true
-        ..functionRan = false;
+        ..outcome = PatientProvisioningOutcome.uncertain;
       final provider = buildProvider(
         auth: auth,
         patientsRepo: patientsRepo,
@@ -328,16 +413,18 @@ void main() {
       expect(success, false);
       expect(verificationService.deletePendingUserCalled, false);
       expect(auth.signOutCalled, true);
-      expect(provider.errorMessage, contains('Try signing in'));
+      expect(patientsRepo.createPatientCalls, 0);
+      expect(provisioningService.callCount, 2);      expect(provider.errorMessage, isNotNull);
     });
 
-    test('network failure without a session never deletes: absence is unprovable', () async {
-      final auth = MockGoTrueClient()..returnSession = false;
+    test('known rejection after a clean lookup deletes the pending user', () async {
+      final auth = MockGoTrueClient();
       final patientsRepo = ThrowingPatientsRepository();
       final verificationService = FakeVerificationService();
-      final provisioningService = MockPatientProvisioningService()
-        ..shouldFail = true
-        ..functionRan = false;
+      final provisioningService = SequencedProvisioningService([
+        PatientProvisioningOutcome.uncertain,
+        PatientProvisioningOutcome.rejected,
+      ]);
       final provider = buildProvider(
         auth: auth,
         patientsRepo: patientsRepo,
@@ -357,8 +444,44 @@ void main() {
       );
 
       expect(success, false);
+      expect(provisioningService.callCount, 2);
+      expect(verificationService.deletePendingUserCalled, true);
+      expect(auth.signOutCalled, true);
+      expect(patientsRepo.createPatientCalls, 0);
+    });
+
+    test('failed lookup with an uncertain retry keeps the account', () async {
+      final auth = MockGoTrueClient();
+      final patientsRepo = OfflinePatientsRepository();
+      final verificationService = FakeVerificationService();
+      final provisioningService = SequencedProvisioningService([
+        PatientProvisioningOutcome.uncertain,
+        PatientProvisioningOutcome.uncertain,
+      ]);
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: patientsRepo,
+        verificationService: verificationService,
+        provisioningService: provisioningService,
+      );
+
+      final success = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(success, false);
+      expect(provisioningService.callCount, 2);
+      expect(patientsRepo.lookupCalls, 1);
       expect(verificationService.deletePendingUserCalled, false);
-      expect(provider.errorMessage, contains('Try signing in'));
+      expect(auth.signOutCalled, true);
+      expect(patientsRepo.createPatientCalls, 0);
     });
   });
 }

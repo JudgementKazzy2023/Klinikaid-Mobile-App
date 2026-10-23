@@ -4,11 +4,30 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/models/patient.dart';
 import '../../../../core/supabase/supabase_client.dart';
 
+/// How a patient provisioning attempt ended.
+enum PatientProvisioningOutcome {
+  /// The function answered and refused the request. Nothing was written.
+  rejected,
+
+  /// The outcome is unknown: the request may have been applied before the
+  /// connection dropped, so a patient row may already exist. The account must
+  /// be kept in this case.
+  uncertain,
+}
+
 class PatientProvisioningException implements Exception {
   final String message;
-  final bool functionRan;
+  final PatientProvisioningOutcome outcome;
 
-  const PatientProvisioningException(this.message, {required this.functionRan});
+  /// HTTP status of a [PatientProvisioningOutcome.rejected] answer, if known.
+  /// A 400 means the server refused the fields before writing or deleting.
+  final int? status;
+
+  const PatientProvisioningException(
+    this.message, {
+    required this.outcome,
+    this.status,
+  });
 
   @override
   String toString() => message;
@@ -62,9 +81,11 @@ class SupabasePatientProvisioningService implements PatientProvisioningService {
           try {
             return Patient.fromJson(patientJson);
           } catch (e) {
+            // The function answered with success, so the row exists: only the
+            // response could not be read.
             throw const PatientProvisioningException(
               'Patient provisioning response was invalid.',
-              functionRan: true,
+              outcome: PatientProvisioningOutcome.uncertain,
             );
           }
         }
@@ -73,37 +94,47 @@ class SupabasePatientProvisioningService implements PatientProvisioningService {
 
       throw PatientProvisioningException(
         json['message'] as String? ?? 'Patient provisioning failed.',
-        functionRan: true,
+        outcome: PatientProvisioningOutcome.rejected,
+        status: response.status,
       );
     } on FunctionException catch (e) {
       final details = e.details;
       final json = details is Map<String, dynamic> ? details : <String, dynamic>{};
       throw PatientProvisioningException(
         json['message'] as String? ?? e.reasonPhrase ?? 'Patient provisioning failed.',
-        functionRan: true,
+        outcome: PatientProvisioningOutcome.rejected,
+        status: e.status,
       );
     } on TimeoutException catch (e) {
       throw PatientProvisioningException(
         e.message ?? 'Patient provisioning timed out.',
-        functionRan: false,
+        outcome: PatientProvisioningOutcome.uncertain,
       );
     } on SocketException {
       throw const PatientProvisioningException(
         'You are currently offline. Please check your network connection.',
-        functionRan: false,
+        outcome: PatientProvisioningOutcome.uncertain,
       );
     } on PatientProvisioningException {
       rethrow;
     } catch (e) {
-      throw PatientProvisioningException(e.toString(), functionRan: false);
+      throw PatientProvisioningException(
+        e.toString(),
+        outcome: PatientProvisioningOutcome.uncertain,
+      );
     }
   }
 }
 
 class MockPatientProvisioningService implements PatientProvisioningService {
   bool shouldFail = false;
-  bool functionRan = true;
+  PatientProvisioningOutcome outcome = PatientProvisioningOutcome.rejected;
+  int? status;
   bool wasCalled = false;
+  int callCount = 0;
+
+  /// Fails the first [failFirstCalls] calls and succeeds afterwards.
+  int failFirstCalls = 0;
   Patient? patient;
 
   @override
@@ -117,10 +148,14 @@ class MockPatientProvisioningService implements PatientProvisioningService {
     required String address,
   }) async {
     wasCalled = true;
-    if (shouldFail) {
+    callCount++;
+    if (shouldFail || callCount <= failFirstCalls) {
       throw PatientProvisioningException(
-        functionRan ? 'Patient provisioning failed.' : 'Network failure.',
-        functionRan: functionRan,
+        outcome == PatientProvisioningOutcome.rejected
+            ? 'Patient provisioning failed.'
+            : 'Network failure.',
+        outcome: outcome,
+        status: status,
       );
     }
     return patient;
