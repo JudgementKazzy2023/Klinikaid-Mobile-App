@@ -254,24 +254,19 @@ class AuthProvider extends ChangeNotifier {
         // unverified and will not appear, and overwriting _pendingMfaFactorId
         // mid-verify would kill the challenge→verify sequence.
         if (_pendingMfaFactorId != null) {
-          print('[AuthProvider _updateLocalStates] Admin has pendingMfaFactorId=$_pendingMfaFactorId — skipping listVerifiedFactors to preserve mid-verify state.');
           _needsMfaEnrollment = false;
         } else {
           try {
-            print('[AuthProvider _updateLocalStates] Admin AAL1, no pending factor — calling listVerifiedFactors.');
             final factors = await _mfaService.listVerifiedFactors();
             if (epoch != _identityEpoch) return;
-            print('[AuthProvider _updateLocalStates] listVerifiedFactors returned ${factors.length} factor(s).');
             if (factors.isNotEmpty) {
               _pendingMfaFactorId = factors.first.id;
               _needsMfaEnrollment = false;
-              print('[AuthProvider _updateLocalStates] Set pendingMfaFactorId=${factors.first.id} from verified factor.');
             } else {
               _needsMfaEnrollment = true;
-              print('[AuthProvider _updateLocalStates] No verified factors — needs enrollment.');
             }
           } catch (e) {
-            print('[AuthProvider _updateLocalStates] listVerifiedFactors error: $e — defaulting to needs enrollment.');
+            debugPrint('[AuthProvider _updateLocalStates] listVerifiedFactors error: $e — defaulting to needs enrollment.');
             if (epoch != _identityEpoch) return;
             _needsMfaEnrollment = true;
           }
@@ -518,7 +513,6 @@ class AuthProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
     try {
-      print('[AuthProvider startMfaEnrollment] (${identityHashCode(this)}) Enrolling TOTP factor...');
       final response = await _client.auth.mfa.enroll(
         factorType: FactorType.totp,
         issuer: 'KlinikAid',
@@ -526,12 +520,11 @@ class AuthProvider extends ChangeNotifier {
       if (epoch != _identityEpoch) throw StateError('Session changed');
       _pendingMfaFactorId = response.id;
       _needsMfaEnrollment = false; // Factor enrolled, now verify it
-      print('[AuthProvider startMfaEnrollment] (${identityHashCode(this)}) Success: factorId = ${response.id}');
       _isLoading = false;
       notifyListeners();
       return response;
     } catch (e) {
-      print('[AuthProvider startMfaEnrollment] (${identityHashCode(this)}) Error: $e');
+      debugPrint('[AuthProvider startMfaEnrollment] (${identityHashCode(this)}) Error: $e');
       _isLoading = false;
       notifyListeners();
       rethrow;
@@ -541,9 +534,7 @@ class AuthProvider extends ChangeNotifier {
   /// Verify TOTP code → upgrades session to AAL2
   Future<MfaVerifyResult> verifyMfa(String code) async {
     final epoch = _identityEpoch;
-    print('[AuthProvider verifyMfa] Called. _pendingMfaFactorId=$_pendingMfaFactorId, code length=${code.length}');
     if (_pendingMfaFactorId == null) {
-      print('[AuthProvider verifyMfa] ABORT: _pendingMfaFactorId is null — cannot verify.');
       return MfaVerifyResult.error;
     }
 
@@ -551,31 +542,27 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      print('[AuthProvider verifyMfa] Calling verifyTotp: factorId=$_pendingMfaFactorId code=$code');
       final result = await _mfaService.verifyTotp(
         factorId: _pendingMfaFactorId!,
         code: code,
       );
-      print('[AuthProvider verifyMfa] verifyTotp outcome: $result');
 
       if (epoch != _identityEpoch) return MfaVerifyResult.error;
       if (result == MfaVerifyResult.success) {
         _pendingMfaFactorId = null;
         _needsMfaEnrollment = false;
-        print('[AuthProvider verifyMfa] Success. Refreshing session...');
         try {
           await _client.auth.refreshSession();
-          print('[AuthProvider verifyMfa] Session refreshed. isAal2=${isAal2}');
         } catch (e) {
-          print('[AuthProvider verifyMfa] refreshSession error (non-fatal): $e');
+          debugPrint('[AuthProvider verifyMfa] refreshSession error (non-fatal): $e');
         }
         await _updateLocalStates();
       }
 
       return result;
     } catch (e, stack) {
-      print('[AuthProvider verifyMfa] UNEXPECTED EXCEPTION: $e');
-      print('[AuthProvider verifyMfa] Stack: $stack');
+      debugPrint('[AuthProvider verifyMfa] UNEXPECTED EXCEPTION: $e');
+      debugPrint('[AuthProvider verifyMfa] Stack: $stack');
       return MfaVerifyResult.error;
     } finally {
       // ALWAYS clear loading — this was missing and caused the spinner to lock
@@ -585,7 +572,6 @@ class AuthProvider extends ChangeNotifier {
         _isLoading = false;
         notifyListeners();
       }
-      print('[AuthProvider verifyMfa] finally: _isLoading cleared.');
     }
   }
 
@@ -947,7 +933,7 @@ class AuthProvider extends ChangeNotifier {
       _permissions = const <String>{};
       _permissionFallbackActive = _profile?.role != UserRole.patient;
       if (_permissionFallbackActive) {
-        print('[AuthProvider] Permission routing fallback active: missing role_id.');
+        debugPrint('[AuthProvider] Permission routing fallback active: missing role_id.');
       }
       return;
     }
@@ -958,14 +944,14 @@ class AuthProvider extends ChangeNotifier {
       _permissions = loaded;
       _permissionFallbackActive = loaded.isEmpty && _profile?.role != UserRole.patient;
       if (_permissionFallbackActive) {
-        print('[AuthProvider] Permission routing fallback active: no permissions returned.');
+        debugPrint('[AuthProvider] Permission routing fallback active: no permissions returned.');
       }
     } catch (e) {
       if (epoch != _identityEpoch) return;
       _permissions = const <String>{};
       _permissionFallbackActive = _profile?.role != UserRole.patient;
       if (_permissionFallbackActive) {
-        print('[AuthProvider] Permission routing fallback active: $e');
+        debugPrint('[AuthProvider] Permission routing fallback active: $e');
       }
     }
   }

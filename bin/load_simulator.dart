@@ -1,3 +1,4 @@
+// ignore_for_file: avoid_print -- CLI script; stdout is its output.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

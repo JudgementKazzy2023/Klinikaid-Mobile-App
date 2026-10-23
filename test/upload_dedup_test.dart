@@ -10,7 +10,6 @@ import 'package:klinikaid_mobile/core/supabase/supabase_client.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 import 'package:klinikaid_mobile/features/documents/presentation/providers/document_submission_provider.dart';
 import 'package:klinikaid_mobile/features/documents/presentation/screens/submit_document_screen.dart';
-import 'package:klinikaid_mobile/features/patient/templates/presentation/providers/templates_provider.dart';
 import 'package:klinikaid_mobile/features/patient/submissions/document_dedup.dart';
 
 // Simple Mocks for Supabase Client query chain
@@ -351,7 +350,6 @@ void main() {
       await tester.tap(submitBtn);
       await tester.pumpAndSettle();
 
-      print('DEBUG mockErrorMessage is: ${submissionProvider.mockErrorMessage}');
       expect(
         find.textContaining('You already have a pending [Laboratory Request] submitted on'),
         findsOneWidget,
