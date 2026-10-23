@@ -158,7 +158,7 @@ class AdminDashboardScreen extends StatelessWidget {
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
                         itemCount: recentEvents.length,
-                        separatorBuilder: (_, __) => Divider(color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3)),
+                        separatorBuilder: (_, _) => Divider(color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3)),
                         itemBuilder: (context, index) {
                           final log = recentEvents[index];
                           return _buildEventItem(context, log);

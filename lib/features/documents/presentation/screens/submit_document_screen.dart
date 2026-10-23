@@ -1,4 +1,5 @@
 import 'dart:io';
+import '../../../../core/patient_submission_containment.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
@@ -18,33 +19,14 @@ class SubmitDocumentScreen extends StatefulWidget {
   State<SubmitDocumentScreen> createState() => _SubmitDocumentScreenState();
 }
 
-class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with WidgetsBindingObserver {
+class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> {
   final ImagePicker _picker = ImagePicker();
   String? _selectedDocumentType;
   List<String> _selectedTestIds = [];
   String? _initializedDetectionSignature;
   
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<DocumentSubmissionProvider>(context, listen: false).syncOfflineQueue();
-    });
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      Provider.of<DocumentSubmissionProvider>(context, listen: false).syncOfflineQueue();
-    }
-  }
+  // Opening/resuming this screen must never replay drafts. Phase 2 requires
+  // explicit owner-aware reconciliation before any queued submission.
 
   Future<void> _pickImage(ImageSource source, Patient patient) async {
     try {
@@ -174,6 +156,34 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> with Widget
 
   @override
   Widget build(BuildContext context) {
+    if (PatientSubmissionContainment.isActive) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Submit Document')),
+        body: SafeArea(
+          child: Consumer<DocumentSubmissionProvider>(
+            builder: (context, provider, child) => ListView(
+              padding: const EdgeInsets.all(20),
+              children: [
+                const Text(PatientSubmissionContainment.message),
+                const SizedBox(height: 16),
+                const Text(
+                  'Existing saved drafts are kept on this device. '
+                  'They will not be submitted automatically. '
+                  'Previously submitted documents remain available in Records.',
+                ),
+                const SizedBox(height: 24),
+                for (final doc in provider.queuedSubmissions)
+                  ListTile(
+                    leading: const Icon(Icons.description_outlined),
+                    title: Text(doc.fileName),
+                    subtitle: const Text('Saved draft - submission unavailable'),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     final authProvider = Provider.of<AuthProvider>(context);
     final patient = authProvider.patient;
     

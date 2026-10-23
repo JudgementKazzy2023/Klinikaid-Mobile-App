@@ -9,7 +9,6 @@ import 'package:klinikaid_mobile/core/cache/local_database.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 import 'package:klinikaid_mobile/core/routing/app_router.dart';
 import 'package:klinikaid_mobile/features/auth/data/session_activity_service.dart';
-import 'package:klinikaid_mobile/features/auth/presentation/screens/login_screen.dart';
 
 class MockSessionActivityService extends SessionActivityService {
   @override

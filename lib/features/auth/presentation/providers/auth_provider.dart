@@ -289,24 +289,19 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
         // unverified and will not appear, and overwriting _pendingMfaFactorId
         // mid-verify would kill the challenge→verify sequence.
         if (_pendingMfaFactorId != null) {
-          print('[AuthProvider _updateLocalStates] Admin has pendingMfaFactorId=$_pendingMfaFactorId — skipping listVerifiedFactors to preserve mid-verify state.');
           _needsMfaEnrollment = false;
         } else {
           try {
-            print('[AuthProvider _updateLocalStates] Admin AAL1, no pending factor — calling listVerifiedFactors.');
             final factors = await _mfaService.listVerifiedFactors();
             if (epoch != _identityEpoch) return;
-            print('[AuthProvider _updateLocalStates] listVerifiedFactors returned ${factors.length} factor(s).');
             if (factors.isNotEmpty) {
               _pendingMfaFactorId = factors.first.id;
               _needsMfaEnrollment = false;
-              print('[AuthProvider _updateLocalStates] Set pendingMfaFactorId=${factors.first.id} from verified factor.');
             } else {
               _needsMfaEnrollment = true;
-              print('[AuthProvider _updateLocalStates] No verified factors — needs enrollment.');
             }
           } catch (e) {
-            print('[AuthProvider _updateLocalStates] listVerifiedFactors error: $e — defaulting to needs enrollment.');
+            debugPrint('[AuthProvider _updateLocalStates] listVerifiedFactors error: $e — defaulting to needs enrollment.');
             if (epoch != _identityEpoch) return;
             _needsMfaEnrollment = true;
           }
@@ -553,7 +548,6 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
     _isLoading = true;
     notifyListeners();
     try {
-      print('[AuthProvider startMfaEnrollment] (${identityHashCode(this)}) Enrolling TOTP factor...');
       final response = await _client.auth.mfa.enroll(
         factorType: FactorType.totp,
         issuer: 'KlinikAid',
@@ -561,12 +555,11 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
       if (epoch != _identityEpoch) throw StateError('Session changed');
       _pendingMfaFactorId = response.id;
       _needsMfaEnrollment = false; // Factor enrolled, now verify it
-      print('[AuthProvider startMfaEnrollment] (${identityHashCode(this)}) Success: factorId = ${response.id}');
       _isLoading = false;
       notifyListeners();
       return response;
     } catch (e) {
-      print('[AuthProvider startMfaEnrollment] (${identityHashCode(this)}) Error: $e');
+      debugPrint('[AuthProvider startMfaEnrollment] (${identityHashCode(this)}) Error: $e');
       _isLoading = false;
       notifyListeners();
       rethrow;
@@ -576,9 +569,7 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
   /// Verify TOTP code → upgrades session to AAL2
   Future<MfaVerifyResult> verifyMfa(String code) async {
     final epoch = _identityEpoch;
-    print('[AuthProvider verifyMfa] Called. _pendingMfaFactorId=$_pendingMfaFactorId, code length=${code.length}');
     if (_pendingMfaFactorId == null) {
-      print('[AuthProvider verifyMfa] ABORT: _pendingMfaFactorId is null — cannot verify.');
       return MfaVerifyResult.error;
     }
 
@@ -586,31 +577,27 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
     notifyListeners();
 
     try {
-      print('[AuthProvider verifyMfa] Calling verifyTotp: factorId=$_pendingMfaFactorId code=$code');
       final result = await _mfaService.verifyTotp(
         factorId: _pendingMfaFactorId!,
         code: code,
       );
-      print('[AuthProvider verifyMfa] verifyTotp outcome: $result');
 
       if (epoch != _identityEpoch) return MfaVerifyResult.error;
       if (result == MfaVerifyResult.success) {
         _pendingMfaFactorId = null;
         _needsMfaEnrollment = false;
-        print('[AuthProvider verifyMfa] Success. Refreshing session...');
         try {
           await _client.auth.refreshSession();
-          print('[AuthProvider verifyMfa] Session refreshed. isAal2=${isAal2}');
         } catch (e) {
-          print('[AuthProvider verifyMfa] refreshSession error (non-fatal): $e');
+          debugPrint('[AuthProvider verifyMfa] refreshSession error (non-fatal): $e');
         }
         await _updateLocalStates();
       }
 
       return result;
     } catch (e, stack) {
-      print('[AuthProvider verifyMfa] UNEXPECTED EXCEPTION: $e');
-      print('[AuthProvider verifyMfa] Stack: $stack');
+      debugPrint('[AuthProvider verifyMfa] UNEXPECTED EXCEPTION: $e');
+      debugPrint('[AuthProvider verifyMfa] Stack: $stack');
       return MfaVerifyResult.error;
     } finally {
       // ALWAYS clear loading — this was missing and caused the spinner to lock
@@ -620,7 +607,6 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
         _isLoading = false;
         notifyListeners();
       }
-      print('[AuthProvider verifyMfa] finally: _isLoading cleared.');
     }
   }
 
@@ -770,10 +756,30 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
             updatedAt: DateTime.now(),
           );
     } on PatientProvisioningException catch (e) {
-      _errorMessage = e.message;
-      if (!e.functionRan) {
+      if (e.outcome == PatientProvisioningOutcome.uncertain) {
+        // The function may have created the row before the connection dropped.
+        // The account is kept either way: a pending account can be recovered,
+        // a deleted one cannot.
+        final resolved = await _resolveUncertainProvisioning(
+          firstName: firstName,
+          lastName: lastName,
+          dateOfBirth: dateOfBirth,
+          gender: gender,
+          contactNumber: contactNumber,
+          email: email,
+          address: address,
+        );
+        if (resolved != null) {
+          return resolved;
+        }
+      } else if (e.status == 400) {
+        // The server refused the fields before writing or deleting anything,
+        // so this login has no patient row and never will. Delete it while the
+        // session is still valid, so the patient can register again.
         await _verificationService.deletePendingUser();
       }
+
+      final message = e.message;
       await _client.auth.signOut().catchError((_) {});
       _user = null;
       _session = null;
@@ -785,7 +791,66 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
       _hasConsented = false;
       _isOnboarded = false;
       _isLoading = false;
+      // After `_user = null`, whose identity reset clears the error.
+      _errorMessage = message;
       notifyListeners();
+      return null;
+    }
+  }
+
+  /// Resolves a provisioning attempt whose outcome is unknown: the function
+  /// may already have created the patient row.
+  ///
+  /// The row is looked up first and the (now idempotent) function is retried
+  /// once, so a lost response never leaves the account without its patient row
+  /// and never deletes a working account. Only a known outcome (the lookup
+  /// proved there is no row and the server refused the retry) deletes the
+  /// pending user, so the patient can register again; an uncertain result
+  /// always keeps the account.
+  Future<Patient?> _resolveUncertainProvisioning({
+    required String firstName,
+    required String lastName,
+    required DateTime dateOfBirth,
+    required Gender gender,
+    required String contactNumber,
+    required String email,
+    required String address,
+  }) async {
+    final userId = _user?.id;
+    if (userId == null) {
+      return null;
+    }
+
+    var lookupSucceeded = false;
+    try {
+      final existing = await _patientsRepo.getPatientByProfileId(userId);
+      lookupSucceeded = true;
+      if (existing != null) {
+        return existing;
+      }
+    } catch (_) {
+      // The lookup failed (for example the device is offline); the retry
+      // below is the second chance.
+    }
+
+    try {
+      return await _patientProvisioningService.createPatientRecord(
+        firstName: firstName,
+        lastName: lastName,
+        dateOfBirth: dateOfBirth,
+        gender: gender,
+        contactNumber: contactNumber,
+        email: email,
+        address: address,
+      );
+    } on PatientProvisioningException catch (e) {
+      // Known outcome: the lookup succeeded and found no row, and the server
+      // itself refused the retry, so nothing was written for this account.
+      // Delete the pending user so the patient can register again. When the
+      // lookup failed, a row may still exist, so the account is kept.
+      if (lookupSucceeded && e.outcome == PatientProvisioningOutcome.rejected) {
+        await _verificationService.deletePendingUser();
+      }
       return null;
     }
   }
