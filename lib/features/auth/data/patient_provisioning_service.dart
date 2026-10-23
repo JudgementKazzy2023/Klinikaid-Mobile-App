@@ -19,7 +19,15 @@ class PatientProvisioningException implements Exception {
   final String message;
   final PatientProvisioningOutcome outcome;
 
-  const PatientProvisioningException(this.message, {required this.outcome});
+  /// HTTP status of a [PatientProvisioningOutcome.rejected] answer, if known.
+  /// A 400 means the server refused the fields before writing or deleting.
+  final int? status;
+
+  const PatientProvisioningException(
+    this.message, {
+    required this.outcome,
+    this.status,
+  });
 
   @override
   String toString() => message;
@@ -87,6 +95,7 @@ class SupabasePatientProvisioningService implements PatientProvisioningService {
       throw PatientProvisioningException(
         json['message'] as String? ?? 'Patient provisioning failed.',
         outcome: PatientProvisioningOutcome.rejected,
+        status: response.status,
       );
     } on FunctionException catch (e) {
       final details = e.details;
@@ -94,6 +103,7 @@ class SupabasePatientProvisioningService implements PatientProvisioningService {
       throw PatientProvisioningException(
         json['message'] as String? ?? e.reasonPhrase ?? 'Patient provisioning failed.',
         outcome: PatientProvisioningOutcome.rejected,
+        status: e.status,
       );
     } on TimeoutException catch (e) {
       throw PatientProvisioningException(
@@ -119,6 +129,7 @@ class SupabasePatientProvisioningService implements PatientProvisioningService {
 class MockPatientProvisioningService implements PatientProvisioningService {
   bool shouldFail = false;
   PatientProvisioningOutcome outcome = PatientProvisioningOutcome.rejected;
+  int? status;
   bool wasCalled = false;
   int callCount = 0;
 
@@ -144,6 +155,7 @@ class MockPatientProvisioningService implements PatientProvisioningService {
             ? 'Patient provisioning failed.'
             : 'Network failure.',
         outcome: outcome,
+        status: status,
       );
     }
     return patient;

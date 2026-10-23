@@ -745,9 +745,14 @@ class AuthProvider extends ChangeNotifier {
         if (resolved != null) {
           return resolved;
         }
+      } else if (e.status == 400) {
+        // The server refused the fields before writing or deleting anything,
+        // so this login has no patient row and never will. Delete it while the
+        // session is still valid, so the patient can register again.
+        await _verificationService.deletePendingUser();
       }
 
-      _errorMessage = e.message;
+      final message = e.message;
       await _client.auth.signOut().catchError((_) {});
       _user = null;
       _session = null;
@@ -758,6 +763,8 @@ class AuthProvider extends ChangeNotifier {
       _hasConsented = false;
       _isOnboarded = false;
       _isLoading = false;
+      // After `_user = null`, whose identity reset clears the error.
+      _errorMessage = message;
       notifyListeners();
       return null;
     }

@@ -285,6 +285,40 @@ void main() {
       expect(auth.signOutCalled, true);
       expect(verificationService.deletePendingUserCalled, false);
       expect(patientsRepo.createPatientCalls, 0);
+      expect(provider.errorMessage, 'Patient provisioning failed.');
+    });
+
+    test('a 400 field rejection deletes the pending user and shows the error', () async {
+      final auth = MockGoTrueClient();
+      final patientsRepo = ThrowingPatientsRepository();
+      final verificationService = FakeVerificationService();
+      final provisioningService = MockPatientProvisioningService()
+        ..shouldFail = true
+        ..outcome = PatientProvisioningOutcome.rejected
+        ..status = 400;
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: patientsRepo,
+        verificationService: verificationService,
+        provisioningService: provisioningService,
+      );
+
+      final success = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(success, false);
+      expect(verificationService.deletePendingUserCalled, true);
+      expect(auth.signOutCalled, true);
+      expect(provisioningService.callCount, 1);
+      expect(provider.errorMessage, 'Patient provisioning failed.');
     });
 
     test('uncertain outcome keeps the account and uses the existing patient row', () async {
@@ -380,7 +414,7 @@ void main() {
       expect(verificationService.deletePendingUserCalled, false);
       expect(auth.signOutCalled, true);
       expect(patientsRepo.createPatientCalls, 0);
-      expect(provisioningService.callCount, 2);
+      expect(provisioningService.callCount, 2);      expect(provider.errorMessage, isNotNull);
     });
 
     test('known rejection after a clean lookup deletes the pending user', () async {
