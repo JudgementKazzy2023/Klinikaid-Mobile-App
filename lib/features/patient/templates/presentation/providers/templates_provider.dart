@@ -37,6 +37,9 @@ class TemplatesProvider extends ChangeNotifier {
   TemplateSubmissionError? _error;
   TemplateSubmissionSuccess? _result;
   String? _requestId;
+  // The request whose outcome is unknown: asked about (/status) before any
+  // further send, so edited answers cannot become a second submission.
+  String? _uncertainRequestId;
   String? _draftOwner;
   String? _draftTemplate;
   Map<String, String> _answers = {};
@@ -172,6 +175,7 @@ class TemplatesProvider extends ChangeNotifier {
       _draftOwner = owner;
       _draftTemplate = templateId;
       _requestId = null;
+      _uncertainRequestId = null;
       _answers = {};
       resetState();
     }
@@ -180,7 +184,7 @@ class TemplatesProvider extends ChangeNotifier {
     _requestId ??= UuidGenerator.generateV4();
     if (!canSubmit) return false;
     final retry = outcomeUnknown;
-    final requestId = _requestId!;
+    var requestId = _requestId!;
     final snapshot = Map<String, String>.unmodifiable(answers);
     _isLoading = true;
     _error = null;
@@ -190,6 +194,32 @@ class TemplatesProvider extends ChangeNotifier {
     _advisoryMessage = null;
     notifyListeners();
     try {
+      final uncertain = _uncertainRequestId;
+      if (uncertain != null) {
+        final known = await _repository.lookupTemplateOutcome(uncertain);
+        if (known == null) {
+          _applyError(TemplateSubmissionError.unknown, templateName);
+          return false;
+        }
+        _uncertainRequestId = null;
+        switch (known.state) {
+          case TemplateLookupState.committed:
+            _result = TemplateSubmissionSuccess(
+              known.documentId!,
+              known.status ?? 'pending',
+              true,
+            );
+            _success = true;
+            return true;
+          case TemplateLookupState.withdrawn:
+            // The patient cancelled it; that id now needs reconciliation.
+            if (requestId == uncertain) {
+              requestId = _requestId = UuidGenerator.generateV4();
+            }
+          case TemplateLookupState.notFound:
+            break;
+        }
+      }
       // Advisory only: it must never mask a replay or the authoritative result.
       if (!retry && templateId != 'other') {
         try {
@@ -219,6 +249,7 @@ class TemplatesProvider extends ChangeNotifier {
     } catch (_) {
       _applyError(TemplateSubmissionError.unknown, templateName);
     } finally {
+      if (outcomeUnknown) _uncertainRequestId ??= requestId;
       _isLoading = false;
       notifyListeners();
     }
