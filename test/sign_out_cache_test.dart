@@ -73,7 +73,7 @@ class EventAuth extends GoTrueClient {
 }
 
 class TestClient extends SupabaseClient {
-  TestClient(this.testAuth) : super('https://example.supabase.co', 'fake-key');
+  TestClient(this.testAuth) : super('https://example.invalid', 'fake-key');
   final EventAuth testAuth;
   @override
   GoTrueClient get auth => testAuth;
@@ -155,7 +155,7 @@ void main() {
     SupabaseService.mockClient = client;
     for (final id in ['a', 'b']) {
       await db.queueOfflineDocument(
-        OfflineDocument(
+        OfflineDocument(uploadState: 'draft',
           id: 'draft-$id',
           uploaderId: id,
           fileName: 'draft.pdf',
