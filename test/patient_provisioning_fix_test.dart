@@ -12,6 +12,8 @@ import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provi
 
 class MockGoTrueClient extends GoTrueClient {
   bool signOutCalled = false;
+  // Email-confirmation signups return no session: RLS then hides the row.
+  bool returnSession = true;
 
   MockGoTrueClient() : super(autoRefreshToken: false);
 
@@ -41,7 +43,7 @@ class MockGoTrueClient extends GoTrueClient {
       tokenType: 'bearer',
       user: user,
     );
-    return AuthResponse(user: user, session: session);
+    return AuthResponse(user: user, session: returnSession ? session : null);
   }
 
   @override
@@ -326,6 +328,36 @@ void main() {
       expect(success, false);
       expect(verificationService.deletePendingUserCalled, false);
       expect(auth.signOutCalled, true);
+      expect(provider.errorMessage, contains('Try signing in'));
+    });
+
+    test('network failure without a session never deletes: absence is unprovable', () async {
+      final auth = MockGoTrueClient()..returnSession = false;
+      final patientsRepo = ThrowingPatientsRepository();
+      final verificationService = FakeVerificationService();
+      final provisioningService = MockPatientProvisioningService()
+        ..shouldFail = true
+        ..functionRan = false;
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: patientsRepo,
+        verificationService: verificationService,
+        provisioningService: provisioningService,
+      );
+
+      final success = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(success, false);
+      expect(verificationService.deletePendingUserCalled, false);
       expect(provider.errorMessage, contains('Try signing in'));
     });
   });

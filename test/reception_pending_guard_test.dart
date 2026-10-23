@@ -13,6 +13,8 @@ import 'package:klinikaid_mobile/features/reception/data/reception_repository.da
 void main() {
   late List<http.Request> requests;
   late bool documentStillPending;
+  // What the pre-routing status read sees (may differ from the update: race).
+  late String statusSeenBeforeRouting;
 
   SupabaseClient client() => SupabaseClient(
         'https://example.supabase.co',
@@ -20,6 +22,12 @@ void main() {
         httpClient: MockClient((request) async {
           requests.add(request);
           final json = {'content-type': 'application/json'};
+          if (request.method == 'GET') {
+            final row = {'status': statusSeenBeforeRouting};
+            final object = request.headers['accept']?.contains('object') ?? false;
+            return http.Response(jsonEncode(object ? row : [row]), 200,
+                request: request, headers: json);
+          }
           if (request.url.path.endsWith('/rpc/triage_patient')) {
             return http.Response('{"id":1}', 200, request: request, headers: json);
           }
@@ -43,7 +51,16 @@ void main() {
   setUp(() {
     requests = [];
     documentStillPending = true;
+    statusSeenBeforeRouting = 'pending';
   });
+
+  Future<void> approve() => ReceptionRepository(client: client()).approveAndRoute(
+        documentId: 'doc',
+        patientId: 'patient',
+        department: 'laboratory',
+        priority: 'normal',
+      );
+  bool routed() => requests.any((r) => r.url.path.endsWith('/rpc/triage_patient'));
 
   Map<String, String> documentUpdate() => requests
       .singleWhere((r) => r.method == 'PATCH' && r.url.path == '/rest/v1/documents')
@@ -66,25 +83,26 @@ void main() {
     );
   });
 
-  test('approval cannot flip a document that is no longer pending', () async {
-    await ReceptionRepository(client: client()).approveAndRoute(
-      documentId: 'doc',
-      patientId: 'patient',
-      department: 'laboratory',
-      priority: 'normal',
-    );
+  test('approval of a pending document routes, then updates only if still pending', () async {
+    await approve();
+    expect(routed(), isTrue);
     expect(documentUpdate(), {'id': 'eq.doc', 'status': 'eq.pending', 'select': 'id'});
+  });
 
+  test('an already decided document is refused before the patient is routed', () async {
+    statusSeenBeforeRouting = 'rejected';
+    await expectLater(approve(), throwsA(isA<DatabaseFailure>().having(
+        (f) => f.message, 'message', contains('no longer pending'))));
+    expect(routed(), isFalse);
+    expect(requests.where((r) => r.method == 'PATCH'), isEmpty);
+  });
+
+  test('a decision made between the read and the update gets a plain message', () async {
     documentStillPending = false;
-    requests.clear();
-    await expectLater(
-      ReceptionRepository(client: client()).approveAndRoute(
-        documentId: 'doc',
-        patientId: 'patient',
-        department: 'laboratory',
-        priority: 'normal',
-      ),
-      throwsA(isA<DatabaseFailure>()),
-    );
+    await expectLater(approve(), throwsA(isA<DatabaseFailure>().having(
+        (f) => f.message, 'message', allOf(
+          contains('no longer pending, so it was not approved'),
+          isNot(contains('JSON object requested'))))));
+    expect(routed(), isTrue);
   });
 }

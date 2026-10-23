@@ -139,6 +139,11 @@ void main() {
       }
       expect(requests.map((r) => '${r.method} ${r.url.path}'),
         ['PATCH /rest/v1/patient_queue']);
+      expect(requests.single.url.queryParameters, {
+        'patient_id': 'eq.patient', 'department': 'eq.laboratory',
+        'status': 'in.("waiting","in_progress")', 'select': 'id',
+      });
+      expect(jsonDecode(requests.single.body), {'status': 'completed'});
       await client.dispose();
       client.fakeAuth.dispose();
     });
