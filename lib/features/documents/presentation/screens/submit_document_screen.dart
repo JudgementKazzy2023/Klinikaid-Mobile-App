@@ -1,3 +1,4 @@
+import '../../data/upload_image.dart';
 import 'dart:convert';
 import 'package:go_router/go_router.dart';
 import 'package:file_selector/file_selector.dart' as files;
@@ -42,11 +43,14 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> {
       );
 
       if (image != null && mounted) {
+        // WebP/HEIC from the photo picker become a JPEG the server accepts.
+        final uploadable = await ensureUploadableImage(image.path);
+        if (!mounted) return;
         // Trigger on-device OCR via provider
         await Provider.of<DocumentSubmissionProvider>(
           context,
           listen: false,
-        ).processOnDeviceOcr(image.path, patient);
+        ).processOnDeviceOcr(uploadable, patient);
         if (!mounted) return;
         final detectedTests = Provider.of<DocumentSubmissionProvider>(
           context,

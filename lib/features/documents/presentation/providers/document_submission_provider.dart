@@ -611,13 +611,16 @@ class DocumentSubmissionProvider extends ChangeNotifier {
       final bytes = await file.readAsBytes();
       if (!_ownerStill(owner)) return _abandonSubmit(generation);
       final mime = UploadsRepository.mimeFor(fileExtension);
-      if (mime.isEmpty || bytes.isEmpty || bytes.length > 5 * 1024 * 1024) {
+      final fileProblem = mime.isEmpty
+          ? 'This file type is not supported. Choose a PDF, JPEG or PNG file.'
+          : bytes.isEmpty
+          ? 'This file is empty. Choose the file again.'
+          : bytes.length > 5 * 1024 * 1024
+          ? 'This file is larger than 5 MB. Choose a smaller file.'
+          : null;
+      if (fileProblem != null) {
         _applyUploadFailure(
-          const UploadFailure(
-            'FIELD_INVALID',
-            'Choose a PDF, JPEG or PNG file up to 5 MB.',
-            field: 'file',
-          ),
+          UploadFailure('FIELD_INVALID', fileProblem, field: 'file'),
           category,
         );
         return false;
