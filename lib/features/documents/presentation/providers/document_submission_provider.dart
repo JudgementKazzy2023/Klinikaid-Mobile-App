@@ -647,8 +647,9 @@ class DocumentSubmissionProvider extends ChangeNotifier {
       final changed =
           draft?.submissionContent != null &&
           draft!.submissionContent != content;
-      // Reaching here, an earlier attempt for this draft is confirmed unused:
-      // blocked states returned above, and unknown ones were looked up.
+      // Reaching here, an earlier attempt for this draft has no committed or
+      // in-RPC submit: blocked states returned above, and unknown ones were
+      // looked up (the lookup lock covers submits that reached the RPC).
       final superseded = changed && draft.assessmentId != null
           ? (id: draft.assessmentId!, mime: UploadsRepository.mimeFor(draft.fileType))
           : null;

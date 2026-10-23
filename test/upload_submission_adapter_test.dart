@@ -255,6 +255,19 @@ void main() {
     expect(discardedFile(first.assessmentId!), true);
   });
 
+  test('a failed row delete keeps the file, so row and file stay together', () async {
+    f.respond = fieldInvalidOnce;
+    expect(await f.submit(selected: ['cbc']), false);
+    final first = (await f.drafts()).single;
+    f.respond = (r) async =>
+        r.method == 'DELETE' && r.url.path.endsWith('/pending_document_ocr')
+        ? f.json({'code': '55P03', 'message': 'lock not available'}, 500)
+        : f.defaults(r);
+    expect(await f.submit(selected: ['fbs']), true);
+    expect(discardedRow(first.assessmentId!), true);
+    expect(discardedFile(first.assessmentId!), false);
+  });
+
   test('an unchanged resend keeps its assessment', () async {
     f.respond = fieldInvalidOnce;
     expect(await f.submit(selected: ['cbc']), false);
