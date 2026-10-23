@@ -229,6 +229,36 @@ void main() {
       expect(await f.drafts(), isEmpty);
     },
   );
+  test(
+    'confirmed outcomes delete the app copy, never the original file',
+    () async {
+      final folder = Directory(
+        '${f.temp.path}/submission-drafts/${UploadFixture.owner}',
+      );
+      List<FileSystemEntity> copies() =>
+          folder.existsSync() ? folder.listSync() : <FileSystemEntity>[];
+
+      expect(await f.submit(), true);
+      expect(copies(), isEmpty);
+      expect(await f.file.exists(), true);
+
+      f.respond = (r) async => r.url.path.endsWith('/upload')
+          ? f.json({'error_code': 'SERVER_ERROR', 'message': 'unknown'}, 503)
+          : f.defaults(r);
+      expect(await f.submit(), false);
+      expect(copies(), hasLength(1)); // unknown: the copy is kept
+      f.respond = (r) async => r.url.path.endsWith('/status')
+          ? f.json({
+              'state': 'committed',
+              'document_id': 'committed',
+              'status': 'pending',
+            }, 200)
+          : f.defaults(r);
+      expect(await f.submit(), true);
+      expect(copies(), isEmpty);
+      expect(await f.file.exists(), true);
+    },
+  );
   for (final state in ['withdrawn', 'unavailable']) {
     test('$state lookup never resends or deletes draft/file', () async {
       f.respond = (r) async => r.url.path.endsWith('/upload')

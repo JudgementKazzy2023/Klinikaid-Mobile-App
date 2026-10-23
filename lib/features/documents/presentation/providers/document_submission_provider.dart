@@ -414,6 +414,21 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     }
   }
 
+  /// The server confirmed this submission, so the app's private copy of the
+  /// medical document is no longer needed on the device. Only files inside the
+  /// owner's submission-drafts folder are touched, never the patient's original.
+  Future<void> _deleteDraftCopy(String filePath, String owner) async {
+    try {
+      final root = _draftDirectory ?? await getApplicationDocumentsDirectory();
+      final folder = path.join(root.path, 'submission-drafts', owner);
+      if (!path.isWithin(folder, filePath)) return;
+      final file = File(filePath);
+      if (await file.exists()) await file.delete();
+    } catch (_) {
+      // The submission is confirmed; a leftover copy is not worth failing it.
+    }
+  }
+
   /// This compatibility entry never replays a queue, even with containment off.
   Future<void> syncOfflineQueue() async {
     if (PatientSubmissionContainment.isActive) return;
@@ -563,6 +578,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
           case UploadLookup(state: 'committed'):
             _documentId = known.documentId;
             await _localDb.removeQueuedDocument(draft.id, owner);
+            await _deleteDraftCopy(draft.localFilePath, owner);
             if (!_ownerStill(owner)) return _abandonSubmit(generation);
             return true;
           case UploadLookup(state: 'not_found'):
@@ -717,6 +733,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
         case UploadSuccess():
           _documentId = result.documentId;
           await _localDb.removeQueuedDocument(draft.id, owner);
+          await _deleteDraftCopy(draft.localFilePath, owner);
           if (!_ownerStill(owner)) return _abandonSubmit(generation);
           return true;
         case UploadFailure():

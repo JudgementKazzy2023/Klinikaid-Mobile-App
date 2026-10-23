@@ -125,7 +125,7 @@ Migration 42 widens `submission_receipts.operation` to include `submit_upload`. 
 
 **Decision: promote the pending object in place; do not copy it to a second path.** A Storage copy and Postgres commit cannot form one transaction. Keeping the original object avoids the two-file orphan/cleanup race entirely. Failed SQL rolls back the seal and assessment consumption, leaving the original pending draft. The final document references the server-validated pending path; no client-selected final path is trusted.
 
-The transaction updates the object row version while sealing it. A tightened patient DELETE policy refuses sealed/referenced objects; a trigger rejects deletion or replacement even by cleanup code. Read bookkeeping fields may update without changing the object. No new code calls Storage.remove after submission or on an uncertain outcome. Receipts and seals are retained through cancellation; any future physical retention/cleanup policy requires separate owner review.
+The transaction updates the object row version while sealing it. A tightened patient DELETE policy refuses sealed/referenced objects; a trigger rejects deletion or replacement, even by cleanup code, while a document references the file. Read bookkeeping fields may update without changing the object. No new code calls Storage.remove after submission or on an uncertain outcome. Receipts are retained through cancellation; the cancelled document's file is no longer protected, so web's existing cancel cleanup still removes it (review fix, `d9156d5`).
 
 **Verification limit:** The SQL metadata protection and rollback are tested in-process. Actual Supabase Storage service behavior, permissions and physical-object lifecycle still require owner verification in an isolated project. The tests do not claim production deployment or multi-connection advisory-lock contention.
 
@@ -168,9 +168,13 @@ Unknown and migrated legacy drafts check `/upload/status` before an explicit res
 
 No opening, app resume, auth event, constructor or syncOfflineQueue callback submits any queued row. The sync compatibility entry only reloads local rows. The signed-in owner must choose and confirm one saved draft. Other owners' rows are hidden and untouched. Missing files are retained and surfaced for support; they are never silently removed.
 
-A local queue row is removed only after confirmed submit success or a committed status lookup. No local or remote file is automatically deleted. Duplicate rejection, field errors, unavailable lookup, timeout, conflict, withdrawal and blocked states retain the draft/file. The patient direct documents insert/update APIs have been removed; document reads remain.
+A local queue row is removed only after confirmed submit success or a committed status lookup. At that point the app's private copy under `submission-drafts/<owner>/` is deleted too, so submitted medical documents do not accumulate on the device; the patient's original file is never touched. No other local or remote file is deleted automatically. Duplicate rejection, field errors, unavailable lookup, timeout, conflict, withdrawal and blocked states retain the draft/file. The patient direct documents insert/update APIs have been removed; document reads remain.
+
+Detected tests on mobile uploads come from OCR text the client wrote into its own pending row, so they are labelled `test_detection_source: "client_ocr_catalog_match"`; web keeps `"ocr_text_catalog_match"`. Reception reviews the original file either way.
 
 ## 10. Validation and evidence
+
+**Outside the brief, kept in this branch:** about 20 existing test files had the real production Supabase URL and anon key replaced with synthetic values, and `test/flutter_test_config.dart` now fails any live HTTP in tests. Both are safety improvements unrelated to uploads; they can be split into their own PR before review if preferred.
 
 No live database/Storage/assessment calls, credentials, migrations, deployments, pushes or GitHub comments were used. Flutter tests have a global fail-closed HTTP override; explicit mocked clients remain usable. Legacy production initialization literals were replaced with synthetic URL/key values. Every test-only containment override is restored in tearDown.
 
