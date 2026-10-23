@@ -128,7 +128,7 @@ class MockSupabaseClient extends SupabaseClient {
 
   MockSupabaseClient(this.mockAuth)
       : super(
-          'https://example.supabase.co',
+          'https://example.invalid',
           'mock-anon-key',
           authOptions: const AuthClientOptions(autoRefreshToken: false),
         );
