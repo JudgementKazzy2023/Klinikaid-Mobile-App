@@ -5,6 +5,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'package:klinikaid_mobile/core/patient_submission_containment.dart';
 import 'package:klinikaid_mobile/core/cache/local_database.dart';
 import 'package:klinikaid_mobile/core/models/patient.dart';
 import 'package:klinikaid_mobile/core/supabase/supabase_client.dart';
@@ -332,6 +333,10 @@ Patient _patient({String? profileId, String id = 'patient-uuid-1'}) => Patient(
     );
 
 void main() {
+  // These tests exercise the submit flows that containment blocks.
+  setUp(() => PatientSubmissionContainment.activeForTesting = false);
+  tearDown(() => PatientSubmissionContainment.activeForTesting = true);
+
   TestWidgetsFlutterBinding.ensureInitialized();
 
   const userA = 'user-a';

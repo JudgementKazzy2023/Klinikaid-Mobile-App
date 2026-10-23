@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:drift/native.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:klinikaid_mobile/core/patient_submission_containment.dart';
 import 'package:klinikaid_mobile/core/supabase/supabase_client.dart';
 import 'package:klinikaid_mobile/core/cache/local_database.dart';
 import 'package:klinikaid_mobile/core/models/patient.dart';
@@ -134,6 +135,10 @@ class MockImagePickerPlatform extends ImagePickerPlatform {
 }
 
 void main() {
+  // These tests exercise the submit flows that containment blocks.
+  setUp(() => PatientSubmissionContainment.activeForTesting = false);
+  tearDown(() => PatientSubmissionContainment.activeForTesting = true);
+
   TestWidgetsFlutterBinding.ensureInitialized();
   HttpOverrides.global = null;
 
