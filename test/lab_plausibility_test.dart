@@ -1,12 +1,52 @@
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:klinikaid_mobile/features/specialist/data/specialist_repository.dart';
 import 'package:klinikaid_mobile/features/department/data/department_repository.dart';
 import 'package:klinikaid_mobile/features/department/domain/lab_reference_ranges.dart';
 import 'package:klinikaid_mobile/features/department/presentation/providers/result_entry_provider.dart';
 
+// Web migration 40 (Setsuna-guwah/KlinikAid#212, live 2026-10-23): the DB refuses
+// implausible lab values with PostgREST 400, code 23514, and web's sentence.
+const _serverRefusal =
+    'Hemoglobin: 99 g/dL is outside the possible range (1–25 g/dL). Check the value and its unit.';
+
+class _FakeAuth extends GoTrueClient {
+  _FakeAuth() : super(autoRefreshToken: false);
+
+  @override
+  User? get currentUser => User(
+        id: 'recorder-uuid',
+        appMetadata: const {},
+        userMetadata: const {},
+        aud: 'authenticated',
+        createdAt: DateTime.now().toIso8601String(),
+      );
+}
+
+/// Real Supabase transport whose every insert is refused like migration 40.
+class _RefusingClient extends SupabaseClient {
+  _RefusingClient()
+      : super(
+          'https://example.supabase.co',
+          'fake',
+          authOptions: const AuthClientOptions(autoRefreshToken: false),
+          httpClient: MockClient((request) async => http.Response(
+                jsonEncode({'code': '23514', 'message': _serverRefusal, 'details': null, 'hint': null}),
+                400,
+                request: request,
+                headers: {'content-type': 'application/json'},
+              )),
+        );
+
+  @override
+  GoTrueClient get auth => _FakeAuth();
+}
+
 class _RecordingRepo extends DepartmentRepository {
   List<LabResultRow>? rows;
-  Object? failWith;
 
   @override
   String? get currentUserId => 'recorder';
@@ -16,7 +56,6 @@ class _RecordingRepo extends DepartmentRepository {
     required String patientId,
     required List<LabResultRow> rows,
   }) async {
-    if (failWith != null) throw failWith!;
     this.rows = rows;
   }
 }
@@ -78,16 +117,6 @@ void main() {
       expect(repo.rows!.single.testValue, '14');
     });
 
-    // Web migration 40 (KlinikAid#212) adds a DB trigger that refuses implausible
-    // values with errcode 23514; mobile must show that server message as-is.
-    test('a server-side plausibility refusal (23514) shows the server message', () async {
-      const serverMessage =
-          'Hemoglobin: 5.5 g/dL is outside the possible range (6–25 g/dL). Check the value and its unit.';
-      repo.failWith = const PostgrestException(message: serverMessage, code: '23514');
-      expect(await submitHemoglobin('14'), isFalse);
-      expect(provider.errorMessage, serverMessage);
-    });
-
     test('the refusal message echoes the value as entered, like web', () async {
       expect(await submitHemoglobin('30.0'), isFalse);
       expect(provider.errorMessage, startsWith('Hemoglobin: 30.0 g/dL is outside'));
@@ -98,6 +127,32 @@ void main() {
         expect(await submitHemoglobin(bad), isFalse, reason: bad);
         expect(repo.rows, isNull, reason: bad);
       }
+    });
+  });
+
+  group('server refusal (23514) shows the server sentence', () {
+    test('department save, through the real repository', () async {
+      final repo = DepartmentRepository(client: _RefusingClient())
+        ..adminDepartmentOverride = 'laboratory';
+      final provider = ResultEntryProvider(repo)
+        ..setLabGroup('Complete Blood Count (CBC)')
+        ..setParameterValue('Hemoglobin', '14');
+
+      expect(await provider.submitLabResults(patientId: 'p1', gender: 'male'), isFalse);
+      expect(provider.errorMessage, _serverRefusal);
+    });
+
+    test('specialist save, through the real repository', () async {
+      final repo = SpecialistRepository(client: _RefusingClient());
+      // The specialist provider shows `e.toString()` of what the repository throws.
+      await expectLater(
+        repo.submitRecord(
+          specialistPatientId: 'sp1',
+          testType: 'Complete Blood Count (CBC)',
+          rows: [SpecialistRecordRow(testName: 'Hemoglobin', testValue: '14', isFlagged: false)],
+        ),
+        throwsA(predicate((e) => e.toString() == _serverRefusal)),
+      );
     });
   });
 }
