@@ -8,6 +8,22 @@ export async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
+  if (req.method !== "POST") {
+    return new Response(
+      JSON.stringify({
+        error_code: "METHOD_NOT_ALLOWED",
+        message: "Use POST or OPTIONS.",
+      }),
+      {
+        status: 405,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+          Allow: "POST, OPTIONS",
+        },
+      },
+    );
+  }
   const url = Deno.env.get("SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -58,7 +74,7 @@ export async function handler(req: Request): Promise<Response> {
       },
       async profile(userId) {
         const { data, error } = await admin.from("profiles")
-          .select("is_active, accepted_privacy_at").eq("id", userId)
+          .select("role, is_active, accepted_privacy_at").eq("id", userId)
           .maybeSingle();
         if (error) throw new SubmissionError("SERVER_ERROR");
         return data;

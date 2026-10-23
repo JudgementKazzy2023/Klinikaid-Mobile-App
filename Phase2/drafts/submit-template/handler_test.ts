@@ -42,6 +42,7 @@ class FakeStore implements SubmissionStore {
   audits: (Audit & { document_id: string })[] = [];
   duplicate = false;
   failCommit = false;
+  loseResponse = false;
   expiredCalls = 0;
   async onExpired(_scope: Scope): Promise<never> {
     this.expiredCalls++;
@@ -71,7 +72,13 @@ class FakeStore implements SubmissionStore {
             kind: "complete",
             fingerprint,
             document_id,
+            first_accepted_at: new Date().toISOString(),
+            expires_at: new Date(Date.now() + 86400000).toISOString(),
           });
+          if (this.loseResponse) {
+            this.loseResponse = false;
+            throw new Error("Synthetic response lost after atomic commit");
+          }
           return document_id;
         },
       }) as T;
@@ -92,7 +99,11 @@ function fixture() {
       email_confirmed_at: "2026-01-01",
       app_metadata: {},
     },
-    profile: { is_active: true, accepted_privacy_at: "2026-01-01" },
+    profile: {
+      role: "patient",
+      is_active: true,
+      accepted_privacy_at: "2026-01-01",
+    },
     patient: {
       id: "DIFFERENT-patient-row-uuid",
       profile_id: "profile-uuid",
@@ -342,7 +353,7 @@ Deno.test("intake age boundary Manila; other forms do not impose intake age", as
     }-${String(day).padStart(2, "0")}`;
     equal(
       (await call(f, body("patient-intake"))).status,
-      age === 18 || age === 120 ? 200 : 403,
+      age === 18 || age === 120 ? 200 : age === 121 ? 500 : 403,
     );
   }
   const f = fixture();
@@ -396,6 +407,8 @@ Deno.test("operation scoping and persisted in-progress receipt", async () => {
   const f = fixture();
   f.store.receipts.set(JSON.stringify(["profile-uuid", "submit_upload", id]), {
     kind: "complete",
+    first_accepted_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
     document_id: "other-operation",
     fingerprint: "different",
   });
@@ -455,6 +468,128 @@ Deno.test("malformed JSON, missing bearer, and non-object body fail safely", asy
     equal((await response.json()).error_code, code);
   }
   equal(f.store.documents.length, 0);
+});
+Deno.test("OPTIONS and unsupported methods perform no identity or store calls", async () => {
+  const identity: Identity = {
+    authenticate: () => {
+      throw new Error("must not authenticate");
+    },
+    profile: () => {
+      throw new Error("must not read profile");
+    },
+    patientByProfile: () => {
+      throw new Error("must not read patient");
+    },
+  };
+  const handler = createHandler({ identity });
+  for (const method of ["OPTIONS", "GET", "PUT", "DELETE", "PATCH"]) {
+    const response = await handler(
+      new Request("https://example.invalid", { method }),
+    );
+    equal(response.status, method === "OPTIONS" ? 200 : 405);
+    equal(
+      response.headers.get("Access-Control-Allow-Methods"),
+      "POST, OPTIONS",
+    );
+    if (method !== "OPTIONS") {
+      equal(response.headers.get("Allow"), "POST, OPTIONS");
+      equal((await response.json()).error_code, "METHOD_NOT_ALLOWED");
+    }
+  }
+});
+Deno.test("patient role and linked row are independent gates, including replays", async () => {
+  for (const replay of [false, true]) {
+    const f = fixture();
+    if (replay) await call(f);
+    f.state.profile!.role = "admin";
+    equal((await call(f)).body.error_code, "PATIENT_ACCOUNT_REQUIRED");
+    f.state.profile!.role = "patient";
+    f.state.patient = null;
+    equal((await call(f)).body.error_code, "NO_PATIENT_RECORD");
+    equal(f.store.documents.length, replay ? 1 : 0);
+  }
+});
+Deno.test("bad stored DOB is server data error only for intake; read failure is unavailable", async () => {
+  for (
+    const dob of [
+      null,
+      "",
+      "not-a-date",
+      "2025-02-30",
+      "1800-01-01",
+      "9999-01-01",
+    ]
+  ) {
+    const f = fixture();
+    f.state.patient!.date_of_birth = dob;
+    const result = await call(f, body("patient-intake"));
+    equal(result.status, 500);
+    equal(result.body.error_code, "SERVER_DATA_INVALID");
+    equal(result.body.message.includes("contact the clinic"), true);
+    equal(result.body.field, undefined);
+    if (dob) equal(JSON.stringify(result).includes(dob), false);
+    equal(f.store.documents.length, 0);
+    equal((await call(f)).status, 200);
+  }
+  const f = fixture();
+  f.identity.patientByProfile = async () => {
+    throw new Error("read unavailable");
+  };
+  equal(
+    (await call(f, body("patient-intake"))).body.error_code,
+    "SERVER_ERROR",
+  );
+});
+Deno.test("proposed seven-day receipt boundary: before, at, after; no expired insertion", async () => {
+  // Proposed fixture horizon ONLY; not a backend retention acceptance claim.
+  for (const offset of [-1, 0, 1]) {
+    const f = fixture();
+    const initial = await call(f);
+    const key = scopeKey({
+      user_id: "profile-uuid",
+      operation: "submit_template",
+      request_id: id,
+    });
+    const receipt = f.store.receipts.get(key)!;
+    if (receipt.kind !== "complete") throw new Error("missing fixture receipt");
+    const start = new Date("2026-10-01T00:00:00Z");
+    const expiry = new Date(start.getTime() + 7 * 86400000);
+    f.store.receipts.set(key, {
+      ...receipt,
+      first_accepted_at: start.toISOString(),
+      expires_at: expiry.toISOString(),
+    });
+    f.handler = createHandler({
+      identity: f.identity,
+      store: f.store,
+      now: () => new Date(expiry.getTime() + offset),
+    });
+    const result = await call(f);
+    equal(result.status, offset < 0 ? 200 : 503);
+    if (offset < 0) equal(result.body.document_id, initial.body.document_id);
+    equal(f.store.expiredCalls, offset < 0 ? 0 : 1);
+    equal(f.store.documents.length, 1);
+    equal(f.store.audits.length, 1);
+  }
+});
+Deno.test("ambiguous post-commit timeout resolves through same key without another event", async () => {
+  const f = fixture();
+  f.store.loseResponse = true;
+  equal((await call(f)).body.error_code, "SERVER_ERROR");
+  const result = await call(f);
+  equal(result.status, 200);
+  equal(result.body.replayed, true);
+  equal(result.body.document_id, f.store.audits[0].document_id);
+  equal(f.store.documents.length, 1);
+  equal(f.store.audits.length, 1);
+});
+Deno.test("atomic commit failure leaves no fixture document, event, or receipt", async () => {
+  const f = fixture();
+  f.store.failCommit = true;
+  equal((await call(f)).status, 503);
+  equal(f.store.documents.length, 0);
+  equal(f.store.audits.length, 0);
+  equal(f.store.receipts.size, 0);
 });
 Deno.test({
   name: "OWNER BLOCKED: atomic cross-web/mobile duplicate integration",

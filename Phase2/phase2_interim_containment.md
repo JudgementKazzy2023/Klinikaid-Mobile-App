@@ -1,7 +1,7 @@
 # Interim Containment — Patient Document Submission
 
-**Status:** Proposed containment only. NOT implemented or released. Explicit
-implementation and release approval pending. No backend deployment.
+**Status:** Implementation approved and present locally; not committed or released.
+Device Gate D pending. No backend deployment.
 **Date:** 2026-10-20
 **Context:** Patient document INSERT/UPDATE RLS policies were removed on prod
 (PR #76 / migration 23). Mobile's direct-insert submission paths are now
@@ -13,6 +13,42 @@ covers what mobile does in the meantime.
 ---
 
 ## Problem
+
+### Local containment implementation (2026-10-20)
+
+- Shared patient containment guard blocks template submit, upload submit before
+  Storage, offline replay, and the unused pending-document UPDATE helper.
+- Upload entry shows the persistent unavailable state before file selection
+  (and therefore before remote quality assessment). Existing in-memory metadata
+  is not cleared. Previously persisted upload rows/files remain untouched.
+- New template routes show the unavailable state instead of accepting form input.
+  No template persistence was added.
+- Initial-screen and app-resume automatic replay calls were removed. Lifting
+  the containment guard will not restore these lifecycle triggers.
+- Existing upload drafts are held without retry/delete controls. Other-account
+  drafts are retained without displaying their filenames in this view.
+- Patient document reads and staff/admin code paths remain unchanged.
+- Six isolated tests pass in `test/patient_submission_containment_test.dart`:
+  repository write guards plus allowed reads; template rejection with retained
+  input; upload rejection including offline fallback; queue/file preservation
+  across local database reopen; initial/resume lifecycle; all template routes.
+  Every HTTP call is intercepted, including potential Storage calls. No global
+  Supabase initialization, live credentials, realtime, camera, or OCR is used.
+  Test fixtures use a temporary local SQLite database and synthetic text files.
+- Focused analysis reported no errors or warnings and one pre-existing
+  `deprecated_member_use` info for the template dropdown's `value` property.
+  The analysis command exits nonzero for that info; it was not changed here.
+- `flutter build apk --release --no-pub` passed (91.0 seconds).
+  Output: `build/app/outputs/flutter-apk/app-release.apk` (101.1 MB).
+  Existing plugins emitted a future Kotlin Gradle Plugin compatibility warning.
+- The repository ignores `test/`; explicitly include
+  `test/patient_submission_containment_test.dart` in a future approved commit.
+  No files have been staged or committed for this implementation.
+- Gate D still requires device confirmation of unavailable states, retained
+  drafts after restart, functioning Records/tracking, and unaffected staff flows.
+  Do not uninstall or clear app data when testing retained drafts.
+
+The proposal below records the approved rationale and acceptance criteria.
 
 Patients cannot submit documents. Two mobile paths call
 `_client.from('documents').insert(...)` directly:
@@ -43,7 +79,9 @@ Mobile uploads to `<user>/<uuid>_<filename>` instead of
 `<user>/pending-submissions/...`, so upload/sync now fails at Storage before the
 documents insert. This is a second independent block, not an alternative fix:
 changing the path alone would still leave document insertion denied. Templates
-have no Storage upload step. No production submission was attempted.
+have no Storage upload step. The agent did not attempt a production submission.
+The user's subsequent device evidence confirms a raw StorageException 403
+(`new row violates row-level security policy`) before document insertion.
 
 A patient tapping Submit today gets a failure. Until the
 Edge Function ships, submission cannot work — the containment makes that

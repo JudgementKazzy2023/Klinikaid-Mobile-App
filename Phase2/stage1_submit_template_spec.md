@@ -1,7 +1,11 @@
 # Stage 1 Spec — `submit_template` Edge Function
 
-**Status:** DRAFT for backend owner review. Not approved, not implemented.
-**Date:** 2026-10-20
+**Status:** Contract and ownership **accepted** by the backend owner on
+2026-10-22 (#3, #36). Implementation is in review as web PR
+[Setsuna-guwah/KlinikAid#215](https://github.com/Setsuna-guwah/KlinikAid/pull/215)
+(migration 41 + `patient-document-submission` Edge function). It is not applied
+or deployed. Mobile containment stays until the steps in section 13 are verified.
+**Date:** 2026-10-20, decisions updated 2026-10-23
 **Scope:** Template submission only. Upload path is Stage 2.
 **Ownership:** Backend owner (`@Setsuna-guwah`) retains contract authority,
 deployment, rollback, and maintenance. Mobile may contribute source and tests
@@ -32,6 +36,15 @@ until Stage 2.
 ---
 
 ## 2. Reference baseline — IMPORTANT
+
+**Source revision:** The published Stage 1 source draft is mobile PR #3 commit
+`3db90ac`. Its web reference modules are pinned to `940a2f6`.
+This uncommitted contract revision incorporates the web owner's
+[reply checked against web 06ccce1](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/pull/3#issuecomment-6289444454).
+Comparison through `06ccce1` confirms the catalog, template checks and submit
+action are unchanged; validation.ts adds unrelated blood-pressure validation.
+Historical local checkout observations are not the source revision or evidence
+of deployment; see the draft README for that separate audit context.
 
 **Web's current template flow is authoritative.** Mobile's template catalog and
 field schemas were ported from web at an earlier baseline (`a9460ce`) and have
@@ -67,6 +80,13 @@ Content-Type: application/json
 
 **Unknown top-level keys and unknown field keys are rejected**, not ignored.
 Silent ignoring hides client/server drift.
+Stage 1 explicitly uses **400** for field and unknown-key errors, not 422.
+Non-string answers are rejected rather than coerced to empty (an intentional
+transport difference from the web action).
+
+OPTIONS is CORS preflight. Unsupported methods return **405 METHOD_NOT_ALLOWED**
+with `Allow: POST, OPTIONS`. Neither path authenticates, reads patient data or
+performs submission writes.
 
 ### Server-derived — client values rejected, not overwritten
 
@@ -122,12 +142,20 @@ remediation rather than showing a generic failure. Proposed set in §8.
 | Valid JWT | `UNAUTHENTICATED` |
 | Patient record exists for this profile | `NO_PATIENT_RECORD` |
 | Profile active | `PROFILE_INACTIVE` |
+| Authoritative profile role is patient | `PATIENT_ACCOUNT_REQUIRED` |
 | Email confirmed | `EMAIL_NOT_CONFIRMED` |
 | Privacy consent accepted | `CONSENT_REQUIRED` |
 | `must_change_password` not set | `PASSWORD_CHANGE_REQUIRED` |
 
 Each must be distinguishable. A single generic `FORBIDDEN` forces mobile to
-show an unhelpful error for six different remediable states.
+show an unhelpful error for distinct remediable states.
+
+An active patient role and a linked patient row are separate requirements.
+A staff account with a linked row is still refused; broad document permissions
+do not authorize this patient-only endpoint. Profile role comes from the
+authoritative profile, not caller fields or user-editable metadata. All gates
+apply on first calls and replays. Failed reads are 503 unavailability, not an
+absent patient, consent denial or eligibility verdict.
 
 `NO_PATIENT_RECORD` matters specifically: mobile previously shipped a bug where
 accounts existed in `auth.users` + `profiles` with no `patients` row. That is
@@ -138,7 +166,25 @@ fixed, but the function should fail loudly rather than insert with a null
 
 ## 5. The four validation decisions
 
-These require the backend owner's answer before implementation.
+The following table separates agreement on a revised contract from production
+implementation and verification. Backend review recommendations are not release
+acceptance. The detailed questions below retain the original decision context.
+
+| Item | Proposed | Accepted | Implemented | Verified |
+|---|---|---|---|---|
+| Ownership split | Backend owner: contract, persistence, deploy, rollback; mobile: adapter, queue, client release; mobile may contribute backend PRs | **Accepted** 2026-10-22 (#3) | — | — |
+| Shared module | One runtime-neutral module for web and Deno | **Accepted** (#36) | Web PR #215: the function imports `src/lib` template modules via `deno.json`; no copies | Deno + vitest pass; deploy bundling to be confirmed by owner |
+| Field bounds / metadata | Web catalog, 200/2000, trim, Manila dates; flat metadata | **Accepted** | #215 (shared `templateDocument` builder) | Synthetic tests |
+| Intake age / stored DOB | 18+; invalid stored DOB is 500 | **Accepted** | #215 handler | Synthetic tests |
+| Patient predicate | Active profile with patient role AND linked patient row | **Accepted**; role resolved through `role_id` → `roles` (owner review) | #215 | Synthetic tests |
+| Transport | 400 validation, 405 + Allow, OPTIONS preflight | **Accepted** | #215 handler | Synthetic tests |
+| Duplicates | One pending per patient and category, cross-method, atomic | **Accepted**: `other` exempt; existing rows never mutated; a collision rejects the new submission with the existing document id/status | #215 migration 41: advisory lock per (patient, category) inside the submit transaction | PGlite scenarios; live multi-connection not tested. Web uploads join in Stage 2 |
+| Receipt retention | 7-day client retry horizon | **Accepted**: 7-day horizon, receipts kept 30 days; expired/unknown go to reconciliation, never a fresh insert | #215: `submission_receipts`, `expires_at` = +30 days | PGlite boundary check |
+| Audit | One transaction: document + event + receipt; failure rolls back | **Accepted** | #215 `submit_patient_template` | PGlite rollback check |
+| Outcome lookup | Owner-scoped status lookup for reconciliation | Direction accepted; endpoint and schema not yet specified | Not built | — |
+| Support owner | Reception for patient cases; backend owner for receipt/commit recovery | **Accepted**; clinic must name a reception person before containment lifts | — | — |
+| Legacy duplicate report | Read-only pending/conflict/unclassifiable counts | **Accepted**, runs before re-enabling | Not built | — |
+| Deployment/release | Backend owner applies and deploys | **Accepted** | Not applied/deployed | Not verified |
 
 ### Decision 1 — Template catalog and field schema authority
 
@@ -186,12 +232,19 @@ the error code?
 
 Mobile currently enforces 18+ client-side for `patient-intake` only, computed
 against Philippine time (UTC+8) from the patient's date of birth. Registration
-uses 13+; these are deliberately different thresholds.
+already uses 18+ on both mobile main and web. The previous 13+ reference was
+stale documentation; this correction is not a newly shipped registration fix.
 
-**Mobile's position:** enforce server-side with a distinct code
-(`AGE_REQUIREMENT_NOT_MET`). A client-only clinical eligibility rule is
-bypassable. Confirm the threshold, the timezone basis, and whether it applies
-to any template other than `patient-intake`.
+For intake only: a valid stored DOB below 18 returns 403
+`AGE_REQUIREMENT_NOT_MET`. Missing, malformed, future or more-than-120-year-old
+stored DOB returns 500 `SERVER_DATA_INVALID`, with a safe contact-clinic message.
+Do not expose clinical values in diagnostics or automatically retry this error
+until corrected. Failure to read DOB is 503 `SERVER_ERROR`, never eligibility.
+Other templates do not acquire an intake DOB/age gate.
+
+**Revised contract:** enforce the intake rule server-side against Manila today.
+The source draft implements the distinction above; deployed verification is
+still blocked on the shared persistence contribution and release acceptance.
 
 ### Decision 4 — Business duplicate rule for templates
 
@@ -214,6 +267,13 @@ Needed:
 
 **Mobile's position:** server-side and atomic. Mobile keeps its client-side
 check as UX (fail fast, better message) but stops treating it as the guarantee.
+
+Mobile's current `document_dedup.dart` compares normalized categories without
+an `other` exemption, so it already matches the no-exemption recommendation.
+This is not atomic enforcement and does not resolve legacy conflicts. A
+read-only legacy classification/conflict report and an approved resolution
+plan must precede enforcement; no relabeling, cleanup or winner selection is
+authorized. Shared persistence must be used by both web and Edge.
 
 ### Also needs confirming (not blocking, but affects the contract)
 
@@ -242,9 +302,10 @@ Mobile currently writes, and web currently reads:
 `patient-intake` additionally carries `date_of_birth`, `contact_number`,
 `address`, injected from the patient record. Other templates do not.
 
-**Decision needed:** the function now owns this shape. Confirm it is unchanged,
-and that the function — not the client — performs the `patient-intake`
-injection. Mobile should stop injecting them once the function does.
+**Revised contract:** preserve this flat shape; the function performs the
+`patient-intake` injection from the linked patient record. No client identity,
+name/category override or upload `selected_tests` is accepted for templates.
+Mobile stops injecting demographics only when the accepted adapter is built.
 
 Byte-parity matters here: web reception renders directly from
 `extracted_metadata.selected_tests` and the template fields. A shape change
@@ -265,22 +326,66 @@ breaks reception display for existing documents.
 - Same `request_id` with **different normalized content** → `409
   IDEMPOTENCY_CONFLICT`. This catches a client that mutated the draft and
   retried with a stale id.
-- **In-progress** handling: a second call with the same `request_id` while the
-  first is still executing must not double-insert. Either block until the first
-  resolves and return its result, or return a distinguishable `IN_PROGRESS`
-  that mobile treats as "do not retry yet."
+- **In-progress** handling (#215): a second call with the same `request_id`
+  waits on a transaction lock until the first finishes, then replays its
+  result. There is no `IN_PROGRESS` response.
 
-**Decision needed:** retention window for `request_id`. Mobile's retry policy
-must stay inside it. Beyond the window, a replay would create a second
-document — so mobile needs the number to cap its retry horizon and to decide
-when a queued draft becomes "must reconcile manually" rather than "safe to
-retry."
+**Two different clocks:**
+- Server receipt window starts at the **first accepted request**, not local
+  draft creation or the latest retry. Seven days is a proposed target only,
+  not a deployed/verified guarantee. The backend supplies first_accepted_at and
+  expires_at; retries must not extend them.
+- Offline draft age starts locally. A never-sent draft has no server receipt.
+  Its age alone cannot establish receipt expiry or prove a prior submission.
+  An uncertain outcome is not equivalent to never sent.
+
+Draft boundary convention is [first acceptance, expiry): immediately before
+expiry permits replay; at/after expiry requires reconciliation, never fresh
+insertion under the expired key. Durable outcome/tombstone evidence must remain.
+Keep the same request ID and normalized payload after uncertain outcomes.
+The production duration, durable implementation, and operational reconciliation
+UX/resolver remain owner acceptance items. Preserve the draft; the proposed
+operational direction below is not an available service or approved rollout.
 
 **Ambiguous timeout:** mobile cannot distinguish "never arrived" from
 "committed but response lost." Mobile's rule: retry with the same `request_id`
 (safe by idempotency), and if still unresolved, surface
 "could not be confirmed — refresh before retrying" rather than claiming either
 outcome. No automatic replay without reconciliation.
+
+### Proposed operational reconciliation (latest owner planning reply)
+
+Source: [owner planning reply](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/pull/3#issuecomment-6292453439).
+These are proposed contract states, not an implemented status endpoint.
+
+Patient message: **"We could not confirm this submission. Your draft is saved.
+Check its status or contact the clinic before submitting again."**
+
+An authenticated, owner-scoped outcome lookup must use the original operation,
+request ID and normalized fingerprint. Missing/expired receipts alone cannot
+prove non-commit. Endpoint route, exact response schema, bounded retry guidance
+and support-reference format still require acceptance; none are invented here.
+
+| Outcome | Permitted transition |
+|---|---|
+| Committed | Return original document ID/status; link existing record and resolve local draft, without another submission/event |
+| In progress | Show "Checking submission status"; follow server-bounded status-check guidance |
+| Unknown/unavailable | Retain draft and safe support reference; only status checks, no new insertion |
+| Confirmed not committed | Only authoritative evidence or documented operator resolution permits patient review and explicit resubmission under an accepted new-request procedure |
+
+Never discard the file, silently generate another key, or delete/recreate
+clinical records to resolve uncertainty. Preserve original ownership.
+Clinic reception/intake is proposed to coordinate the patient case; the
+shared-backend maintainer handles technical receipt/commit recovery. A named
+operational owner and escalation route must be accepted before advertising a
+working support process. No patient/mobile-support privileged access.
+
+The owner explicitly declined an independently deployed service-role insert
+with client dedup. Keep containment. No implementation PR or delivery date for
+shared persistence was committed in that reply. The shared-backend contribution
+should supply the legacy classification query; its maintainer runs any later
+authorized target report and retains detailed results privately. This task
+does not run it or authorize production SQL/data cleanup.
 
 ---
 
@@ -289,6 +394,9 @@ outcome. No automatic replay without reconciliation.
 | Code | HTTP | Mobile remediation |
 |---|---|---|
 | `UNAUTHENTICATED` | 401 | Re-authenticate |
+| `METHOD_NOT_ALLOWED` | 405 | Use POST; response includes `Allow: POST, OPTIONS` |
+| `PATIENT_ACCOUNT_REQUIRED` | 403 | Patient-only endpoint; do not substitute staff permissions |
+| `SERVER_DATA_INVALID` | 500 | Contact clinic; no automatic retry until corrected |
 | `NO_PATIENT_RECORD` | 403 | Contact clinic — account incomplete |
 | `PROFILE_INACTIVE` | 403 | Contact clinic |
 | `EMAIL_NOT_CONFIRMED` | 403 | Route to verification |
@@ -299,10 +407,10 @@ outcome. No automatic replay without reconciliation.
 | `FIELD_REQUIRED` | 400 | Highlight field |
 | `FIELD_INVALID` | 400 | Highlight field with reason |
 | `AGE_REQUIREMENT_NOT_MET` | 403 | Explain eligibility |
-| `DUPLICATE_PENDING` | 409 | Point at existing pending document |
+| `DUPLICATE_PENDING` | 409 | Point at existing pending document (response carries its `document_id` and `status`) |
 | `IDEMPOTENCY_CONFLICT` | 409 | Do not retry; surface for reconciliation |
-| `IN_PROGRESS` | 409 | Wait, do not retry yet |
-| `SERVER_ERROR` | 5xx | Retry with same `request_id` |
+| `RECONCILIATION_REQUIRED` | 409 | Receipt expired (30 days) or the patient cancelled that document; do not retry, contact the clinic |
+| `SERVER_ERROR` | 503 | Unavailable/uncertain; preserve key and payload, reconcile when required |
 
 `FIELD_REQUIRED` / `FIELD_INVALID` should identify the offending field key so
 mobile can highlight it rather than showing a form-level error.
@@ -313,10 +421,13 @@ mobile can highlight it rather than showing a form-level error.
 
 - Exactly one attributed `DOCUMENT_SUBMITTED` event per **new** document.
 - Idempotent replay emits **no** event.
-- **Decision needed:** audit-failure recovery. If the document commits and the
-  audit write fails — roll back the submission, or commit and reconcile the
-  audit gap separately? Mobile has no visibility either way; this is purely a
-  backend behavior to state.
+- **Revised contract:** a single transaction covers document, attributed
+  DOCUMENT_SUBMITTED event (with document_id), and request receipt. Audit
+  failure rolls back all three. No outbox.
+- A lost response after commit is resolved using the same key, without another
+  document or event. The current web action/general logger does not provide
+  this guarantee. Backend implementation and rollback/crash verification remain
+  blocked; the draft fake is not production evidence.
 
 ---
 
@@ -348,7 +459,7 @@ upload replay. All Stage 2.
 | Valid submit, each of the six templates | 201/200, document created, `status=pending`, one audit event |
 | Replay, same `request_id`, same content | Same `document_id`, `replayed: true`, no second insert, no second audit event |
 | Replay, same `request_id`, different content | 409 `IDEMPOTENCY_CONFLICT` |
-| Concurrent calls, same `request_id` | Exactly one document; second returns replay or `IN_PROGRESS` |
+| Concurrent calls, same `request_id` | Exactly one document; second waits and returns the replay |
 | Concurrent duplicate across web + mobile | Exactly one pending document for the category |
 | Client sends `patient_id` | 400, rejected not ignored |
 | Client sends `status: 'approved'` | 400, rejected not ignored |
@@ -367,7 +478,12 @@ upload replay. All Stage 2.
 | Second pending of same category | 409 `DUPLICATE_PENDING` |
 | `patient-intake` metadata | `date_of_birth`, `contact_number`, `address` injected by server |
 | Non-intake template metadata | Those three fields absent |
-| Replay beyond retention window | Behavior defined and documented (second document, or rejection) |
+| Replay before/at/after expiry | Replay before; reconciliation at/after; never a new insert |
+| Lost response after commit | Same key returns original outcome; no duplicate event |
+| OPTIONS / rejected method | Preflight / 405 METHOD_NOT_ALLOWED + Allow; zero writes |
+| Staff with linked patient row | 403 PATIENT_ACCOUNT_REQUIRED |
+| Missing/malformed/out-of-range intake DOB | 500 SERVER_DATA_INVALID; no clinical values or auto-retry |
+| DOB read failure | 503 SERVER_ERROR; not an eligibility verdict |
 
 ### Mobile (fully mocked — no live Supabase initialization)
 
@@ -413,14 +529,14 @@ inventing a competing one.
 
 ## 13. What mobile needs to proceed
 
-1. Answers to Decisions 1–4 (§5)
-2. Confirmation of the `extracted_metadata` shape and who injects intake
-   demographics (§6)
-3. Idempotency retention window (§7)
-4. Audit-failure behavior (§9)
-5. Agreement on the error-code set, or a replacement set (§8)
-6. A reachable environment with the function deployed
+1. Acceptance of the exact shared module version and both runtime consumers
+2. Reviewed shared atomic persistence and web integration, including category
+   and legacy conflict resolution (no Edge-only duplicate guarantee)
+3. Accepted and verified receipt retention plus durable outcome evidence
+4. Verified single-transaction audit rollback and ambiguous-response recovery
+5. Accepted status-lookup contract, reconciliation evidence and named support owner
+6. Final contract/release acceptance and reachable, versioned backend evidence
 
-Mobile can draft the function source and tests for review in parallel with 1–5,
-but cannot finalize the adapter until the contract is fixed and the function is
-reachable.
+Source drafts/tests may continue for review, but the adapter/execution hold
+stands until the contract is fixed and the function is reachable. None of the
+synthetic tests establishes deployed persistence, retention or release approval.
