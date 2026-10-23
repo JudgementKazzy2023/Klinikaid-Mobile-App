@@ -133,6 +133,32 @@ class UploadsRepository {
     _requireOwner(owner);
   }
 
+  /// Best effort: removes an assessment the server confirmed it never used, so
+  /// an edited resend leaves no orphan row or pending file. Storage policy and
+  /// migration 42's trigger refuse a file a document references, so this can
+  /// never remove a submitted one.
+  Future<void> discardAssessment({
+    required String owner,
+    required String assessmentId,
+    required String mime,
+  }) async {
+    PatientSubmissionContainment.requireAvailable();
+    if (!_owns(owner) || mime.isEmpty) return;
+    try {
+      await _client
+          .from('pending_document_ocr')
+          .delete()
+          .eq('id', assessmentId)
+          .eq('user_id', owner);
+    } catch (_) {}
+    if (!_owns(owner)) return;
+    try {
+      await _client.storage.from('patient-documents').remove([
+        pendingPath(owner, assessmentId, mime),
+      ]);
+    } catch (_) {}
+  }
+
   Future<UploadResult> submit({
     required String owner,
     required String requestId,

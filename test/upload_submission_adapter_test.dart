@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
+// ignore: depend_on_referenced_packages
+import 'package:http/http.dart' as http;
 import 'package:klinikaid_mobile/core/patient_submission_containment.dart';
 import 'package:klinikaid_mobile/features/documents/data/uploads_repository.dart';
 import 'support/upload_fixture.dart';
@@ -109,9 +111,6 @@ void main() {
     'PATIENT_ACCOUNT_REQUIRED': 403,
     'NO_PATIENT_RECORD': 403,
     'PROFILE_INACTIVE': 403,
-    'SERVER_DATA_INVALID': 500,
-    'AGE_REQUIREMENT_NOT_MET': 403,
-    'UNKNOWN_TEMPLATE': 400,
     'UNKNOWN_FIELD': 400,
     'METHOD_NOT_ALLOWED': 405,
     'SERVER_ERROR': 503,
@@ -162,11 +161,7 @@ void main() {
           expect(f.requests.length, before);
           expect(f.provider.errorMessage, contains('contact the clinic'));
         }
-        if ([
-          'UNKNOWN_TEMPLATE',
-          'UNKNOWN_FIELD',
-          'METHOD_NOT_ALLOWED',
-        ].contains(entry.key))
+        if (['UNKNOWN_FIELD', 'METHOD_NOT_ALLOWED'].contains(entry.key))
           expect(f.provider.errorMessage, 'This app version is out of date.');
         if (entry.key == 'SERVER_ERROR')
           expect(f.provider.errorMessage, UploadFailure.unknown.message);
@@ -229,6 +224,71 @@ void main() {
       expect(await f.drafts(), isEmpty);
     },
   );
+  bool discardedRow(String assessmentId) => f.requests.any(
+    (r) =>
+        r.method == 'DELETE' &&
+        r.url.path.endsWith('/pending_document_ocr') &&
+        r.url.queryParameters['id'] == 'eq.$assessmentId',
+  );
+  bool discardedFile(String assessmentId) => f.requests.any(
+    (r) =>
+        r.method == 'DELETE' &&
+        r.url.path.contains('/storage/') &&
+        r.body.contains('/pending-submissions/$assessmentId/'),
+  );
+  Future<http.Response> fieldInvalidOnce(http.Request r) async =>
+      r.url.path.endsWith('/upload')
+      ? f.json({
+          'error_code': 'FIELD_INVALID',
+          'message': 'Pick a test',
+          'field': 'selected_test_ids',
+        }, 400)
+      : f.defaults(r);
+
+  test('an edited resend discards the unused earlier assessment', () async {
+    f.respond = fieldInvalidOnce;
+    expect(await f.submit(selected: ['cbc']), false);
+    final first = (await f.drafts()).single;
+    f.respond = f.defaults;
+    expect(await f.submit(selected: ['fbs']), true);
+    expect(discardedRow(first.assessmentId!), true);
+    expect(discardedFile(first.assessmentId!), true);
+  });
+
+  test('an unchanged resend keeps its assessment', () async {
+    f.respond = fieldInvalidOnce;
+    expect(await f.submit(selected: ['cbc']), false);
+    final first = (await f.drafts()).single;
+    f.respond = f.defaults;
+    expect(await f.submit(selected: ['cbc']), true);
+    expect(discardedRow(first.assessmentId!), false);
+  });
+
+  test('a replayed success removes the re-inserted pending row', () async {
+    f.respond = (r) async => r.url.path.endsWith('/upload')
+        ? f.json({
+            'document_id': 'slow-first-attempt',
+            'status': 'pending',
+            'replayed': true,
+          }, 200)
+        : f.defaults(r);
+    final before = f.requests.length;
+    expect(await f.submit(), true);
+    final prepared = f.requests
+        .skip(before)
+        .firstWhere((r) => r.url.path.endsWith('/pending_document_ocr'));
+    final id = (jsonDecode(prepared.body) as Map)['id'] as String;
+    expect(discardedRow(id), true);
+  });
+
+  test('a template-only code from /upload is treated as an unknown outcome', () async {
+    f.respond = (r) async => r.url.path.endsWith('/upload')
+        ? f.json({'error_code': 'UNKNOWN_TEMPLATE', 'message': 'x'}, 400)
+        : f.defaults(r);
+    expect(await f.submit(), false);
+    expect(f.provider.errorMessage, UploadFailure.unknown.message);
+  });
+
   test(
     'confirmed outcomes delete the app copy, never the original file',
     () async {

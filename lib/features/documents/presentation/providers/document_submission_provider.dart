@@ -372,7 +372,6 @@ class DocumentSubmissionProvider extends ChangeNotifier {
       'RECONCILIATION_REQUIRED' ||
       'ASSESSMENT_NOT_FOUND' =>
         'Please contact the clinic before submitting again. Your file and answers are still here.',
-      'UNKNOWN_TEMPLATE' ||
       'UNKNOWN_FIELD' ||
       'METHOD_NOT_ALLOWED' => 'This app version is out of date.',
       'UNAUTHENTICATED' ||
@@ -383,7 +382,6 @@ class DocumentSubmissionProvider extends ChangeNotifier {
       'NO_PATIENT_RECORD' ||
       'PROFILE_INACTIVE' ||
       'SERVER_DATA_INVALID' ||
-      'AGE_REQUIREMENT_NOT_MET' ||
       'FIELD_REQUIRED' ||
       'FIELD_INVALID' => error.message,
       _ => UploadFailure.unknown.message,
@@ -394,7 +392,6 @@ class DocumentSubmissionProvider extends ChangeNotifier {
           'IDEMPOTENCY_CONFLICT',
           'RECONCILIATION_REQUIRED',
           'ASSESSMENT_NOT_FOUND',
-          'UNKNOWN_TEMPLATE',
           'UNKNOWN_FIELD',
           'METHOD_NOT_ALLOWED',
           'UNAUTHENTICATED',
@@ -405,7 +402,6 @@ class DocumentSubmissionProvider extends ChangeNotifier {
           'NO_PATIENT_RECORD',
           'PROFILE_INACTIVE',
           'SERVER_DATA_INVALID',
-          'AGE_REQUIREMENT_NOT_MET',
           'FIELD_REQUIRED',
           'FIELD_INVALID',
         ].contains(error.code)) {
@@ -651,6 +647,11 @@ class DocumentSubmissionProvider extends ChangeNotifier {
       final changed =
           draft?.submissionContent != null &&
           draft!.submissionContent != content;
+      // Reaching here, an earlier attempt for this draft is confirmed unused:
+      // blocked states returned above, and unknown ones were looked up.
+      final superseded = changed && draft.assessmentId != null
+          ? (id: draft.assessmentId!, mime: UploadsRepository.mimeFor(draft.fileType))
+          : null;
       draft = OfflineDocument(
         id: draft?.id ?? UuidGenerator.generateV4(),
         patientId: patientId,
@@ -692,6 +693,15 @@ class DocumentSubmissionProvider extends ChangeNotifier {
         await _localDb.updateUploadDraft(draft, owner);
       }
       if (!_ownerStill(owner)) return _abandonSubmit(generation);
+      // Only after the new draft is saved, so nothing the patient has is lost.
+      if (superseded != null) {
+        await _uploads.discardAssessment(
+          owner: owner,
+          assessmentId: superseded.id,
+          mime: superseded.mime,
+        );
+        if (!_ownerStill(owner)) return _abandonSubmit(generation);
+      }
       if (category != 'other' && existing?.uploadState != 'unknown') {
         final advisory = await checkPendingDuplicate(
           patientId,
@@ -734,6 +744,15 @@ class DocumentSubmissionProvider extends ChangeNotifier {
           _documentId = result.documentId;
           await _localDb.removeQueuedDocument(draft.id, owner);
           await _deleteDraftCopy(draft.localFilePath, owner);
+          // A replay means a slow first attempt committed while this resend
+          // re-inserted the pending row; that copy is unused now.
+          if (result.replayed) {
+            await _uploads.discardAssessment(
+              owner: owner,
+              assessmentId: draft.assessmentId!,
+              mime: mime,
+            );
+          }
           if (!_ownerStill(owner)) return _abandonSubmit(generation);
           return true;
         case UploadFailure():
