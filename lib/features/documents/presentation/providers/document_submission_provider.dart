@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/cache/local_database.dart';
+import '../../../../core/patient_submission_containment.dart';
 import '../../../../core/errors/failures.dart';
 import '../../../../core/models/document.dart';
 import '../../../../core/models/patient.dart';
@@ -19,7 +20,9 @@ import '../../../patient/submissions/document_dedup.dart';
 
 class DocumentSubmissionProvider extends ChangeNotifier {
   final LocalDatabase _localDb;
-  final _docsRepo = DocumentsRepository();
+  final DocumentsRepository _docsRepo;
+  final SupabaseClient? _injectedClient;
+  SupabaseClient get _client => _injectedClient ?? SupabaseService.client;
   final _qualityService = DocumentQualityService();
   
   bool _isLoading = false;
@@ -39,7 +42,9 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   StreamSubscription<AuthState>? _authSubscription;
   bool _disposed = false;
 
-  DocumentSubmissionProvider(this._localDb) {
+  DocumentSubmissionProvider(this._localDb, {SupabaseClient? client})
+      : _injectedClient = client,
+        _docsRepo = DocumentsRepository(client: client) {
     _loadQueuedSubmissions();
     _watchAuthIdentityChanges();
   }
@@ -64,7 +69,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   /// Fails closed: an unreadable auth client counts as unauthenticated.
   String? _currentUserId() {
     try {
-      return SupabaseService.client.auth.currentUser?.id;
+      return _client.auth.currentUser?.id;
     } catch (_) {
       return null;
     }
@@ -134,7 +139,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   void _watchAuthIdentityChanges() {
     try {
       _authSubscription =
-          SupabaseService.client.auth.onAuthStateChange.listen((_) {
+          _client.auth.onAuthStateChange.listen((_) {
         if (_disposed) return;
         _queuedSubmissions = [];
         notifyListeners();
@@ -183,6 +188,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   /// Foreign ids and signed-out calls are a no-op: the owner-scoped delete
   /// matches no row, so other accounts' drafts are never removed.
   Future<void> removeQueuedItem(String id) async {
+    if (PatientSubmissionContainment.isActive) return;
     final ownerId = _currentUserId();
     if (ownerId == null) return;
     try {
@@ -329,6 +335,12 @@ class DocumentSubmissionProvider extends ChangeNotifier {
     List<String>? selectedTestIds,
     bool isTest = false,
   }) async {
+    if (PatientSubmissionContainment.isActive) {
+      _isLoading = false;
+      _errorMessage = PatientSubmissionContainment.message;
+      notifyListeners();
+      return false;
+    }
     // Capture the operation owner before the first async boundary: everything
     // below is judged against the identity that started this submit, never
     // against whichever account happens to be signed in when an await ends.
@@ -444,7 +456,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
       // upload rather than writing under a newer session.
       if (!stillOwned()) return _abandonSubmit(generation);
       
-      await SupabaseService.client.storage
+      await _client.storage
           .from('patient-documents')
           .upload(storagePath, file);
 
@@ -570,6 +582,8 @@ class DocumentSubmissionProvider extends ChangeNotifier {
   /// recalled from the client, but nothing new is written and no queued row
   /// is deleted under the newer identity.
   Future<void> syncOfflineQueue() async {
+    // Hold every row, including missing-file and other-owner drafts, unchanged.
+    if (PatientSubmissionContainment.isActive) return;
     await _loadQueuedSubmissions();
     final ownerId = _currentUserId();
     if (ownerId == null || _queuedSubmissions.isEmpty) return;
@@ -612,7 +626,7 @@ class DocumentSubmissionProvider extends ChangeNotifier {
 
         // 1. Upload file
         final storagePath = '$ownerId/${doc.id}_${doc.fileName}';
-        await SupabaseService.client.storage
+        await _client.storage
             .from('patient-documents')
             .upload(storagePath, file);
 

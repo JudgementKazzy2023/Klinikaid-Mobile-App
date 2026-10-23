@@ -273,7 +273,7 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
       final hour = nowPht.hour.toString().padLeft(2, '0');
       final minute = nowPht.minute.toString().padLeft(2, '0');
       final second = nowPht.second.toString().padLeft(2, '0');
-      final filename = 'system_events_${year}${month}${day}_${hour}${minute}${second}.csv';
+      final filename = 'system_events_$year$month${day}_$hour$minute$second.csv';
 
       final success = await saveCsvToDownloads(
         filename: filename,
@@ -797,7 +797,7 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: provider.weeklyBreakdown.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
+              separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final week = provider.weeklyBreakdown[index];
                 return ListTile(
