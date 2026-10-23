@@ -1,10 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 import 'package:klinikaid_mobile/features/department/data/department_repository.dart';
 import 'package:klinikaid_mobile/features/department/domain/lab_reference_ranges.dart';
 import 'package:klinikaid_mobile/features/department/presentation/providers/result_entry_provider.dart';
 
 class _RecordingRepo extends DepartmentRepository {
   List<LabResultRow>? rows;
+  Object? failWith;
 
   @override
   String? get currentUserId => 'recorder';
@@ -14,6 +16,7 @@ class _RecordingRepo extends DepartmentRepository {
     required String patientId,
     required List<LabResultRow> rows,
   }) async {
+    if (failWith != null) throw failWith!;
     this.rows = rows;
   }
 }
@@ -73,6 +76,16 @@ void main() {
     test('the value is stored as entered, like web', () async {
       expect(await submitHemoglobin('14'), isTrue);
       expect(repo.rows!.single.testValue, '14');
+    });
+
+    // Web migration 40 (KlinikAid#212) adds a DB trigger that refuses implausible
+    // values with errcode 23514; mobile must show that server message as-is.
+    test('a server-side plausibility refusal (23514) shows the server message', () async {
+      const serverMessage =
+          'Hemoglobin: 5.5 g/dL is outside the possible range (6–25 g/dL). Check the value and its unit.';
+      repo.failWith = const PostgrestException(message: serverMessage, code: '23514');
+      expect(await submitHemoglobin('14'), isFalse);
+      expect(provider.errorMessage, serverMessage);
     });
 
     test('the refusal message echoes the value as entered, like web', () async {
