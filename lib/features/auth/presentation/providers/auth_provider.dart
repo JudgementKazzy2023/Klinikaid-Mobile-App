@@ -719,10 +719,30 @@ class AuthProvider extends ChangeNotifier {
             updatedAt: DateTime.now(),
           );
     } on PatientProvisioningException catch (e) {
-      _errorMessage = e.message;
-      if (!e.functionRan) {
+      if (e.outcome == PatientProvisioningOutcome.uncertain) {
+        // The function may have created the row before the connection dropped.
+        // The account is kept either way: a pending account can be recovered,
+        // a deleted one cannot.
+        final resolved = await _resolveUncertainProvisioning(
+          firstName: firstName,
+          lastName: lastName,
+          dateOfBirth: dateOfBirth,
+          gender: gender,
+          contactNumber: contactNumber,
+          email: email,
+          address: address,
+        );
+        if (resolved != null) {
+          return resolved;
+        }
+      } else if (e.status == 400) {
+        // The server refused the fields before writing or deleting anything,
+        // so this login has no patient row and never will. Delete it while the
+        // session is still valid, so the patient can register again.
         await _verificationService.deletePendingUser();
       }
+
+      final message = e.message;
       await _client.auth.signOut().catchError((_) {});
       _user = null;
       _session = null;
@@ -733,7 +753,66 @@ class AuthProvider extends ChangeNotifier {
       _hasConsented = false;
       _isOnboarded = false;
       _isLoading = false;
+      // After `_user = null`, whose identity reset clears the error.
+      _errorMessage = message;
       notifyListeners();
+      return null;
+    }
+  }
+
+  /// Resolves a provisioning attempt whose outcome is unknown: the function
+  /// may already have created the patient row.
+  ///
+  /// The row is looked up first and the (now idempotent) function is retried
+  /// once, so a lost response never leaves the account without its patient row
+  /// and never deletes a working account. Only a known outcome (the lookup
+  /// proved there is no row and the server refused the retry) deletes the
+  /// pending user, so the patient can register again; an uncertain result
+  /// always keeps the account.
+  Future<Patient?> _resolveUncertainProvisioning({
+    required String firstName,
+    required String lastName,
+    required DateTime dateOfBirth,
+    required Gender gender,
+    required String contactNumber,
+    required String email,
+    required String address,
+  }) async {
+    final userId = _user?.id;
+    if (userId == null) {
+      return null;
+    }
+
+    var lookupSucceeded = false;
+    try {
+      final existing = await _patientsRepo.getPatientByProfileId(userId);
+      lookupSucceeded = true;
+      if (existing != null) {
+        return existing;
+      }
+    } catch (_) {
+      // The lookup failed (for example the device is offline); the retry
+      // below is the second chance.
+    }
+
+    try {
+      return await _patientProvisioningService.createPatientRecord(
+        firstName: firstName,
+        lastName: lastName,
+        dateOfBirth: dateOfBirth,
+        gender: gender,
+        contactNumber: contactNumber,
+        email: email,
+        address: address,
+      );
+    } on PatientProvisioningException catch (e) {
+      // Known outcome: the lookup succeeded and found no row, and the server
+      // itself refused the retry, so nothing was written for this account.
+      // Delete the pending user so the patient can register again. When the
+      // lookup failed, a row may still exist, so the account is kept.
+      if (lookupSucceeded && e.outcome == PatientProvisioningOutcome.rejected) {
+        await _verificationService.deletePendingUser();
+      }
       return null;
     }
   }
