@@ -108,8 +108,7 @@ class _QueueScreenState extends State<QueueScreen> {
                 const SizedBox(height: 16),
 
                 // Active Queue Entry Card
-                if (active != null && 
-                    (active.status == QueueStatus.waiting || active.status == QueueStatus.inProgress)) ...[
+                if (active != null && isActiveQueueStatus(active.rawStatus)) ...[
                   _buildActiveQueueCard(active),
                   const SizedBox(height: 24),
                 ],
@@ -280,7 +279,7 @@ class _QueueScreenState extends State<QueueScreen> {
   }
 
   Widget _buildHistoryCard(PatientQueue entry) {
-    if (entry.status == QueueStatus.waiting || entry.status == QueueStatus.inProgress) {
+    if (isActiveQueueStatus(entry.rawStatus)) {
       // Handled in top active card
       return const SizedBox.shrink();
     }
@@ -313,7 +312,7 @@ class _QueueScreenState extends State<QueueScreen> {
                 ),
               ],
             ),
-            _buildStatusBadge(entry.status),
+            _buildStatusBadge(entry),
           ],
         ),
       ),
@@ -370,10 +369,17 @@ class _QueueScreenState extends State<QueueScreen> {
     );
   }
 
-  Widget _buildStatusBadge(QueueStatus status) {
+  Widget _buildStatusBadge(PatientQueue entry) {
     Color bgColor;
     Color fgColor;
-    switch (status) {
+    // A status this build does not recognise is shown exactly as the source
+    // spelled it, never as the `waiting` its parse silently defaults to.
+    final label = QueueStatus.tryFromString(entry.rawStatus) == null
+        ? entry.rawStatus.toUpperCase()
+        : entry.status.name
+              .toUpperCase()
+              .replaceAll('INPROGRESS', 'IN PROGRESS');
+    switch (entry.status) {
       case QueueStatus.waiting:
         bgColor = Theme.of(context).colorScheme.secondary;
         fgColor = Theme.of(context).colorScheme.onSecondary;
@@ -399,7 +405,7 @@ class _QueueScreenState extends State<QueueScreen> {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
-        status.name.toUpperCase().replaceAll('INPROGRESS', 'IN PROGRESS'),
+        label,
         style: TextStyle(
           color: fgColor,
           fontSize: 11,
