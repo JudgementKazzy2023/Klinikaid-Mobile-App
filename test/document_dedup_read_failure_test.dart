@@ -5,6 +5,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'package:klinikaid_mobile/core/patient_submission_containment.dart';
 import 'package:klinikaid_mobile/core/cache/local_database.dart';
 import 'package:klinikaid_mobile/core/models/patient.dart';
 import 'package:klinikaid_mobile/core/supabase/supabase_client.dart';
@@ -170,6 +171,10 @@ Map<String, dynamic> _pendingTemplateRow(String templateId) => {
     };
 
 void main() {
+  // These tests exercise the submit flows that containment blocks.
+  setUp(() => PatientSubmissionContainment.activeForTesting = false);
+  tearDown(() => PatientSubmissionContainment.activeForTesting = true);
+
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late FakeSupabaseClient client;
@@ -471,66 +476,25 @@ void main() {
     });
   });
 
-  group('Template submission — a failed duplicate check blocks the submission',
-      () {
-    test('no insert is attempted and the patient is asked to retry', () async {
-      client.readError = const SocketException('Network is unreachable');
-      final provider = TemplatesProvider();
-
-      final submitted = await submitTemplateForm(provider);
-
-      expect(submitted, isFalse);
-      expect(
-        provider.errorMessage,
-        contains(
-            'Could not check for a pending [Laboratory Request] submission.'),
-      );
-      expect(provider.errorMessage, contains('try again'));
-      expect(client.inserts, isEmpty);
-    });
-
-    test('a permission failure is surfaced the same way', () async {
-      client.readError = const PostgrestException(
+  // Templates no longer decide duplicates on the client: the
+  // patient-document-submission function's DUPLICATE_PENDING is authoritative
+  // and the local check is advisory (template_submission_adapter_test.dart).
+  group('Template submission — the local duplicate check is advisory only', () {
+    for (final readError in <Object?>[
+      const SocketException('Network is unreachable'),
+      const PostgrestException(
         message: 'permission denied for table documents',
         code: '42501',
-      );
-      final provider = TemplatesProvider();
-
-      final submitted = await submitTemplateForm(provider);
-
-      expect(submitted, isFalse);
-      expect(
-        provider.errorMessage,
-        contains(
-            'Could not check for a pending [Laboratory Request] submission.'),
-      );
-      expect(client.inserts, isEmpty);
-    });
-
-    test('a real duplicate still blocks with the pending date', () async {
-      client.documents = [_pendingTemplateRow('lab-request')];
-      final provider = TemplatesProvider();
-
-      final submitted = await submitTemplateForm(provider);
-
-      expect(submitted, isFalse);
-      expect(
-        provider.errorMessage,
-        contains(
-            'You already have a pending [Laboratory Request] submitted on'),
-      );
-      expect(client.inserts, isEmpty);
-    });
-
-    test('a verified clear check still inserts the template', () async {
-      client.documents = [_pendingTemplateRow('referral-form')];
-      final provider = TemplatesProvider();
-
-      final submitted = await submitTemplateForm(provider);
-
-      expect(submitted, isTrue);
-      expect(provider.errorMessage, isNull);
-      expect(client.inserts, hasLength(1));
-    });
+      ),
+      null,
+    ]) {
+      test('never inserts into documents directly (read error: $readError)',
+          () async {
+        client.readError = readError;
+        client.documents = [_pendingTemplateRow('lab-request')];
+        await submitTemplateForm(TemplatesProvider());
+        expect(client.inserts, isEmpty);
+      });
+    }
   });
 }

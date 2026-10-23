@@ -178,6 +178,18 @@ class DepartmentRepository {
     }
   }
 
+  /// Completes the queue entry alone, after results were saved but completion
+  /// failed. Never re-inserts results. Throws [QueueCompletionFailure].
+  Future<void> completeQueue(String patientId) async {
+    final String department;
+    try {
+      department = await _getCurrentUserDept();
+    } catch (_) {
+      throw const QueueCompletionFailure();
+    }
+    await _completeQueue(patientId, department);
+  }
+
   /// Submits laboratory result rows to Supabase and updates patient queue.
   /// Implements sequential non-atomic write logic matching web route.ts.
   Future<void> submitLabResults({

@@ -104,9 +104,9 @@ class SpecialistRepository {
 
   /// Fetches raw data to derive dashboard aggregates client-side.
   /// Returns a Map containing:
-  /// - 'patients': List<SpecialistPatient>
-  /// - 'records': List<SpecialistRecord>
-  /// - 'recordsWithPatient': List<Map<String, dynamic>> (raw JSON to resolve joined patient info)
+  /// - 'patients': `List<SpecialistPatient>`
+  /// - 'records': `List<SpecialistRecord>`
+  /// - 'recordsWithPatient': `List<Map<String, dynamic>>` (raw JSON to resolve joined patient info)
   /// - 'total_patients': int (the server's exact patient count)
   ///
   /// Both reads are paged so the aggregates cover every row and not just the
