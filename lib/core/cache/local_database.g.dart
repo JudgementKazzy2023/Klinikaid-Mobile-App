@@ -2596,6 +2596,52 @@ class $OfflineDocumentsQueueTable extends OfflineDocumentsQueue
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
   $OfflineDocumentsQueueTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _requestIdMeta = const VerificationMeta(
+    'requestId',
+  );
+  @override
+  late final GeneratedColumn<String> requestId = GeneratedColumn<String>(
+    'request_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _assessmentIdMeta = const VerificationMeta(
+    'assessmentId',
+  );
+  @override
+  late final GeneratedColumn<String> assessmentId = GeneratedColumn<String>(
+    'assessment_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _uploadStateMeta = const VerificationMeta(
+    'uploadState',
+  );
+  @override
+  late final GeneratedColumn<String> uploadState = GeneratedColumn<String>(
+    'upload_state',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('draft'),
+  );
+  static const VerificationMeta _submissionContentMeta = const VerificationMeta(
+    'submissionContent',
+  );
+  @override
+  late final GeneratedColumn<String> submissionContent =
+      GeneratedColumn<String>(
+        'submission_content',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _idMeta = const VerificationMeta('id');
   @override
   late final GeneratedColumn<String> id = GeneratedColumn<String>(
@@ -2696,6 +2742,10 @@ class $OfflineDocumentsQueueTable extends OfflineDocumentsQueue
   );
   @override
   List<GeneratedColumn> get $columns => [
+    requestId,
+    assessmentId,
+    uploadState,
+    submissionContent,
     id,
     patientId,
     uploaderId,
@@ -2718,6 +2768,39 @@ class $OfflineDocumentsQueueTable extends OfflineDocumentsQueue
   }) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
+    if (data.containsKey('request_id')) {
+      context.handle(
+        _requestIdMeta,
+        requestId.isAcceptableOrUnknown(data['request_id']!, _requestIdMeta),
+      );
+    }
+    if (data.containsKey('assessment_id')) {
+      context.handle(
+        _assessmentIdMeta,
+        assessmentId.isAcceptableOrUnknown(
+          data['assessment_id']!,
+          _assessmentIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('upload_state')) {
+      context.handle(
+        _uploadStateMeta,
+        uploadState.isAcceptableOrUnknown(
+          data['upload_state']!,
+          _uploadStateMeta,
+        ),
+      );
+    }
+    if (data.containsKey('submission_content')) {
+      context.handle(
+        _submissionContentMeta,
+        submissionContent.isAcceptableOrUnknown(
+          data['submission_content']!,
+          _submissionContentMeta,
+        ),
+      );
+    }
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     } else if (isInserting) {
@@ -2796,6 +2879,22 @@ class $OfflineDocumentsQueueTable extends OfflineDocumentsQueue
   OfflineDocument map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return OfflineDocument(
+      requestId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}request_id'],
+      ),
+      assessmentId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}assessment_id'],
+      ),
+      uploadState: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}upload_state'],
+      )!,
+      submissionContent: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}submission_content'],
+      ),
       id: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}id'],
@@ -2842,6 +2941,10 @@ class $OfflineDocumentsQueueTable extends OfflineDocumentsQueue
 }
 
 class OfflineDocument extends DataClass implements Insertable<OfflineDocument> {
+  final String? requestId;
+  final String? assessmentId;
+  final String uploadState;
+  final String? submissionContent;
   final String id;
   final String? patientId;
   final String uploaderId;
@@ -2852,6 +2955,10 @@ class OfflineDocument extends DataClass implements Insertable<OfflineDocument> {
   final String? extractedMetadata;
   final DateTime createdAt;
   const OfflineDocument({
+    this.requestId,
+    this.assessmentId,
+    required this.uploadState,
+    this.submissionContent,
     required this.id,
     this.patientId,
     required this.uploaderId,
@@ -2865,6 +2972,16 @@ class OfflineDocument extends DataClass implements Insertable<OfflineDocument> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (!nullToAbsent || requestId != null) {
+      map['request_id'] = Variable<String>(requestId);
+    }
+    if (!nullToAbsent || assessmentId != null) {
+      map['assessment_id'] = Variable<String>(assessmentId);
+    }
+    map['upload_state'] = Variable<String>(uploadState);
+    if (!nullToAbsent || submissionContent != null) {
+      map['submission_content'] = Variable<String>(submissionContent);
+    }
     map['id'] = Variable<String>(id);
     if (!nullToAbsent || patientId != null) {
       map['patient_id'] = Variable<String>(patientId);
@@ -2885,6 +3002,16 @@ class OfflineDocument extends DataClass implements Insertable<OfflineDocument> {
 
   OfflineDocumentsQueueCompanion toCompanion(bool nullToAbsent) {
     return OfflineDocumentsQueueCompanion(
+      requestId: requestId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(requestId),
+      assessmentId: assessmentId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(assessmentId),
+      uploadState: Value(uploadState),
+      submissionContent: submissionContent == null && nullToAbsent
+          ? const Value.absent()
+          : Value(submissionContent),
       id: Value(id),
       patientId: patientId == null && nullToAbsent
           ? const Value.absent()
@@ -2909,6 +3036,12 @@ class OfflineDocument extends DataClass implements Insertable<OfflineDocument> {
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return OfflineDocument(
+      requestId: serializer.fromJson<String?>(json['requestId']),
+      assessmentId: serializer.fromJson<String?>(json['assessmentId']),
+      uploadState: serializer.fromJson<String>(json['uploadState']),
+      submissionContent: serializer.fromJson<String?>(
+        json['submissionContent'],
+      ),
       id: serializer.fromJson<String>(json['id']),
       patientId: serializer.fromJson<String?>(json['patientId']),
       uploaderId: serializer.fromJson<String>(json['uploaderId']),
@@ -2926,6 +3059,10 @@ class OfflineDocument extends DataClass implements Insertable<OfflineDocument> {
   Map<String, dynamic> toJson({ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
+      'requestId': serializer.toJson<String?>(requestId),
+      'assessmentId': serializer.toJson<String?>(assessmentId),
+      'uploadState': serializer.toJson<String>(uploadState),
+      'submissionContent': serializer.toJson<String?>(submissionContent),
       'id': serializer.toJson<String>(id),
       'patientId': serializer.toJson<String?>(patientId),
       'uploaderId': serializer.toJson<String>(uploaderId),
@@ -2939,6 +3076,10 @@ class OfflineDocument extends DataClass implements Insertable<OfflineDocument> {
   }
 
   OfflineDocument copyWith({
+    Value<String?> requestId = const Value.absent(),
+    Value<String?> assessmentId = const Value.absent(),
+    String? uploadState,
+    Value<String?> submissionContent = const Value.absent(),
     String? id,
     Value<String?> patientId = const Value.absent(),
     String? uploaderId,
@@ -2949,6 +3090,12 @@ class OfflineDocument extends DataClass implements Insertable<OfflineDocument> {
     Value<String?> extractedMetadata = const Value.absent(),
     DateTime? createdAt,
   }) => OfflineDocument(
+    requestId: requestId.present ? requestId.value : this.requestId,
+    assessmentId: assessmentId.present ? assessmentId.value : this.assessmentId,
+    uploadState: uploadState ?? this.uploadState,
+    submissionContent: submissionContent.present
+        ? submissionContent.value
+        : this.submissionContent,
     id: id ?? this.id,
     patientId: patientId.present ? patientId.value : this.patientId,
     uploaderId: uploaderId ?? this.uploaderId,
@@ -2963,6 +3110,16 @@ class OfflineDocument extends DataClass implements Insertable<OfflineDocument> {
   );
   OfflineDocument copyWithCompanion(OfflineDocumentsQueueCompanion data) {
     return OfflineDocument(
+      requestId: data.requestId.present ? data.requestId.value : this.requestId,
+      assessmentId: data.assessmentId.present
+          ? data.assessmentId.value
+          : this.assessmentId,
+      uploadState: data.uploadState.present
+          ? data.uploadState.value
+          : this.uploadState,
+      submissionContent: data.submissionContent.present
+          ? data.submissionContent.value
+          : this.submissionContent,
       id: data.id.present ? data.id.value : this.id,
       patientId: data.patientId.present ? data.patientId.value : this.patientId,
       uploaderId: data.uploaderId.present
@@ -2984,6 +3141,10 @@ class OfflineDocument extends DataClass implements Insertable<OfflineDocument> {
   @override
   String toString() {
     return (StringBuffer('OfflineDocument(')
+          ..write('requestId: $requestId, ')
+          ..write('assessmentId: $assessmentId, ')
+          ..write('uploadState: $uploadState, ')
+          ..write('submissionContent: $submissionContent, ')
           ..write('id: $id, ')
           ..write('patientId: $patientId, ')
           ..write('uploaderId: $uploaderId, ')
@@ -2999,6 +3160,10 @@ class OfflineDocument extends DataClass implements Insertable<OfflineDocument> {
 
   @override
   int get hashCode => Object.hash(
+    requestId,
+    assessmentId,
+    uploadState,
+    submissionContent,
     id,
     patientId,
     uploaderId,
@@ -3013,6 +3178,10 @@ class OfflineDocument extends DataClass implements Insertable<OfflineDocument> {
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is OfflineDocument &&
+          other.requestId == this.requestId &&
+          other.assessmentId == this.assessmentId &&
+          other.uploadState == this.uploadState &&
+          other.submissionContent == this.submissionContent &&
           other.id == this.id &&
           other.patientId == this.patientId &&
           other.uploaderId == this.uploaderId &&
@@ -3025,6 +3194,10 @@ class OfflineDocument extends DataClass implements Insertable<OfflineDocument> {
 }
 
 class OfflineDocumentsQueueCompanion extends UpdateCompanion<OfflineDocument> {
+  final Value<String?> requestId;
+  final Value<String?> assessmentId;
+  final Value<String> uploadState;
+  final Value<String?> submissionContent;
   final Value<String> id;
   final Value<String?> patientId;
   final Value<String> uploaderId;
@@ -3036,6 +3209,10 @@ class OfflineDocumentsQueueCompanion extends UpdateCompanion<OfflineDocument> {
   final Value<DateTime> createdAt;
   final Value<int> rowid;
   const OfflineDocumentsQueueCompanion({
+    this.requestId = const Value.absent(),
+    this.assessmentId = const Value.absent(),
+    this.uploadState = const Value.absent(),
+    this.submissionContent = const Value.absent(),
     this.id = const Value.absent(),
     this.patientId = const Value.absent(),
     this.uploaderId = const Value.absent(),
@@ -3048,6 +3225,10 @@ class OfflineDocumentsQueueCompanion extends UpdateCompanion<OfflineDocument> {
     this.rowid = const Value.absent(),
   });
   OfflineDocumentsQueueCompanion.insert({
+    this.requestId = const Value.absent(),
+    this.assessmentId = const Value.absent(),
+    this.uploadState = const Value.absent(),
+    this.submissionContent = const Value.absent(),
     required String id,
     this.patientId = const Value.absent(),
     required String uploaderId,
@@ -3065,6 +3246,10 @@ class OfflineDocumentsQueueCompanion extends UpdateCompanion<OfflineDocument> {
        fileType = Value(fileType),
        createdAt = Value(createdAt);
   static Insertable<OfflineDocument> custom({
+    Expression<String>? requestId,
+    Expression<String>? assessmentId,
+    Expression<String>? uploadState,
+    Expression<String>? submissionContent,
     Expression<String>? id,
     Expression<String>? patientId,
     Expression<String>? uploaderId,
@@ -3077,6 +3262,10 @@ class OfflineDocumentsQueueCompanion extends UpdateCompanion<OfflineDocument> {
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
+      if (requestId != null) 'request_id': requestId,
+      if (assessmentId != null) 'assessment_id': assessmentId,
+      if (uploadState != null) 'upload_state': uploadState,
+      if (submissionContent != null) 'submission_content': submissionContent,
       if (id != null) 'id': id,
       if (patientId != null) 'patient_id': patientId,
       if (uploaderId != null) 'uploader_id': uploaderId,
@@ -3091,6 +3280,10 @@ class OfflineDocumentsQueueCompanion extends UpdateCompanion<OfflineDocument> {
   }
 
   OfflineDocumentsQueueCompanion copyWith({
+    Value<String?>? requestId,
+    Value<String?>? assessmentId,
+    Value<String>? uploadState,
+    Value<String?>? submissionContent,
     Value<String>? id,
     Value<String?>? patientId,
     Value<String>? uploaderId,
@@ -3103,6 +3296,10 @@ class OfflineDocumentsQueueCompanion extends UpdateCompanion<OfflineDocument> {
     Value<int>? rowid,
   }) {
     return OfflineDocumentsQueueCompanion(
+      requestId: requestId ?? this.requestId,
+      assessmentId: assessmentId ?? this.assessmentId,
+      uploadState: uploadState ?? this.uploadState,
+      submissionContent: submissionContent ?? this.submissionContent,
       id: id ?? this.id,
       patientId: patientId ?? this.patientId,
       uploaderId: uploaderId ?? this.uploaderId,
@@ -3119,6 +3316,18 @@ class OfflineDocumentsQueueCompanion extends UpdateCompanion<OfflineDocument> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (requestId.present) {
+      map['request_id'] = Variable<String>(requestId.value);
+    }
+    if (assessmentId.present) {
+      map['assessment_id'] = Variable<String>(assessmentId.value);
+    }
+    if (uploadState.present) {
+      map['upload_state'] = Variable<String>(uploadState.value);
+    }
+    if (submissionContent.present) {
+      map['submission_content'] = Variable<String>(submissionContent.value);
+    }
     if (id.present) {
       map['id'] = Variable<String>(id.value);
     }
@@ -3155,6 +3364,10 @@ class OfflineDocumentsQueueCompanion extends UpdateCompanion<OfflineDocument> {
   @override
   String toString() {
     return (StringBuffer('OfflineDocumentsQueueCompanion(')
+          ..write('requestId: $requestId, ')
+          ..write('assessmentId: $assessmentId, ')
+          ..write('uploadState: $uploadState, ')
+          ..write('submissionContent: $submissionContent, ')
           ..write('id: $id, ')
           ..write('patientId: $patientId, ')
           ..write('uploaderId: $uploaderId, ')
@@ -4483,6 +4696,10 @@ typedef $$CachedDepartmentRecordsTableProcessedTableManager =
     >;
 typedef $$OfflineDocumentsQueueTableCreateCompanionBuilder =
     OfflineDocumentsQueueCompanion Function({
+      Value<String?> requestId,
+      Value<String?> assessmentId,
+      Value<String> uploadState,
+      Value<String?> submissionContent,
       required String id,
       Value<String?> patientId,
       required String uploaderId,
@@ -4496,6 +4713,10 @@ typedef $$OfflineDocumentsQueueTableCreateCompanionBuilder =
     });
 typedef $$OfflineDocumentsQueueTableUpdateCompanionBuilder =
     OfflineDocumentsQueueCompanion Function({
+      Value<String?> requestId,
+      Value<String?> assessmentId,
+      Value<String> uploadState,
+      Value<String?> submissionContent,
       Value<String> id,
       Value<String?> patientId,
       Value<String> uploaderId,
@@ -4517,6 +4738,26 @@ class $$OfflineDocumentsQueueTableFilterComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnFilters<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get assessmentId => $composableBuilder(
+    column: $table.assessmentId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get uploadState => $composableBuilder(
+    column: $table.uploadState,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get submissionContent => $composableBuilder(
+    column: $table.submissionContent,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnFilters(column),
@@ -4572,6 +4813,26 @@ class $$OfflineDocumentsQueueTableOrderingComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnOrderings<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get assessmentId => $composableBuilder(
+    column: $table.assessmentId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get uploadState => $composableBuilder(
+    column: $table.uploadState,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get submissionContent => $composableBuilder(
+    column: $table.submissionContent,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnOrderings(column),
@@ -4627,6 +4888,24 @@ class $$OfflineDocumentsQueueTableAnnotationComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  GeneratedColumn<String> get requestId =>
+      $composableBuilder(column: $table.requestId, builder: (column) => column);
+
+  GeneratedColumn<String> get assessmentId => $composableBuilder(
+    column: $table.assessmentId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get uploadState => $composableBuilder(
+    column: $table.uploadState,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get submissionContent => $composableBuilder(
+    column: $table.submissionContent,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
 
@@ -4707,6 +4986,10 @@ class $$OfflineDocumentsQueueTableTableManager
               ),
           updateCompanionCallback:
               ({
+                Value<String?> requestId = const Value.absent(),
+                Value<String?> assessmentId = const Value.absent(),
+                Value<String> uploadState = const Value.absent(),
+                Value<String?> submissionContent = const Value.absent(),
                 Value<String> id = const Value.absent(),
                 Value<String?> patientId = const Value.absent(),
                 Value<String> uploaderId = const Value.absent(),
@@ -4718,6 +5001,10 @@ class $$OfflineDocumentsQueueTableTableManager
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => OfflineDocumentsQueueCompanion(
+                requestId: requestId,
+                assessmentId: assessmentId,
+                uploadState: uploadState,
+                submissionContent: submissionContent,
                 id: id,
                 patientId: patientId,
                 uploaderId: uploaderId,
@@ -4731,6 +5018,10 @@ class $$OfflineDocumentsQueueTableTableManager
               ),
           createCompanionCallback:
               ({
+                Value<String?> requestId = const Value.absent(),
+                Value<String?> assessmentId = const Value.absent(),
+                Value<String> uploadState = const Value.absent(),
+                Value<String?> submissionContent = const Value.absent(),
                 required String id,
                 Value<String?> patientId = const Value.absent(),
                 required String uploaderId,
@@ -4742,6 +5033,10 @@ class $$OfflineDocumentsQueueTableTableManager
                 required DateTime createdAt,
                 Value<int> rowid = const Value.absent(),
               }) => OfflineDocumentsQueueCompanion.insert(
+                requestId: requestId,
+                assessmentId: assessmentId,
+                uploadState: uploadState,
+                submissionContent: submissionContent,
                 id: id,
                 patientId: patientId,
                 uploaderId: uploaderId,
