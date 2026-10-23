@@ -32,6 +32,10 @@ class MockSessionActivityService extends SessionActivityService {
 }
 
 class MockAuthProviderForLab extends AuthProvider {
+  // These screen tests start after staff MFA verification.
+  @override
+  bool get isAal2 => true;
+
   final Department mockDepartment;
 
   MockAuthProviderForLab({this.mockDepartment = Department.laboratory})
@@ -302,10 +306,10 @@ void main() {
       router.router.push('/department/result-entry/patient-123');
       await tester.pumpAndSettle();
 
-      // Default group is Complete Blood Count (CBC). Enter abnormal value: 25.5 (out of range) for Hemoglobin
+      // Default group is Complete Blood Count (CBC). Enter abnormal value: 20.5 (abnormal but plausible; web refuses >25) for Hemoglobin
       final inputFinder = find.byKey(const Key('param_input_Hemoglobin'));
       expect(inputFinder, findsOneWidget);
-      await tester.enterText(inputFinder, '25.5');
+      await tester.enterText(inputFinder, '20.5');
       await tester.pumpAndSettle();
 
       // Tap submit button
@@ -317,8 +321,8 @@ void main() {
       // Confirmation dialog should appear with Title: "Confirm flagged value(s)"
       expect(find.text('Confirm flagged value(s)'), findsOneWidget);
       
-      // Formatting matches: "Hemoglobin: 25.5 g/dL (normal 13.5–17.5). Please confirm this value was entered correctly."
-      expect(find.textContaining('Hemoglobin: 25.5 g/dL (normal 13.5–17.5). Please confirm this value was entered correctly.'), findsOneWidget);
+      // Formatting matches: "Hemoglobin: 20.5 g/dL (normal 13.5–17.5). Please confirm this value was entered correctly."
+      expect(find.textContaining('Hemoglobin: 20.5 g/dL (normal 13.5–17.5). Please confirm this value was entered correctly.'), findsOneWidget);
 
       // Click "Review" (Cancel)
       await tester.tap(find.text('Review'));
@@ -340,7 +344,7 @@ void main() {
       expect(mockRepo.submitCalled, isTrue);
       expect(mockRepo.lastPatientId, 'patient-123');
       expect(mockRepo.lastRows?.first.testName, 'Hemoglobin');
-      expect(mockRepo.lastRows?.first.testValue, '25.5');
+      expect(mockRepo.lastRows?.first.testValue, '20.5');
       expect(mockRepo.lastRows?.first.isFlagged, isTrue);
     });
 

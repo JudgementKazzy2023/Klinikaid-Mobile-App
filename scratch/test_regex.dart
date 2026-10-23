@@ -1,3 +1,4 @@
+// ignore_for_file: avoid_print -- CLI script; stdout is its output.
 void main() {
   final phoneReg = RegExp(r'^(09|\+639)\d{9}$');
   final emailReg = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');

@@ -36,7 +36,10 @@ class _MyAppState extends State<MyApp> {
     super.initState();
     _localDatabase = LocalDatabase();
     _sessionActivityService = SessionActivityService();
-    _authProvider = AuthProvider(activityService: _sessionActivityService);
+    _authProvider = AuthProvider(
+      activityService: _sessionActivityService,
+      localDatabase: _localDatabase,
+    );
     _appRouter = AppRouter(_authProvider);
     _lifecycleObserver = SessionLifecycleObserver(_sessionActivityService, _authProvider);
     

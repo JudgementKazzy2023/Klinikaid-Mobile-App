@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../../core/cache/local_database.dart';
 import '../../../../core/repositories/patients_repository.dart';
 import '../../../../core/repositories/profiles_repository.dart';
 import '../../../../core/models/patient.dart';
@@ -27,6 +28,7 @@ class AuthProvider extends ChangeNotifier {
   final PermissionService _permissionService;
   final SessionActivityService _activityService;
   final MfaService _mfaService;
+  final LocalDatabase? localDatabase;
 
   User? _activeUser;
   int _identityEpoch = 0;
@@ -117,6 +119,7 @@ class AuthProvider extends ChangeNotifier {
     PermissionService? permissionService,
     SessionActivityService? activityService,
     MfaService? mfaService,
+    this.localDatabase,
   })  : _client = client ?? Supabase.instance.client,
         _patientsRepo = patientsRepo ?? PatientsRepository(),
         _profilesRepo = profilesRepo ?? ProfilesRepository(),
@@ -150,13 +153,25 @@ class AuthProvider extends ChangeNotifier {
     });
 
     _authStateSubscription = _client.auth.onAuthStateChange.listen((data) async {
+      // Ignore an obsolete signed-out event if the client already has a new
+      // session. Expiry and SDK-initiated sign-outs also need cache cleanup.
+      if (data.event == AuthChangeEvent.signedOut &&
+          _client.auth.currentSession != null) {
+        return;
+      }
       _session = data.session;
       _user = data.session?.user;
+      final epoch = _identityEpoch;
       
       _isLoading = true;
       notifyListeners();
 
+      if (data.event == AuthChangeEvent.signedOut && epoch == _identityEpoch) {
+        await _clearLocalCache();
+      }
+      if (epoch != _identityEpoch || _isDisposed) return;
       await _updateLocalStates();
+      if (epoch != _identityEpoch || _isDisposed) return;
       
       _isLoading = false;
       notifyListeners();
@@ -233,30 +248,25 @@ class AuthProvider extends ChangeNotifier {
       _patientRecordState = PatientRecordState.unknown;
       _patientRecordError = null;
 
-      if (_profile?.role == UserRole.admin && !isAal2) {
+      if (_profile?.role != UserRole.patient && !isAal2) {
         // IMPORTANT: If we already have a pending factor from enrollment/login,
         // do NOT call listVerifiedFactors — the newly-enrolled factor is still
         // unverified and will not appear, and overwriting _pendingMfaFactorId
         // mid-verify would kill the challenge→verify sequence.
         if (_pendingMfaFactorId != null) {
-          print('[AuthProvider _updateLocalStates] Admin has pendingMfaFactorId=$_pendingMfaFactorId — skipping listVerifiedFactors to preserve mid-verify state.');
           _needsMfaEnrollment = false;
         } else {
           try {
-            print('[AuthProvider _updateLocalStates] Admin AAL1, no pending factor — calling listVerifiedFactors.');
             final factors = await _mfaService.listVerifiedFactors();
             if (epoch != _identityEpoch) return;
-            print('[AuthProvider _updateLocalStates] listVerifiedFactors returned ${factors.length} factor(s).');
             if (factors.isNotEmpty) {
               _pendingMfaFactorId = factors.first.id;
               _needsMfaEnrollment = false;
-              print('[AuthProvider _updateLocalStates] Set pendingMfaFactorId=${factors.first.id} from verified factor.');
             } else {
               _needsMfaEnrollment = true;
-              print('[AuthProvider _updateLocalStates] No verified factors — needs enrollment.');
             }
           } catch (e) {
-            print('[AuthProvider _updateLocalStates] listVerifiedFactors error: $e — defaulting to needs enrollment.');
+            debugPrint('[AuthProvider _updateLocalStates] listVerifiedFactors error: $e — defaulting to needs enrollment.');
             if (epoch != _identityEpoch) return;
             _needsMfaEnrollment = true;
           }
@@ -296,18 +306,7 @@ class AuthProvider extends ChangeNotifier {
               : const Duration(minutes: 10);
           if (!_activityService.isExempt && _activityService.idleTime > timeout) {
             _wasLoggedOutForInactivity = true;
-            await _client.auth.signOut();
-            _user = null;
-            _session = null;
-            _profile = null;
-            _patient = null;
-            _patientRecordState = PatientRecordState.unknown;
-            _patientRecordError = null;
-            _permissions = const <String>{};
-            _permissionFallbackActive = false;
-            _hasConsented = false;
-            _isOnboarded = false;
-            _activityService.stopMonitoring();
+            await signOut();
             return;
           }
         }
@@ -514,7 +513,6 @@ class AuthProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
     try {
-      print('[AuthProvider startMfaEnrollment] (${identityHashCode(this)}) Enrolling TOTP factor...');
       final response = await _client.auth.mfa.enroll(
         factorType: FactorType.totp,
         issuer: 'KlinikAid',
@@ -522,12 +520,11 @@ class AuthProvider extends ChangeNotifier {
       if (epoch != _identityEpoch) throw StateError('Session changed');
       _pendingMfaFactorId = response.id;
       _needsMfaEnrollment = false; // Factor enrolled, now verify it
-      print('[AuthProvider startMfaEnrollment] (${identityHashCode(this)}) Success: factorId = ${response.id}');
       _isLoading = false;
       notifyListeners();
       return response;
     } catch (e) {
-      print('[AuthProvider startMfaEnrollment] (${identityHashCode(this)}) Error: $e');
+      debugPrint('[AuthProvider startMfaEnrollment] (${identityHashCode(this)}) Error: $e');
       _isLoading = false;
       notifyListeners();
       rethrow;
@@ -537,9 +534,7 @@ class AuthProvider extends ChangeNotifier {
   /// Verify TOTP code → upgrades session to AAL2
   Future<MfaVerifyResult> verifyMfa(String code) async {
     final epoch = _identityEpoch;
-    print('[AuthProvider verifyMfa] Called. _pendingMfaFactorId=$_pendingMfaFactorId, code length=${code.length}');
     if (_pendingMfaFactorId == null) {
-      print('[AuthProvider verifyMfa] ABORT: _pendingMfaFactorId is null — cannot verify.');
       return MfaVerifyResult.error;
     }
 
@@ -547,31 +542,27 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      print('[AuthProvider verifyMfa] Calling verifyTotp: factorId=$_pendingMfaFactorId code=$code');
       final result = await _mfaService.verifyTotp(
         factorId: _pendingMfaFactorId!,
         code: code,
       );
-      print('[AuthProvider verifyMfa] verifyTotp outcome: $result');
 
       if (epoch != _identityEpoch) return MfaVerifyResult.error;
       if (result == MfaVerifyResult.success) {
         _pendingMfaFactorId = null;
         _needsMfaEnrollment = false;
-        print('[AuthProvider verifyMfa] Success. Refreshing session...');
         try {
           await _client.auth.refreshSession();
-          print('[AuthProvider verifyMfa] Session refreshed. isAal2=${isAal2}');
         } catch (e) {
-          print('[AuthProvider verifyMfa] refreshSession error (non-fatal): $e');
+          debugPrint('[AuthProvider verifyMfa] refreshSession error (non-fatal): $e');
         }
         await _updateLocalStates();
       }
 
       return result;
     } catch (e, stack) {
-      print('[AuthProvider verifyMfa] UNEXPECTED EXCEPTION: $e');
-      print('[AuthProvider verifyMfa] Stack: $stack');
+      debugPrint('[AuthProvider verifyMfa] UNEXPECTED EXCEPTION: $e');
+      debugPrint('[AuthProvider verifyMfa] Stack: $stack');
       return MfaVerifyResult.error;
     } finally {
       // ALWAYS clear loading — this was missing and caused the spinner to lock
@@ -581,7 +572,6 @@ class AuthProvider extends ChangeNotifier {
         _isLoading = false;
         notifyListeners();
       }
-      print('[AuthProvider verifyMfa] finally: _isLoading cleared.');
     }
   }
 
@@ -729,10 +719,30 @@ class AuthProvider extends ChangeNotifier {
             updatedAt: DateTime.now(),
           );
     } on PatientProvisioningException catch (e) {
-      _errorMessage = e.message;
-      if (!e.functionRan) {
+      if (e.outcome == PatientProvisioningOutcome.uncertain) {
+        // The function may have created the row before the connection dropped.
+        // The account is kept either way: a pending account can be recovered,
+        // a deleted one cannot.
+        final resolved = await _resolveUncertainProvisioning(
+          firstName: firstName,
+          lastName: lastName,
+          dateOfBirth: dateOfBirth,
+          gender: gender,
+          contactNumber: contactNumber,
+          email: email,
+          address: address,
+        );
+        if (resolved != null) {
+          return resolved;
+        }
+      } else if (e.status == 400) {
+        // The server refused the fields before writing or deleting anything,
+        // so this login has no patient row and never will. Delete it while the
+        // session is still valid, so the patient can register again.
         await _verificationService.deletePendingUser();
       }
+
+      final message = e.message;
       await _client.auth.signOut().catchError((_) {});
       _user = null;
       _session = null;
@@ -743,7 +753,66 @@ class AuthProvider extends ChangeNotifier {
       _hasConsented = false;
       _isOnboarded = false;
       _isLoading = false;
+      // After `_user = null`, whose identity reset clears the error.
+      _errorMessage = message;
       notifyListeners();
+      return null;
+    }
+  }
+
+  /// Resolves a provisioning attempt whose outcome is unknown: the function
+  /// may already have created the patient row.
+  ///
+  /// The row is looked up first and the (now idempotent) function is retried
+  /// once, so a lost response never leaves the account without its patient row
+  /// and never deletes a working account. Only a known outcome (the lookup
+  /// proved there is no row and the server refused the retry) deletes the
+  /// pending user, so the patient can register again; an uncertain result
+  /// always keeps the account.
+  Future<Patient?> _resolveUncertainProvisioning({
+    required String firstName,
+    required String lastName,
+    required DateTime dateOfBirth,
+    required Gender gender,
+    required String contactNumber,
+    required String email,
+    required String address,
+  }) async {
+    final userId = _user?.id;
+    if (userId == null) {
+      return null;
+    }
+
+    var lookupSucceeded = false;
+    try {
+      final existing = await _patientsRepo.getPatientByProfileId(userId);
+      lookupSucceeded = true;
+      if (existing != null) {
+        return existing;
+      }
+    } catch (_) {
+      // The lookup failed (for example the device is offline); the retry
+      // below is the second chance.
+    }
+
+    try {
+      return await _patientProvisioningService.createPatientRecord(
+        firstName: firstName,
+        lastName: lastName,
+        dateOfBirth: dateOfBirth,
+        gender: gender,
+        contactNumber: contactNumber,
+        email: email,
+        address: address,
+      );
+    } on PatientProvisioningException catch (e) {
+      // Known outcome: the lookup succeeded and found no row, and the server
+      // itself refused the retry, so nothing was written for this account.
+      // Delete the pending user so the patient can register again. When the
+      // lookup failed, a row may still exist, so the account is kept.
+      if (lookupSucceeded && e.outcome == PatientProvisioningOutcome.rejected) {
+        await _verificationService.deletePendingUser();
+      }
       return null;
     }
   }
@@ -909,6 +978,9 @@ class AuthProvider extends ChangeNotifier {
       await _client.auth.signOut();
     } finally {
       if (epoch == _identityEpoch) {
+        await _clearLocalCache();
+      }
+      if (epoch == _identityEpoch) {
         _user = null;
         _session = null;
         _profile = null;
@@ -925,13 +997,22 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  // A failed cache clear must not leave sign-out half done.
+  Future<void> _clearLocalCache() async {
+    try {
+      await localDatabase?.clearAllCache();
+    } catch (e) {
+      debugPrint('[AuthProvider] Local cache clear failed on sign-out: $e');
+    }
+  }
+
   Future<void> _loadPermissionsForProfile(int epoch) async {
     final roleId = _profile?.roleId;
     if (roleId == null || roleId.trim().isEmpty) {
       _permissions = const <String>{};
       _permissionFallbackActive = _profile?.role != UserRole.patient;
       if (_permissionFallbackActive) {
-        print('[AuthProvider] Permission routing fallback active: missing role_id.');
+        debugPrint('[AuthProvider] Permission routing fallback active: missing role_id.');
       }
       return;
     }
@@ -942,14 +1023,14 @@ class AuthProvider extends ChangeNotifier {
       _permissions = loaded;
       _permissionFallbackActive = loaded.isEmpty && _profile?.role != UserRole.patient;
       if (_permissionFallbackActive) {
-        print('[AuthProvider] Permission routing fallback active: no permissions returned.');
+        debugPrint('[AuthProvider] Permission routing fallback active: no permissions returned.');
       }
     } catch (e) {
       if (epoch != _identityEpoch) return;
       _permissions = const <String>{};
       _permissionFallbackActive = _profile?.role != UserRole.patient;
       if (_permissionFallbackActive) {
-        print('[AuthProvider] Permission routing fallback active: $e');
+        debugPrint('[AuthProvider] Permission routing fallback active: $e');
       }
     }
   }
