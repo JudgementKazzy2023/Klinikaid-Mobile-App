@@ -35,6 +35,16 @@ class TemplateSubmissionError extends TemplateSubmissionResult {
   );
 }
 
+enum TemplateLookupState { committed, withdrawn, notFound }
+
+/// What the server knows about an earlier request (POST .../status).
+class TemplateLookup {
+  final TemplateLookupState state;
+  final String? documentId;
+  final String? status;
+  const TemplateLookup(this.state, {this.documentId, this.status});
+}
+
 /// Transport separated from the guarded app entry point for synthetic HTTP tests.
 class TemplateSubmissionApi {
   final SupabaseClient client;
@@ -97,6 +107,36 @@ class TemplateSubmissionApi {
       return TemplateSubmissionError.unknown;
     }
   }
+
+  /// Null when the outcome cannot be read: never treat that as an answer.
+  Future<TemplateLookup?> lookup(String requestId) async {
+    try {
+      final response = await client.functions
+          .invoke(
+            'patient-document-submission/status',
+            method: HttpMethod.post,
+            body: {'request_id': requestId},
+          )
+          .timeout(const Duration(seconds: 30));
+      final data = response.data;
+      if (response.status != 200 || data is! Map) return null;
+      switch (data['state']) {
+        case 'committed':
+          final id = data['document_id'];
+          if (id is! String || id.isEmpty) return null;
+          return TemplateLookup(TemplateLookupState.committed,
+              documentId: id, status: data['status'] as String?);
+        case 'withdrawn':
+          return const TemplateLookup(TemplateLookupState.withdrawn);
+        case 'not_found':
+          return const TemplateLookup(TemplateLookupState.notFound);
+      }
+      return null;
+    } catch (_) {
+      // Includes FunctionException (gate refusals), timeouts and transport.
+      return null;
+    }
+  }
 }
 
 class TemplatesRepository {
@@ -121,5 +161,12 @@ class TemplatesRepository {
     return TemplateSubmissionApi(
       _injectedClient ?? SupabaseService.client,
     ).submit(requestId: requestId, templateId: templateId, fields: fields);
+  }
+
+  Future<TemplateLookup?> lookupTemplateOutcome(String requestId) {
+    PatientSubmissionContainment.requireAvailable();
+    return TemplateSubmissionApi(
+      _injectedClient ?? SupabaseService.client,
+    ).lookup(requestId);
   }
 }

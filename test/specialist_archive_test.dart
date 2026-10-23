@@ -52,7 +52,7 @@ void main() {
   test('RPC uses POST and exact parameter; true/false/denied are handled', () async {
     for (final answer in ['true', 'false', '{"message":"not permitted","code":"42501"}']) {
       final status = answer.startsWith('{') ? 403 : 200;
-      final client = SupabaseClient('https://example.supabase.co', 'fake',
+      final client = SupabaseClient('https://example.invalid', 'fake',
         authOptions: const AuthClientOptions(autoRefreshToken: false),
         httpClient: MockClient((request) async {
           expect(request.method, 'POST');

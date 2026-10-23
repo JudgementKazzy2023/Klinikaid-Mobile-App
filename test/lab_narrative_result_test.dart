@@ -104,7 +104,7 @@ class _FakeGoTrueClient extends GoTrueClient {
 class _AuthedSupabaseClient extends SupabaseClient {
   _AuthedSupabaseClient(http.Client httpClient)
       : super(
-          'https://example.supabase.co',
+          'https://example.invalid',
           'fake',
           authOptions: const AuthClientOptions(autoRefreshToken: false),
           httpClient: httpClient,
@@ -228,8 +228,8 @@ void main() {
   setUpAll(() async {
     try {
       await Supabase.initialize(
-        url: 'https://example.supabase.co',
-        anonKey: 'fake-anon-key',
+        url: 'https://example.invalid',
+        anonKey: 'synthetic-test-key',
         authOptions: const FlutterAuthClientOptions(
           localStorage: EmptyLocalStorage(),
         ),

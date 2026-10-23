@@ -444,6 +444,7 @@ void main() {
         ocrText: null,
         extractedMetadata: null,
         createdAt: DateTime.utc(2026, 10, 20, 9, 22, 13),
+        uploadState: 'draft',
       ));
       await localDb.cacheDocuments([
         cachedRow(id: 'doc-1', uploaderId: 'uploader-1'),

@@ -753,8 +753,25 @@ class _ResultEntryScreenState extends State<ResultEntryScreen> {
       if (warning != null) {
         scaffoldMessenger.hideCurrentSnackBar();
         scaffoldMessenger.removeCurrentMaterialBanner();
+        // The banner outlives this screen, so retry through the repository.
+        final repo = widget.repo;
+        final patientId = widget.patientId;
         scaffoldMessenger.showMaterialBanner(queueCompletionBanner(
-          warning, scaffoldMessenger.hideCurrentMaterialBanner,
+          warning,
+          scaffoldMessenger.hideCurrentMaterialBanner,
+          onRetry: () async {
+            try {
+              await repo.completeQueue(patientId);
+              scaffoldMessenger.hideCurrentMaterialBanner();
+              scaffoldMessenger.showSnackBar(const SnackBar(
+                content: Text('Queue updated. The results were saved once.'),
+              ));
+            } on QueueCompletionFailure {
+              scaffoldMessenger.showSnackBar(const SnackBar(
+                content: Text('Queue still not updated. Do not resubmit the results.'),
+              ));
+            }
+          },
         ));
       } else {
         scaffoldMessenger.showSnackBar(
