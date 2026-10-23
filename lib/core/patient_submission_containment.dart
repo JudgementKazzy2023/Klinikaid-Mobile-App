@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
 
-/// Lift only after the server contract and owner-aware draft reconciliation
-/// are verified. Lifecycle replay must not be restored automatically.
+/// Patient submissions are live: the shared backend (migrations 41/42 and
+/// patient-document-submission) is deployed and both flows passed the device
+/// check (#36). Kept as a kill switch: set `_active = true` to stop every
+/// patient write again, keeping drafts. Lifecycle replay must never return.
 class PatientSubmissionContainment {
-  static bool _active = true;
+  static bool _active = false;
 
   static bool get isActive => _active;
 
