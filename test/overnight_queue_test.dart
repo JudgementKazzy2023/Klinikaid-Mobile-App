@@ -19,7 +19,7 @@ class TestAuth extends GoTrueClient {
 
 class TestClient extends SupabaseClient {
   final fakeAuth = TestAuth();
-  TestClient(http.Client transport) : super('https://example.supabase.co', 'fake',
+  TestClient(http.Client transport) : super('https://example.invalid', 'fake',
     httpClient: transport, authOptions: const AuthClientOptions(autoRefreshToken: false));
   @override
   GoTrueClient get auth => fakeAuth;
