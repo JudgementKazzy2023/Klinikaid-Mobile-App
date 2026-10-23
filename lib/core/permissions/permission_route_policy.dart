@@ -36,29 +36,47 @@ class PermissionRoutePolicy {
   /// Whether the account may open the specialist area.
   bool get canUseSpecialistShell => hasAny(PermissionConstants.specialistArea);
 
-  /// The screen the account lands on, or null when it holds no permission
-  /// that opens one.
+  /// The screen the account lands on, or null when no screen is open to it.
   ///
   /// The order is the web's landing order (web: `getDefaultLandingPath` in
   /// `src/lib/auth/helpers.ts`), so both clients send the same account to the
   /// same screen. An account that holds no permission gets null: there is no
   /// screen for it, and the router shows the denial instead of guessing one
   /// from the role text on the profile.
+  ///
+  /// Every candidate is checked against [isAllowedPath] before it is handed
+  /// back. The landing route is a route like any other: the router treats a
+  /// redirect to the current location as "no change", so a landing path the
+  /// gate itself rejects would leave the account on a screen its grants do
+  /// not open. A candidate the gate rejects is skipped, and an account whose
+  /// candidates are all rejected gets null - the denial, never a screen its
+  /// permission does not open.
   String? home() {
     if (legacyRole == UserRole.patient) return '/patient';
 
-    if (legacyRole == UserRole.admin &&
-        has(PermissionConstants.profilesManage)) {
-      return '/admin/dashboard';
+    final candidates = <String>[
+      if (legacyRole == UserRole.admin &&
+          has(PermissionConstants.profilesManage))
+        '/admin/dashboard',
+      if (hasAll(PermissionConstants.receptionQueue)) '/reception/queue',
+      if (has(PermissionConstants.patientsManage)) '/reception/dashboard',
+      if (canUseDepartmentShell) '/department/records',
+      if (has(PermissionConstants.specialistPatients))
+        '/specialist/dashboard',
+      // A specialist who holds `specialist.patients` but not
+      // `specialist.analytics` may not open the dashboard, so the landing
+      // falls back to the directory the same gate does open for them.
+      if (has(PermissionConstants.specialistPatients))
+        '/specialist/patients',
+      if (has(PermissionConstants.rolesRead)) '/admin/rbac',
+      if (has(PermissionConstants.systemLogsRead)) '/admin/logs',
+      if (has(PermissionConstants.ragDocumentsManage)) '/admin/rag',
+      if (has(PermissionConstants.staffManage)) '/admin/staff',
+    ];
+
+    for (final candidate in candidates) {
+      if (isAllowedPath(candidate)) return candidate;
     }
-    if (hasAll(PermissionConstants.receptionQueue)) return '/reception/queue';
-    if (has(PermissionConstants.patientsManage)) return '/reception/dashboard';
-    if (canUseDepartmentShell) return '/department/records';
-    if (has(PermissionConstants.specialistPatients)) return '/specialist/dashboard';
-    if (has(PermissionConstants.rolesRead)) return '/admin/rbac';
-    if (has(PermissionConstants.systemLogsRead)) return '/admin/logs';
-    if (has(PermissionConstants.ragDocumentsManage)) return '/admin/rag';
-    if (has(PermissionConstants.staffManage)) return '/admin/staff';
     return null;
   }
 
