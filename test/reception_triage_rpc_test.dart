@@ -14,6 +14,8 @@ void main() {
   late SupabaseClient client;
   late ReceptionRepository repository;
   late List<http.Request> requests;
+  // The pre-routing status read is logged apart, so counts describe writes.
+  late List<String> log;
   var rpcStatus = 200;
   var rpcBody = '{"id":"queue-1"}';
   var documentStatus = 200;
@@ -21,6 +23,7 @@ void main() {
 
   setUp(() {
     requests = [];
+    log = [];
     rpcStatus = 200;
     rpcBody = '{"id":"queue-1"}';
     documentStatus = 200;
@@ -32,11 +35,24 @@ void main() {
       accessToken: () async => 'mock-staff-access-token',
       authOptions: const AuthClientOptions(autoRefreshToken: false),
       httpClient: MockClient((request) async {
-        requests.add(request);
         expect(
           request.headers['Authorization'],
           'Bearer mock-staff-access-token',
         );
+        log.add('${request.method} ${request.url.path}');
+        if (request.method == 'GET') {
+          expect(request.url.path, '/rest/v1/documents');
+          expect(request.url.queryParameters['id'], 'eq.document-1');
+          final row = {'status': 'pending'};
+          final object = request.headers['accept']?.contains('object') ?? false;
+          return http.Response(
+            jsonEncode(object ? row : [row]),
+            200,
+            request: request,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        requests.add(request);
         if (request.url.path == '/rest/v1/rpc/triage_patient') {
           expect(request.method, 'POST');
           return http.Response(
@@ -103,6 +119,12 @@ void main() {
       expect(jsonDecode(requests.last.body), {'status': 'approved'});
       expect(requests.last.url.queryParameters['id'], 'eq.document-1');
       expect(requests.last.url.queryParameters['select'], 'id');
+      expect(requests.last.url.queryParameters['status'], 'eq.pending');
+      expect(log, [
+        'GET /rest/v1/documents',
+        'POST /rest/v1/rpc/triage_patient',
+        'PATCH /rest/v1/documents',
+      ]);
     },
   );
 

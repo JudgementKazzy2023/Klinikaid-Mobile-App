@@ -29,6 +29,9 @@ class HttpRepository extends TemplatesRepository {
     templateId: templateId,
     fields: fields!,
   );
+  @override
+  Future<TemplateLookup?> lookupTemplateOutcome(String requestId) =>
+      api.lookup(requestId);
 }
 
 void main() {
@@ -246,11 +249,22 @@ void main() {
       }
     });
   }
+  bool isStatus(http.Request r) => r.url.path.endsWith('/status');
+  List<http.Request> sends() => requests.where((r) => !isStatus(r)).toList();
+  List<http.Request> lookups() => requests.where(isStatus).toList();
+
   for (final failure in ['network', 'timeout']) {
     test(
-      '$failure then retry preserves ID and answers; edits get new ID',
+      '$failure: the next submit asks /status first and never resends blindly',
       () async {
-        respond = (_) async {
+        var submitFails = true;
+        var statusUnreachable = true;
+        respond = (request) async {
+          if (isStatus(request)) {
+            if (statusUnreachable) throw const SocketException('offline');
+            return json({'state': 'not_found'}, 200);
+          }
+          if (!submitFails) return json(success, 200);
           if (failure == 'network') {
             throw const SocketException('synthetic offline');
           }
@@ -258,24 +272,71 @@ void main() {
         };
         expect(await submit(), isFalse);
         expect(provider.errorMessage, TemplateSubmissionError.unknown.message);
-        final first = jsonDecode(requests.single.body) as Map;
-        provider.resetState();
-        expect(provider.requestId, first['request_id']);
+        final first = jsonDecode(sends().single.body) as Map;
+
+        // Status unreachable: still unknown, and nothing is sent again.
         expect(await submit(), isFalse);
-        expect(jsonDecode(requests[1].body), first);
+        expect(provider.outcomeUnknown, isTrue);
+        expect(sends(), hasLength(1));
+        expect(jsonDecode(lookups().single.body),
+            {'request_id': first['request_id']});
+
+        // Server says it never committed: resend under the same id.
+        statusUnreachable = false;
+        submitFails = false;
+        expect(await submit(), isTrue);
+        expect(jsonDecode(lookups().last.body),
+            {'request_id': first['request_id']});
+        expect(jsonDecode(sends().last.body), first);
         expect(prechecks, 1);
-        final edited = {'chief_complaint': 'Edited answer'};
-        expect(await submit(fields: edited), isFalse);
-        final third = jsonDecode(requests[2].body) as Map;
-        expect(third['request_id'], isNot(first['request_id']));
-        expect(third['fields'], edited);
-        respond = (_) async => json({...success, 'replayed': true}, 200);
-        expect(await submit(fields: edited), isTrue);
-        expect(jsonDecode(requests[3].body), third);
-        expect(provider.result!.replayed, isTrue);
       },
     );
   }
+
+  Future<Map> failOnceThenStatus(Map<String, dynamic> status) async {
+    respond = (_) async => throw const SocketException('offline');
+    expect(await submit(), isFalse);
+    final first = jsonDecode(sends().single.body) as Map;
+    respond = (request) async =>
+        isStatus(request) ? json(status, 200) : json(success, 200);
+    return first;
+  }
+
+  test('committed earlier: success with that document, nothing resent', () async {
+    await failOnceThenStatus(
+        {'state': 'committed', 'document_id': 'doc-1', 'status': 'approved'});
+    // Edited answers must not become a second submission.
+    expect(await submit(fields: {'chief_complaint': 'Edited'}), isTrue);
+    expect(provider.result!.documentId, 'doc-1');
+    expect(provider.result!.status, 'approved');
+    expect(provider.result!.replayed, isTrue);
+    expect(sends(), hasLength(1));
+  });
+
+  test('withdrawn earlier: a fresh id, never the withdrawn one', () async {
+    final first = await failOnceThenStatus({'state': 'withdrawn'});
+    expect(await submit(), isTrue);
+    final resent = jsonDecode(sends().last.body) as Map;
+    expect(resent['request_id'], isNot(first['request_id']));
+    expect(resent['fields'], first['fields']);
+  });
+
+  test('not found and edited: the edited answers go under their new id', () async {
+    final first = await failOnceThenStatus({'state': 'not_found'});
+    final edited = {'chief_complaint': 'Edited answer'};
+    expect(await submit(fields: edited), isTrue);
+    final third = jsonDecode(sends().last.body) as Map;
+    expect(third['request_id'], isNot(first['request_id']));
+    expect(third['fields'], edited);
+  });
+
+  test('a lookup is asked only once per unknown outcome', () async {
+    await failOnceThenStatus({'state': 'not_found'});
+    expect(await submit(), isTrue);
+    expect(await submit(), isFalse); // already succeeded: nothing more
+    expect(lookups(), hasLength(1));
+  });
+
   test('editing and reverting still rotates the request ID', () async {
     respond = (_) async => throw const SocketException('offline');
     await submit();
@@ -332,6 +393,11 @@ void main() {
           templateId: 'patient-intake',
           fields: values,
         ),
+        throwsStateError,
+      );
+      expect(
+        () => TemplatesRepository(client: client)
+            .lookupTemplateOutcome('c617cd35-f162-4e33-81fa-b47b1068f43a'),
         throwsStateError,
       );
       final contained = TemplatesProvider(
