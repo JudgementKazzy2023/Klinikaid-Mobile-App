@@ -768,7 +768,10 @@ class AuthProvider extends ChangeNotifier {
   ///
   /// The row is looked up first and the (now idempotent) function is retried
   /// once, so a lost response never leaves the account without its patient row
-  /// and never deletes a working account.
+  /// and never deletes a working account. Only a known outcome (the lookup
+  /// proved there is no row and the server refused the retry) deletes the
+  /// pending user, so the patient can register again; an uncertain result
+  /// always keeps the account.
   Future<Patient?> _resolveUncertainProvisioning({
     required String firstName,
     required String lastName,
@@ -783,8 +786,10 @@ class AuthProvider extends ChangeNotifier {
       return null;
     }
 
+    var lookupSucceeded = false;
     try {
       final existing = await _patientsRepo.getPatientByProfileId(userId);
+      lookupSucceeded = true;
       if (existing != null) {
         return existing;
       }
@@ -803,7 +808,14 @@ class AuthProvider extends ChangeNotifier {
         email: email,
         address: address,
       );
-    } on PatientProvisioningException {
+    } on PatientProvisioningException catch (e) {
+      // Known outcome: the lookup succeeded and found no row, and the server
+      // itself refused the retry, so nothing was written for this account.
+      // Delete the pending user so the patient can register again. When the
+      // lookup failed, a row may still exist, so the account is kept.
+      if (lookupSucceeded && e.outcome == PatientProvisioningOutcome.rejected) {
+        await _verificationService.deletePendingUser();
+      }
       return null;
     }
   }

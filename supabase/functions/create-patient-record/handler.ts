@@ -403,6 +403,12 @@ export function createCreatePatientRecordHandler(
       return jsonResponse({ error: "bad_request", message: "Invalid JSON body request." }, 400);
     }
 
+    // `null` and arrays are valid JSON but not a request body; they would
+    // otherwise blow up in readRequiredString and fail with a 500.
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      return jsonResponse({ error: "bad_request", message: "Invalid JSON body request." }, 400);
+    }
+
     const validation = validatePatientRegistration(body, todayInManila(now()));
     if (!validation.ok) {
       return jsonResponse({ error: "bad_request", message: validation.error }, 400);

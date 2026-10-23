@@ -400,6 +400,40 @@ Deno.test("returns the row an overlapping call inserted when this insert fails",
   assertEquals(db.deletedUsers.length, 0, "the account is kept when a row exists");
 });
 
+Deno.test("returns 400 for a null JSON body and writes or deletes nothing", async () => {
+  const db = createDatabase({
+    profiles: [{ id: "user-1", role: "patient" }],
+    user: patientUser(),
+  });
+  const handler = buildHandler(db);
+
+  const response = await handler(buildRequest(null));
+  const body = await response.json();
+
+  assertEquals(response.status, 400, "a null body is refused");
+  assertEquals(body.error, "bad_request", "the refusal is reported as bad_request");
+  assertEquals(body.message, "Invalid JSON body request.", "the refusal explains the body rule");
+  assertEquals(db.insertedRows.length, 0, "no patient row is written");
+  assertEquals(db.deletedUsers.length, 0, "the account is never deleted");
+});
+
+Deno.test("returns 400 for an array JSON body and writes or deletes nothing", async () => {
+  const db = createDatabase({
+    profiles: [{ id: "user-1", role: "patient" }],
+    user: patientUser(),
+  });
+  const handler = buildHandler(db);
+
+  const response = await handler(buildRequest([validBody]));
+  const body = await response.json();
+
+  assertEquals(response.status, 400, "an array body is refused");
+  assertEquals(body.error, "bad_request", "the refusal is reported as bad_request");
+  assertEquals(body.message, "Invalid JSON body request.", "the refusal explains the body rule");
+  assertEquals(db.insertedRows.length, 0, "no patient row is written");
+  assertEquals(db.deletedUsers.length, 0, "the account is never deleted");
+});
+
 Deno.test("returns 401 without an Authorization header", async () => {
   const db = createDatabase({ user: patientUser() });
   const handler = buildHandler(db);
