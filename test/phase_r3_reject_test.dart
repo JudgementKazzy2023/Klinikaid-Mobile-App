@@ -149,9 +149,8 @@ void main() {
 
   setUpAll(() async {
     await supabase.Supabase.initialize(
-      url: 'https://onzeyejlfydvvbkejvwf.supabase.co',
-      anonKey:
-          'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9uemV5ZWpsZnlkdnZia2VqdndmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNjcxMjYsImV4cCI6MjA5NDk0MzEyNn0.FJNbbuBZ2LdutVNrloYsxOLGZWbP-oLLTLJaKBOFkMM',
+      url: 'https://example.invalid',
+      anonKey: 'synthetic-test-key',
       authOptions: const supabase.FlutterAuthClientOptions(
         localStorage: supabase.EmptyLocalStorage(),
       ),

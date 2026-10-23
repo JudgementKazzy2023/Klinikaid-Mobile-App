@@ -185,7 +185,18 @@ class _TemplateFormRendererScreenState
           );
           if (mounted && changed == true) provider.resumeAfterAccountFlow();
         case TemplateRemediation.none:
-          break;
+          // The inline error sits at the top of the form, out of view from
+          // the Submit button; show it where the patient is looking, as the
+          // upload screen does.
+          final message = provider.errorMessage;
+          if (message != null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(message),
+                backgroundColor: const Color(0xFFFF3B30),
+              ),
+            );
+          }
       }
     }
   }
