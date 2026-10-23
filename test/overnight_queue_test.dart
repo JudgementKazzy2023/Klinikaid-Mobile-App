@@ -121,4 +121,42 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(MaterialBanner), findsNothing);
   });
+
+  for (final queueBody in ['[{"id":1}]', '[]']) {
+    test('completeQueue retries only the queue update (response $queueBody)', () async {
+      final requests = <http.Request>[];
+      final client = TestClient(MockClient((request) async {
+        requests.add(request);
+        return http.Response(queueBody, 200, request: request,
+          headers: {'content-type': 'application/json'});
+      }));
+      final repo = DepartmentRepository(client: client)..adminDepartmentOverride = 'laboratory';
+      final retry = repo.completeQueue('patient');
+      if (queueBody == '[]') {
+        await expectLater(retry, throwsA(isA<QueueCompletionFailure>()));
+      } else {
+        await retry;
+      }
+      expect(requests.map((r) => '${r.method} ${r.url.path}'),
+        ['PATCH /rest/v1/patient_queue']);
+      expect(requests.single.url.queryParameters, {
+        'patient_id': 'eq.patient', 'department': 'eq.laboratory',
+        'status': 'in.("waiting","in_progress")', 'select': 'id',
+      });
+      expect(jsonDecode(requests.single.body), {'status': 'completed'});
+      await client.dispose();
+      client.fakeAuth.dispose();
+    });
+  }
+
+  testWidgets('banner offers a queue-only retry when given one', (tester) async {
+    var retries = 0;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: queueCompletionBanner(
+      QueueCompletionFailure.message, () {}, onRetry: () => retries++))));
+    await tester.tap(find.text('Retry queue update'));
+    expect(retries, 1);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: queueCompletionBanner(
+      QueueCompletionFailure.message, () {}))));
+    expect(find.text('Retry queue update'), findsNothing);
+  });
 }

@@ -14,6 +14,9 @@ DateTime phtStartOfTodayUtc() {
   return phtMidnight.subtract(const Duration(hours: 8));
 }
 
+const _noLongerPending =
+    'This document is no longer pending. Refresh to see its current status.';
+
 class ReceptionRepository {
   final SupabaseClient _client;
 
@@ -177,6 +180,23 @@ class ReceptionRepository {
     num? temperatureC,
     String? triageNotes,
   }) async {
+    // Refuse before routing: a document another receptionist already decided
+    // must not put the patient in a queue. The guarded update below still
+    // covers a decision made between this read and the approval.
+    final Map<String, dynamic>? current;
+    try {
+      current = await _client
+          .from('documents')
+          .select('status')
+          .eq('id', documentId)
+          .maybeSingle();
+    } catch (e) {
+      throw FailureMapper.fromException(e);
+    }
+    if (current == null || current['status'] != 'pending') {
+      throw const DatabaseFailure(_noLongerPending);
+    }
+
     try {
       final vitals = <String, dynamic>{};
       if (bloodPressure != null && bloodPressure.trim().isNotEmpty) {
@@ -218,13 +238,23 @@ class ReceptionRepository {
     }
 
     try {
-      // Require a returned row: RLS can silently hide a document from UPDATE.
+      // Require a returned row: RLS can silently hide a document from UPDATE,
+      // and a document another receptionist already decided is not pending.
       await _client
           .from('documents')
           .update({'status': 'approved'})
           .eq('id', documentId)
+          .eq('status', 'pending')
           .select('id')
           .single();
+    } on PostgrestException catch (e) {
+      throw DatabaseFailure(e.code == 'PGRST116'
+          ? 'Patient was routed, but the document is no longer pending, so it '
+              'was not approved. Refresh to see its status; do not route the '
+              'patient again.'
+          : 'Patient was routed, but document approval could not be confirmed. '
+              'Refresh and resolve the document approval separately; '
+              'do not route the patient again. ${FailureMapper.fromException(e)}');
     } catch (e) {
       throw DatabaseFailure(
         'Patient was routed, but document approval could not be confirmed. '
@@ -242,13 +272,20 @@ class ReceptionRepository {
     required String reason,
   }) async {
     try {
+      // Same guard as approval: no row back means nothing was rejected.
       await _client
           .from('documents')
           .update({
             'status': 'rejected',
             'rejection_reason': reason,
           })
-          .eq('id', documentId);
+          .eq('id', documentId)
+          .eq('status', 'pending')
+          .select('id')
+          .single();
+    } on PostgrestException catch (e) {
+      if (e.code == 'PGRST116') throw const DatabaseFailure(_noLongerPending);
+      throw FailureMapper.fromException(e);
     } catch (e) {
       throw FailureMapper.fromException(e);
     }
