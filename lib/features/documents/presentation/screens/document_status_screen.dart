@@ -5,7 +5,8 @@ import '../../../../core/models/document.dart';
 import '../providers/document_status_provider.dart';
 
 class DocumentStatusScreen extends StatefulWidget {
-  const DocumentStatusScreen({super.key});
+  final String? documentId;
+  const DocumentStatusScreen({super.key, this.documentId});
 
   @override
   State<DocumentStatusScreen> createState() => _DocumentStatusScreenState();
@@ -65,10 +66,14 @@ class _DocumentStatusScreenState extends State<DocumentStatusScreen> {
                 _buildRealtimeBanner(provider),
                 const SizedBox(height: 16),
 
-                if (provider.documents.isEmpty)
+                if (widget.documentId != null && !provider.documents.any((doc) => doc.id == widget.documentId))
+                  const Text('This document is not available in your records. Pull down to refresh.')
+                else if (provider.documents.isEmpty)
                   _buildEmptyState()
                 else
-                  ...provider.documents.map((doc) => _buildDocumentCard(doc)),
+                  ...provider.documents
+                      .where((doc) => widget.documentId == null || doc.id == widget.documentId)
+                      .map((doc) => _buildDocumentCard(doc)),
               ],
             ),
           );

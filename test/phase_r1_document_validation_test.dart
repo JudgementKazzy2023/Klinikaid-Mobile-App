@@ -15,6 +15,10 @@ import 'package:klinikaid_mobile/core/models/profile.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
 class MockAuthProvider extends AuthProvider {
+  // These screen tests start after staff MFA verification.
+  @override
+  bool get isAal2 => true;
+
   Profile? _mockProfile;
 
   MockAuthProvider() : super();

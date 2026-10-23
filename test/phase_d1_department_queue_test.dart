@@ -18,6 +18,10 @@ import 'package:klinikaid_mobile/features/department/presentation/providers/depa
 import 'package:klinikaid_mobile/features/department/presentation/screens/department_queue_screen.dart';
 
 class MockAuthProvider extends AuthProvider {
+  // These screen tests start after staff MFA verification.
+  @override
+  bool get isAal2 => !_mockIsAal1Pending;
+
   bool _mockIsAuthenticated = false;
   bool _mockHasConsented = false;
   bool _mockIsOnboarded = false;

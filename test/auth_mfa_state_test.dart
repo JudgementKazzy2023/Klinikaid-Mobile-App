@@ -326,6 +326,25 @@ void main() {
     return provider.signIn('a@clinic.test', 'password');
   }
 
+  for (final role in UserRole.values.where(
+    (role) => role != UserRole.patient,
+  )) {
+    test('${role.name} without a factor must enroll at AAL1', () async {
+      mockAuth.usersByEmail['a@clinic.test'] = userA;
+      profilesRepo.profilesById['user-a'] = Profile(
+        id: 'user-a',
+        fullName: 'Staff',
+        role: role,
+        createdAt: DateTime(2026),
+        updatedAt: DateTime(2026),
+      );
+      await provider.signIn('a@clinic.test', 'password');
+      expect(provider.needsMfaEnrollment, isTrue);
+      expect(provider.isAal1Pending, isTrue);
+      expect(provider.pendingMfaFactorId, isNull);
+    });
+  }
+
   group('AUTH-03: MFA/verification state is scoped to the active identity', () {
     test('signOut clears a pending MFA factor (original failure)', () async {
       final outcome = await signInAdminAPending('factor-a1');
@@ -372,8 +391,8 @@ void main() {
 
       expect(outcome, LoginOutcome.success);
       expect(provider.pendingMfaFactorId, isNull);
-      expect(provider.needsMfaEnrollment, isFalse);
-      expect(provider.isAal1Pending, isFalse);
+      expect(provider.needsMfaEnrollment, isTrue);
+      expect(provider.isAal1Pending, isTrue);
       expect(provider.verificationState.status, VerificationStatus.idle);
     });
 
@@ -821,16 +840,17 @@ void main() {
       expect(router.router.state.matchedLocation, '/login');
     });
 
-    testWidgets('signed-in B without pending MFA is sent home, not to MFA',
+    testWidgets('staff B verifies its own MFA after A signs out',
         (tester) async {
       expect(await signInAdminAPending('factor-a1'), LoginOutcome.mfaRequired);
       await provider.signOut();
 
       mockAuth.usersByEmail['b@clinic.test'] = userB;
       profilesRepo.profilesById['user-b'] = receptionistProfile();
-      mfaService.stepUpRequired = false;
+      mfaService.stepUpRequired = true;
+      mfaService.verifiedFactorsByUserId['user-b'] = [makeFactor('factor-b2')];
       expect(await provider.signIn('b@clinic.test', 'password'),
-          LoginOutcome.success);
+          LoginOutcome.mfaRequired);
 
       final router = AppRouter(provider);
       await tester.pumpWidget(MultiProvider(
@@ -843,7 +863,9 @@ void main() {
 
       router.router.go('/mfa-verify');
       await tester.pumpAndSettle();
-      expect(router.router.state.matchedLocation, '/reception/queue');
+      expect(provider.pendingMfaFactorId, 'factor-b2');
+      expect(provider.needsMfaEnrollment, isFalse);
+      expect(router.router.state.matchedLocation, '/mfa-verify');
     });
   });
 }

@@ -32,6 +32,10 @@ class MockSessionActivityService extends SessionActivityService {
 }
 
 class MockAuthProviderForLab extends AuthProvider {
+  // These screen tests start after staff MFA verification.
+  @override
+  bool get isAal2 => true;
+
   final Department mockDepartment;
 
   MockAuthProviderForLab({this.mockDepartment = Department.laboratory})
