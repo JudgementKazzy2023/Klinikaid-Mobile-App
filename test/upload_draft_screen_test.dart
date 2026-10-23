@@ -68,7 +68,7 @@ void main() {
         ),
       );
       await tester.pump(const Duration(milliseconds: 500));
-      expect(find.text('Choose a PDF (up to 5 MB)'), findsOneWidget);
+      expect(find.text('Choose a file: PDF, JPG or PNG (up to 5 MB)'), findsOneWidget);
       expect(find.text('legacy.pdf'), findsOneWidget);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);

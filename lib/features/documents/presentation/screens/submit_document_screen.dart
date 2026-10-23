@@ -42,25 +42,7 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> {
         imageQuality: 85, // Balance size and quality for OCR text readability
       );
 
-      if (image != null && mounted) {
-        // WebP/HEIC from the photo picker become a JPEG the server accepts.
-        final uploadable = await ensureUploadableImage(image.path);
-        if (!mounted) return;
-        // Trigger on-device OCR via provider
-        await Provider.of<DocumentSubmissionProvider>(
-          context,
-          listen: false,
-        ).processOnDeviceOcr(uploadable, patient);
-        if (!mounted) return;
-        final detectedTests = Provider.of<DocumentSubmissionProvider>(
-          context,
-          listen: false,
-        ).detectedTests;
-        setState(() {
-          _selectedTestIds = detectedTests.map((test) => test.id).toList();
-          _initializedDetectionSignature = _detectionSignature(detectedTests);
-        });
-      }
+      if (image != null && mounted) await _useImage(image.path, patient);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -73,31 +55,56 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> {
     }
   }
 
-  Future<void> _pickPdf() async {
+  /// Converts the picked image if needed, then runs on-device OCR and test
+  /// detection. Used by Camera, Gallery and the file chooser.
+  Future<void> _useImage(String imagePath, Patient patient) async {
+    // WebP/HEIC from the photo picker become a JPEG the server accepts.
+    final uploadable = await ensureUploadableImage(imagePath);
+    if (!mounted) return;
+    final provider = Provider.of<DocumentSubmissionProvider>(
+      context,
+      listen: false,
+    );
+    await provider.processOnDeviceOcr(uploadable, patient);
+    if (!mounted) return;
+    final detectedTests = provider.detectedTests;
+    setState(() {
+      _selectedTestIds = detectedTests.map((test) => test.id).toList();
+      _initializedDetectionSignature = _detectionSignature(detectedTests);
+    });
+  }
+
+  Future<void> _pickFile(Patient patient) async {
     if (PatientSubmissionContainment.isActive) return;
     try {
       final file = await files.openFile(
         acceptedTypeGroups: [
           const files.XTypeGroup(
-            label: 'PDF documents',
-            extensions: ['pdf'],
-            mimeTypes: ['application/pdf'],
+            label: 'PDF, JPG or PNG',
+            extensions: ['pdf', 'jpg', 'jpeg', 'png'],
+            mimeTypes: ['application/pdf', 'image/jpeg', 'image/png'],
           ),
         ],
       );
       if (file == null || !mounted) return;
-      await context.read<DocumentSubmissionProvider>().selectPdf(file.path);
+      if (file.path.toLowerCase().endsWith('.pdf')) {
+        await context.read<DocumentSubmissionProvider>().selectPdf(file.path);
+      } else {
+        await _useImage(file.path, patient);
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Choose a readable PDF up to 5 MB. Your saved drafts are still here.',
+              'Choose a readable PDF, JPG or PNG up to 5 MB. Your saved drafts are still here.',
             ),
           ),
         );
+      }
     }
   }
+
 
   String _draftSummary(OfflineDocument doc) {
     try {
@@ -370,7 +377,7 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> {
                   _buildProcessingSpinner()
                 else if (!provider.hasCachedSubmission)
                   Column(
-                    children: [_buildUploadCard(patient), _buildPdfPicker()],
+                    children: [_buildUploadCard(patient), _buildFilePicker(patient)],
                   )
                 else
                   _buildPreviewAndValidationCard(patient, provider),
@@ -565,10 +572,10 @@ class _SubmitDocumentScreenState extends State<SubmitDocumentScreen> {
     );
   }
 
-  Widget _buildPdfPicker() => TextButton.icon(
-    onPressed: _pickPdf,
-    icon: const Icon(Icons.picture_as_pdf_outlined),
-    label: const Text('Choose a PDF (up to 5 MB)'),
+  Widget _buildFilePicker(Patient patient) => TextButton.icon(
+    onPressed: () => _pickFile(patient),
+    icon: const Icon(Icons.upload_file_outlined),
+    label: const Text('Choose a file: PDF, JPG or PNG (up to 5 MB)'),
   );
 
   Widget _buildPreviewAndValidationCard(
