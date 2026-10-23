@@ -90,7 +90,7 @@ class MockSupabaseClient extends SupabaseClient {
   final MockGoTrueClient mockAuth;
 
   MockSupabaseClient(this.mockAuth)
-      : super('https://example.supabase.co', 'mock-anon-key');
+      : super('https://example.invalid', 'mock-anon-key');
 
   @override
   GoTrueClient get auth => mockAuth;
@@ -217,8 +217,8 @@ void main() {
   setUpAll(() async {
     try {
       await Supabase.initialize(
-        url: 'https://example.supabase.co',
-        anonKey: 'mock-anon-key',
+        url: 'https://example.invalid',
+        anonKey: 'synthetic-test-key',
         authOptions: const FlutterAuthClientOptions(
           localStorage: EmptyLocalStorage(),
         ),
