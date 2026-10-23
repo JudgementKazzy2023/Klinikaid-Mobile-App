@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/document.dart';
+import '../patient_submission_containment.dart';
 import '../supabase/supabase_client.dart';
 import '../errors/failures.dart';
 
@@ -35,6 +36,7 @@ class DocumentsRepository {
   /// Inserts a new document metadata record (which has already been processed by OCR).
   /// Throws a [Failure] on error.
   Future<Document> insertDocument(Document document) async {
+    PatientSubmissionContainment.requireAvailable();
     try {
       final jsonPayload = document.toJson();
       jsonPayload.remove('patient');
@@ -53,6 +55,7 @@ class DocumentsRepository {
   /// Updates a pending document's details. RLS restricts this to documents where `status = 'pending'`.
   /// Throws a [Failure] on error (e.g. if the document is already approved/rejected).
   Future<Document> updatePendingDocument(Document document) async {
+    PatientSubmissionContainment.requireAvailable();
     try {
       final jsonPayload = document.toJson();
       jsonPayload.remove('patient');

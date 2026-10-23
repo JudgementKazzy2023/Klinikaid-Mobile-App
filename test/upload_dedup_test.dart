@@ -4,13 +4,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:klinikaid_mobile/core/patient_submission_containment.dart';
 import 'package:klinikaid_mobile/core/cache/local_database.dart';
 import 'package:klinikaid_mobile/core/models/patient.dart';
 import 'package:klinikaid_mobile/core/supabase/supabase_client.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 import 'package:klinikaid_mobile/features/documents/presentation/providers/document_submission_provider.dart';
 import 'package:klinikaid_mobile/features/documents/presentation/screens/submit_document_screen.dart';
-import 'package:klinikaid_mobile/features/patient/templates/presentation/providers/templates_provider.dart';
 import 'package:klinikaid_mobile/features/patient/submissions/document_dedup.dart';
 
 // Simple Mocks for Supabase Client query chain
@@ -132,6 +132,10 @@ class MockDocumentSubmissionProvider extends DocumentSubmissionProvider {
 }
 
 void main() {
+  // These tests exercise the submit flows that containment blocks.
+  setUp(() => PatientSubmissionContainment.activeForTesting = false);
+  tearDown(() => PatientSubmissionContainment.activeForTesting = true);
+
   TestWidgetsFlutterBinding.ensureInitialized();
 
   // Mock shared_preferences MethodChannel to avoid MissingPluginException in tests
@@ -351,7 +355,6 @@ void main() {
       await tester.tap(submitBtn);
       await tester.pumpAndSettle();
 
-      print('DEBUG mockErrorMessage is: ${submissionProvider.mockErrorMessage}');
       expect(
         find.textContaining('You already have a pending [Laboratory Request] submitted on'),
         findsOneWidget,

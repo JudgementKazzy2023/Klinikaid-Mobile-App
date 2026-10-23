@@ -82,7 +82,7 @@ ParameterSeries buildSeries(List<SpecialistRecord> records, String testName) {
       note: r.notes,
       testType: r.testType,
       unit: r.unit,
-      technologist: r.specialistId ?? 'Unknown',
+      technologist: r.specialistId,
     ));
 
     // Update with most recent range bounds as loop progresses (last item is the newest)
