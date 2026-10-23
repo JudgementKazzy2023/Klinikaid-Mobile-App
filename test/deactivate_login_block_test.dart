@@ -14,8 +14,6 @@ import 'package:klinikaid_mobile/core/models/patient.dart';
 import 'package:klinikaid_mobile/core/repositories/profiles_repository.dart';
 import 'package:klinikaid_mobile/core/repositories/patients_repository.dart';
 import 'package:klinikaid_mobile/features/auth/data/session_activity_service.dart';
-import 'package:klinikaid_mobile/features/auth/presentation/screens/login_screen.dart';
-import 'package:klinikaid_mobile/features/dashboard/presentation/screens/dashboard_screen.dart';
 import 'package:klinikaid_mobile/features/auth/domain/login_outcome.dart';
 
 class MockGoTrueClient extends GoTrueClient {
@@ -224,7 +222,7 @@ void main() {
 
       router.router.go('/department/queue');
       await tester.pumpAndSettle();
-      expect(router.router.state!.matchedLocation, '/department/queue');
+      expect(router.router.state.matchedLocation, '/department/queue');
 
       mockProfilesRepo.mockProfile = Profile(
         id: 'user-active-1',
@@ -242,7 +240,7 @@ void main() {
       router.router.go('/department/result-entry/some-patient');
       await tester.pumpAndSettle();
 
-      expect(router.router.state!.matchedLocation, '/login');
+      expect(router.router.state.matchedLocation, '/login');
     });
   });
 }
