@@ -635,6 +635,64 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     provider.dispose();
   });
+
+  testWidgets('the staff screen hands changes off to the web and offers no edit action',
+      (tester) async {
+    final repository = useRepository();
+    final provider = useProvider(repository);
+    await provider.loadStaff();
+    await provider.loadRbacCatalog();
+
+    await pumpStaffScreen(tester, provider);
+
+    expect(find.byKey(const Key('staff_web_handoff_note')), findsOneWidget);
+    expect(
+      find.text(
+        "Staff changes are made on the KlinikAid web admin so the account's sign-in, role and audit record update together.",
+      ),
+      findsOneWidget,
+    );
+    // No card carries an edit control.
+    expect(find.byIcon(Icons.edit_outlined), findsNothing);
+    expect(find.byTooltip('Edit Staff Member'), findsNothing);
+
+    // Tapping a card opens no edit sheet, so no status, role or save control
+    // appears.
+    await tester.tap(find.text('Ben Lab'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('edit_staff_save_button')), findsNothing);
+    expect(find.byKey(const Key('edit_staff_active_switch')), findsNothing);
+    expect(find.byKey(const Key('edit_staff_role_dropdown')), findsNothing);
+    expect(find.text('Edit Staff Member'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    provider.dispose();
+  });
+
+  testWidgets('the registry is still read and filtered beside the hand-off note',
+      (tester) async {
+    final repository = useRepository();
+    final provider = useProvider(repository);
+    await provider.loadStaff();
+    await provider.loadRbacCatalog();
+
+    await pumpStaffScreen(tester, provider);
+
+    expect(find.text('Showing 5 of 5 personnel'), findsOneWidget);
+    expect(find.byKey(const Key('staff_web_handoff_note')), findsOneWidget);
+
+    await chooseFilter(
+      tester,
+      'staff_filter_status_dropdown',
+      'Inactive',
+    );
+    expect(find.text('Showing 1 of 5 personnel'), findsOneWidget);
+    expect(find.text('Eve Retired'), findsOneWidget);
+    expect(find.text('Ana Admin'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    provider.dispose();
+  });
 }
 
 /// A repository that answers the two reads the registry screen makes.
