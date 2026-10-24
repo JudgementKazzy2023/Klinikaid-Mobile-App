@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../providers/auth_provider.dart';
+import '../../domain/password_reset_result.dart';
 import '../../domain/registration_validators.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
@@ -51,12 +52,18 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final email = _emailController.text.trim();
 
-    await authProvider.sendPasswordReset(email);
+    final result = await authProvider.sendPasswordReset(email);
 
     if (!mounted) return;
 
+    // The success state is the same for a known and an unknown address. Only a
+    // failure that says nothing about the address keeps the form open to retry.
     setState(() {
-      _showSuccessState = true;
+      if (result == PasswordResetResult.retryableFailure) {
+        _customError = kPasswordResetRetryMessage;
+      } else {
+        _showSuccessState = true;
+      }
     });
   }
 
