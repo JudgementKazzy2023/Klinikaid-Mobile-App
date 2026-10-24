@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
-import '../../../../../core/patient_submission_containment.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../auth/presentation/providers/auth_provider.dart';
+import '../../../../../core/patient_submission_containment.dart';
+import '../../../../../core/utils/manila_time.dart';
 import '../../../../auth/presentation/screens/verification_code_screen.dart';
 import '../../../../auth/presentation/screens/consent_screen.dart';
 import '../../../../reception/presentation/widgets/change_password_modal.dart';
 import '../../document_templates.dart';
+import '../../template_answers.dart';
 import '../providers/templates_provider.dart';
 
 class TemplateFormRendererScreen extends StatefulWidget {
@@ -62,10 +65,6 @@ class _TemplateFormRendererScreenState
     }
   }
 
-  DateTime _getManilaNow() {
-    return DateTime.now().toUtc().add(const Duration(hours: 8));
-  }
-
   int _calculateAge(DateTime dob, DateTime now) {
     int age = now.year - dob.year;
     if (now.month < dob.month ||
@@ -75,13 +74,44 @@ class _TemplateFormRendererScreenState
     return age;
   }
 
-  void _selectDate(String fieldKey, String label) async {
-    final now = _getManilaNow();
+  /// The error for an answer, or null when the answer is acceptable.
+  ///
+  /// The bounds are the shared clinic rules: a text answer of 200 characters,
+  /// a free-text answer of 2000, a date inside the clinic's window, and one of
+  /// the allowed choices.
+  String? _answerError(TemplateField field, String? value) {
+    final answer = value ?? '';
+    if (field.required && answer.trim().isEmpty) {
+      return '${field.label} is required';
+    }
+    final problem = templateFieldProblem(field, answer, manilaToday());
+    if (problem != null) return '${field.label} $problem.';
+    return null;
+  }
+
+  /// True when the patient declined this consent question.
+  ///
+  /// A decline is a valid answer: the form is still submitted and reception
+  /// reviews it. It is not the account's data-privacy consent, which is a
+  /// separate thing entirely.
+  bool _isDeclinedConsent(TemplateField field) {
+    final value = _formValues[field.key]?.toString() ?? '';
+    return isConsentField(field) && isDeclinedConsentAnswer(value);
+  }
+
+  void _selectDate(TemplateField field) async {
+    final today = manilaToday();
+    final firstDate = parseIsoDate(kTemplateDateMin) ?? DateTime(1900, 1, 1);
+    // A date that records something already done (a referral, a consent given)
+    // cannot be after today; a forward-looking date may be up to two years
+    // ahead.
+    final lastDate = field.notFuture ? today : latestTemplateDate(today);
+
     final pickedDate = await showDatePicker(
       context: context,
-      initialDate: now,
-      firstDate: DateTime(1900),
-      lastDate: DateTime(2100),
+      initialDate: today,
+      firstDate: firstDate,
+      lastDate: lastDate,
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -98,10 +128,7 @@ class _TemplateFormRendererScreenState
     );
 
     if (pickedDate != null && mounted) {
-      _answerChanged(
-        fieldKey,
-        "${pickedDate.year}-${pickedDate.month.toString().padLeft(2, '0')}-${pickedDate.day.toString().padLeft(2, '0')}",
-      );
+      _answerChanged(field.key, formatIsoDate(pickedDate));
     }
   }
 
@@ -125,8 +152,8 @@ class _TemplateFormRendererScreenState
 
     // Age validation for patient-intake only
     if (_template.id == 'patient-intake') {
-      final manilaNow = _getManilaNow();
-      final age = _calculateAge(patient.dateOfBirth, manilaNow);
+      final now = manilaNow();
+      final age = _calculateAge(patient.dateOfBirth, now);
       if (age < 18) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -140,14 +167,18 @@ class _TemplateFormRendererScreenState
 
     final provider = _submission;
 
+    // Answers are stored trimmed, the way the shared rules count them.
+    final answers = <String, String>{
+      for (final entry in _formValues.entries)
+        entry.key: entry.value.toString().trim(),
+    };
+
     final success = await provider.submitTemplate(
       patientId: patient.id,
       uploaderId: user.id,
       templateId: _template.id,
       templateName: _template.name,
-      formValues: Map<String, String>.from(
-        _formValues.map((k, v) => MapEntry(k, v.toString())),
-      ),
+      formValues: answers,
     );
 
     if (!mounted) return;
@@ -510,6 +541,11 @@ class _TemplateFormRendererScreenState
               enabled: !_submission.isLoading,
               forceErrorText: _submission.fieldErrors[field.key],
               style: TextStyle(color: theme.colorScheme.onSurface),
+              // The bound is shown as a counter but not enforced while typing:
+              // an over-long answer is refused with a readable message rather
+              // than silently cut down to an answer nobody wrote.
+              maxLength: templateFieldMaxLength(field),
+              maxLengthEnforcement: MaxLengthEnforcement.none,
               decoration: InputDecoration(
                 hintText: 'Enter ${field.label.toLowerCase()}',
                 contentPadding: const EdgeInsets.symmetric(
@@ -517,12 +553,7 @@ class _TemplateFormRendererScreenState
                   vertical: 10,
                 ),
               ),
-              validator: (value) {
-                if (field.required && (value == null || value.trim().isEmpty)) {
-                  return '${field.label} is required';
-                }
-                return null;
-              },
+              validator: (value) => _answerError(field, value),
               onChanged: (val) => _answerChanged(field.key, val),
             ),
           if (field.type == 'textarea')
@@ -532,20 +563,17 @@ class _TemplateFormRendererScreenState
               forceErrorText: _submission.fieldErrors[field.key],
               style: TextStyle(color: theme.colorScheme.onSurface),
               maxLines: 4,
+              maxLength: templateFieldMaxLength(field),
+              maxLengthEnforcement: MaxLengthEnforcement.none,
               decoration: InputDecoration(
                 hintText:
                     'Provide detailed details for ${field.label.toLowerCase()}',
                 contentPadding: const EdgeInsets.all(12),
               ),
-              validator: (value) {
-                if (field.required && (value == null || value.trim().isEmpty)) {
-                  return '${field.label} is required';
-                }
-                return null;
-              },
+              validator: (value) => _answerError(field, value),
               onChanged: (val) => _answerChanged(field.key, val),
             ),
-          if (field.type == 'select')
+          if (field.type == 'select') ...[
             DropdownButtonFormField<String>(
               key: ValueKey('field-${field.key}'),
               forceErrorText: _submission.fieldErrors[field.key],
@@ -576,14 +604,30 @@ class _TemplateFormRendererScreenState
                 if (field.required && (value == null || value.isEmpty)) {
                   return 'Please select an option';
                 }
+                if (value != null && value.isNotEmpty) {
+                  final problem = templateFieldProblem(field, value, manilaToday());
+                  if (problem != null) return '${field.label} $problem.';
+                }
                 return null;
               },
             ),
+            if (_isDeclinedConsent(field))
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0, left: 12.0),
+                child: Text(
+                  'Consent declined. This form is still sent to reception for review.',
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+          ],
           if (field.type == 'date')
             InkWell(
               onTap: _submission.isLoading
                   ? null
-                  : () => _selectDate(field.key, field.label),
+                  : () => _selectDate(field),
               borderRadius: BorderRadius.circular(8.0),
               child: FormField<String>(
                 key: ValueKey('field-${field.key}'),
@@ -594,6 +638,9 @@ class _TemplateFormRendererScreenState
                       (currentVal == null || currentVal.isEmpty)) {
                     return '${field.label} is required';
                   }
+                  if (currentVal == null || currentVal.trim().isEmpty) return null;
+                  final problem = templateFieldProblem(field, currentVal, manilaToday());
+                  if (problem != null) return '${field.label} $problem.';
                   return null;
                 },
                 builder: (formFieldState) {
