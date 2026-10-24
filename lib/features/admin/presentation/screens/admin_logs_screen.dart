@@ -52,9 +52,8 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
     var canChatbotLogs = true;
     try {
       final auth = Provider.of<AuthProvider>(context, listen: false);
-      final legacyFallback = auth.usesLegacyPermissionFallback;
-      canSystemLogs = legacyFallback || auth.hasPermission(PermissionConstants.systemLogsRead);
-      canChatbotLogs = legacyFallback || auth.hasPermission(PermissionConstants.chatbotLogsRead);
+      canSystemLogs = auth.hasPermission(PermissionConstants.systemLogsRead);
+      canChatbotLogs = auth.hasPermission(PermissionConstants.chatbotLogsRead);
     } catch (_) {
       canSystemLogs = true;
       canChatbotLogs = true;
