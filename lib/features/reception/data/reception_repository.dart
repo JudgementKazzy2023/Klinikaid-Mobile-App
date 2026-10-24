@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/errors/failures.dart';
 import '../../../../core/supabase/paged_read.dart';
@@ -110,6 +112,40 @@ class ReceptionRepository {
 
   ReceptionRepository({SupabaseClient? client})
       : _client = client ?? Supabase.instance.client;
+
+  /// Live signals that a `documents` row the caller can read has changed.
+  ///
+  /// One event per change, whatever its kind (INSERT, UPDATE or DELETE). The
+  /// event carries no row on purpose: Realtime checks INSERT and UPDATE
+  /// payloads against RLS, and a DELETE carries only the primary key, so a
+  /// listener re-reads the board instead of patching it from a payload.
+  ///
+  /// Listening opens the channel, cancelling the subscription removes it. The
+  /// board's provider owns that lifetime.
+  Stream<void> documentChanges() {
+    late final StreamController<void> controller;
+    RealtimeChannel? channel;
+
+    controller = StreamController<void>(
+      onListen: () {
+        channel = _client
+            .channel('reception-documents-realtime')
+            .onPostgresChanges(
+              event: PostgresChangeEvent.all,
+              schema: 'public',
+              table: 'documents',
+              callback: (_) => controller.add(null),
+            )
+            .subscribe();
+      },
+      onCancel: () async {
+        final open = channel;
+        channel = null;
+        if (open != null) await _client.removeChannel(open);
+      },
+    );
+    return controller.stream;
+  }
 
   /// Fetches one page of the submissions, optionally filtered by status.
   /// Scoped by RLS: Receptionists have full select access to public.documents.

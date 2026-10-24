@@ -156,55 +156,71 @@ class DocumentStatusProvider extends ChangeNotifier {
             column: 'uploader_id',
             value: uploaderId,
           ),
-          callback: (payload) async {
-            final newRecord = payload.newRecord;
-            final eventType = payload.eventType;
-
-            if (newRecord.isEmpty) return;
-
-            final updatedDoc = Document.fromJson(newRecord);
-
-            if (eventType == PostgresChangeEvent.insert) {
-              _documents.insert(0, updatedDoc);
-            } else if (eventType == PostgresChangeEvent.update) {
-              final index = _documents.indexWhere((doc) => doc.id == updatedDoc.id);
-              if (index != -1) {
-                _documents[index] = updatedDoc;
-              } else {
-                _documents.insert(0, updatedDoc);
-              }
-            } else if (eventType == PostgresChangeEvent.delete) {
-              final oldRecord = payload.oldRecord;
-              if (oldRecord.isNotEmpty) {
-                final deletedId = oldRecord['id'];
-                _documents.removeWhere((doc) => doc.id == deletedId);
-              }
-            }
-
-            // Sync to local Drift DB
-            final cachedItem = CachedDocument(
-              id: updatedDoc.id,
-              patientId: updatedDoc.patientId,
-              uploaderId: updatedDoc.uploaderId,
-              fileName: updatedDoc.fileName,
-              filePath: updatedDoc.filePath,
-              fileType: updatedDoc.fileType,
-              status: updatedDoc.status.name,
-              ocrText: updatedDoc.ocrText,
-              extractedMetadata: updatedDoc.extractedMetadata != null
-                  ? jsonEncode(updatedDoc.extractedMetadata)
-                  : null,
-              rejectionReason: updatedDoc.rejectionReason,
-              createdAt: updatedDoc.createdAt,
-              updatedAt: updatedDoc.updatedAt,
-            );
-            await _localDb.cacheDocuments([cachedItem]);
-
-            notifyListeners();
-          },
+          callback: (payload) => handleDocumentChange(payload),
         );
 
     _realtimeChannel?.subscribe();
+  }
+
+  /// Applies one realtime change to the documents on screen and to the cache.
+  ///
+  /// A DELETE carries only the primary key (the old record), so it removes that
+  /// document by id and writes nothing back. The offline upload queue is a
+  /// separate table: a draft or offline-only upload is never re-created from a
+  /// change event.
+  @visibleForTesting
+  Future<void> handleDocumentChange(PostgresChangePayload payload) async {
+    if (payload.eventType == PostgresChangeEvent.delete) {
+      final deletedId = payload.oldRecord['id'] as String?;
+      if (deletedId == null) return;
+
+      _documents.removeWhere((doc) => doc.id == deletedId);
+      if (_documents.isEmpty && _dataState == DocumentDataState.live) {
+        _dataState = DocumentDataState.empty;
+      }
+      await _localDb.deleteCachedDocument(deletedId);
+      notifyListeners();
+      return;
+    }
+
+    final newRecord = payload.newRecord;
+    final eventType = payload.eventType;
+
+    if (newRecord.isEmpty) return;
+
+    final updatedDoc = Document.fromJson(newRecord);
+
+    if (eventType == PostgresChangeEvent.insert) {
+      _documents.insert(0, updatedDoc);
+    } else if (eventType == PostgresChangeEvent.update) {
+      final index = _documents.indexWhere((doc) => doc.id == updatedDoc.id);
+      if (index != -1) {
+        _documents[index] = updatedDoc;
+      } else {
+        _documents.insert(0, updatedDoc);
+      }
+    }
+
+    // Sync to local Drift DB
+    final cachedItem = CachedDocument(
+      id: updatedDoc.id,
+      patientId: updatedDoc.patientId,
+      uploaderId: updatedDoc.uploaderId,
+      fileName: updatedDoc.fileName,
+      filePath: updatedDoc.filePath,
+      fileType: updatedDoc.fileType,
+      status: updatedDoc.status.name,
+      ocrText: updatedDoc.ocrText,
+      extractedMetadata: updatedDoc.extractedMetadata != null
+          ? jsonEncode(updatedDoc.extractedMetadata)
+          : null,
+      rejectionReason: updatedDoc.rejectionReason,
+      createdAt: updatedDoc.createdAt,
+      updatedAt: updatedDoc.updatedAt,
+    );
+    await _localDb.cacheDocuments([cachedItem]);
+
+    notifyListeners();
   }
 
   void unsubscribe() {

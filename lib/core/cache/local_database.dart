@@ -168,6 +168,12 @@ class LocalDatabase extends _$LocalDatabase {
     });
   }
 
+  /// Removes one cached document by id. The offline upload queue is a separate
+  /// table and is left untouched.
+  Future<void> deleteCachedDocument(String id) async {
+    await (delete(cachedDocuments)..where((t) => t.id.equals(id))).go();
+  }
+
   Future<List<CachedDocument>> getDocumentsForPatient(String uploaderId) async {
     return (select(cachedDocuments)
           ..where((t) => t.uploaderId.equals(uploaderId))
