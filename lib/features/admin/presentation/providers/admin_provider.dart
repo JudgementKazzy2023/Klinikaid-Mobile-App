@@ -39,6 +39,7 @@ class AdminProvider extends ChangeNotifier {
 
   bool _isRbacLoading = false;
   String? _rbacError;
+  bool _isRbacLoaded = false;
   List<AdminRole> _rbacRoles = [];
   List<AdminPermission> _rbacPermissions = [];
 
@@ -105,6 +106,13 @@ class AdminProvider extends ChangeNotifier {
 
   bool get isRbacLoading => _isRbacLoading;
   String? get rbacError => _rbacError;
+
+  /// True when the role catalogue was read.
+  ///
+  /// A failed read is not an empty catalogue: the staff form and the role
+  /// filter of the registry need the catalogue, and an empty list would read
+  /// as a catalogue without roles instead of as a read that failed.
+  bool get isRbacLoaded => _isRbacLoaded;
   List<AdminRole> get rbacRoles => _rbacRoles;
   List<AdminPermission> get rbacPermissions => _rbacPermissions;
 
@@ -255,8 +263,10 @@ class AdminProvider extends ChangeNotifier {
       final catalog = await _repository.getRbacCatalog();
       _rbacRoles = catalog.roles;
       _rbacPermissions = catalog.permissions;
+      _isRbacLoaded = true;
     } catch (e) {
       _rbacError = e.toString();
+      _isRbacLoaded = false;
     } finally {
       _isRbacLoading = false;
       notifyListeners();

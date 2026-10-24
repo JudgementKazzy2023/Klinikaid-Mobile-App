@@ -458,7 +458,9 @@ void main() {
     await tester.pump();
 
     expect(state.staffTotal, 1500);
-    expect(find.text('1500 personnel'), findsOneWidget);
+    // The count reads like the web's: how many of the staff the filters keep,
+    // out of the staff the server holds.
+    expect(find.text('Showing 1500 of 1500 personnel'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     state.dispose();
   });
