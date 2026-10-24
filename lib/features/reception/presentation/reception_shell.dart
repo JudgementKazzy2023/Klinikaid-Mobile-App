@@ -40,7 +40,11 @@ class ReceptionShell extends StatelessWidget {
           ChangeNotifierProvider<ReceptionQueueProvider>.value(value: parentQueue)
         else
           ChangeNotifierProvider<ReceptionQueueProvider>(
-            create: (context) => ReceptionQueueProvider(repository: repo)..loadSubmissions(),
+            // The provider's dispose ends the realtime subscription, so leaving
+            // the shell (sign-out included) stops the live board.
+            create: (context) => ReceptionQueueProvider(repository: repo)
+              ..loadSubmissions()
+              ..startLiveUpdates(),
           ),
         if (parentDashboard != null)
           ChangeNotifierProvider<ReceptionDashboardProvider>.value(value: parentDashboard)

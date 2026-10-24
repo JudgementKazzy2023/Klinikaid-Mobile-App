@@ -71,6 +71,11 @@ class ReceptionQueueProvider extends ChangeNotifier {
   /// (web's SEARCH_DEBOUNCE_MS).
   static const Duration searchDebounce = Duration(milliseconds: 300);
 
+  /// Delay after the last document change before the board and any open search
+  /// are re-read. A burst of changes (a batch upload, or one decision that
+  /// writes several rows) is answered by one re-read, not one per event.
+  static const Duration liveRefreshDebounce = Duration(milliseconds: 400);
+
   SearchPhase _searchPhase = SearchPhase.idle;
   List<Submission> _searchResults = const [];
   bool _searchHasMore = false;
@@ -90,6 +95,14 @@ class ReceptionQueueProvider extends ChangeNotifier {
   /// Set when the provider is disposed, so an in-flight search that resolves
   /// afterwards reports nothing to a listener that no longer exists.
   bool _disposed = false;
+
+  /// Each board read takes a ticket; only the newest may write the board, the
+  /// same guard [_searchSeq] gives searches.
+  int _boardSeq = 0;
+
+  /// The subscription to document changes, once [startLiveUpdates] has run.
+  StreamSubscription<void>? _documentChanges;
+  Timer? _liveRefreshTimer;
 
   bool _isRouting = false;
   String? _routingError;
@@ -169,11 +182,19 @@ class ReceptionQueueProvider extends ChangeNotifier {
     _runSearch(query);
   }
 
-  Future<void> _runSearch(String query) async {
+  /// Runs the search for [query] and keeps the answer only if it is still the
+  /// newest.
+  ///
+  /// A [quiet] run is a re-read after a document change: an answer already on
+  /// screen stays until the new one arrives, rather than blanking the list on
+  /// every change.
+  Future<void> _runSearch(String query, {bool quiet = false}) async {
     final ticket = ++_searchSeq;
-    _searchPhase = SearchPhase.loading;
-    _searchError = '';
-    notifyListeners();
+    if (!quiet || _searchPhase != SearchPhase.ok) {
+      _searchPhase = SearchPhase.loading;
+      _searchError = '';
+      notifyListeners();
+    }
 
     try {
       final result = await _repository.searchSubmissions(query);
@@ -195,10 +216,86 @@ class ReceptionQueueProvider extends ChangeNotifier {
     }
   }
 
+  /// Starts re-reading the board and any open search when a document changes.
+  ///
+  /// Starts once. [dispose] ends the subscription, which removes the Realtime
+  /// channel, so a provider that is gone receives no further events.
+  void startLiveUpdates() {
+    if (_documentChanges != null || _disposed) return;
+    _documentChanges = _repository.documentChanges().listen(
+          (_) => _onDocumentChanged(),
+        );
+  }
+
+  /// Each change restarts the timer; the re-read runs once the changes stop.
+  void _onDocumentChanged() {
+    if (_disposed) return;
+    _liveRefreshTimer?.cancel();
+    _liveRefreshTimer = Timer(liveRefreshDebounce, _refreshLive);
+  }
+
+  /// Re-reads the board, and the open search if there is one.
+  Future<void> _refreshLive() async {
+    if (_disposed) return;
+    final query = _searchQuery;
+    await Future.wait<void>([
+      _refreshBoard(),
+      if (query.isNotEmpty) _runSearch(query, quiet: true),
+    ]);
+  }
+
+  /// Re-reads every board column without the loading state.
+  ///
+  /// Each column is read back to the length it has on screen (at least one
+  /// page), so a reader's place in a long column survives the change. A failed
+  /// read is shown as one, the same as a failed load: the rows on screen are
+  /// not presented as the server's current answer.
+  Future<void> _refreshBoard() async {
+    final ticket = ++_boardSeq;
+    try {
+      final pages = await Future.wait(<Future<SubmissionsPage>>[
+        for (final status in boardStatuses)
+          _repository.getSubmissionsPage(
+            status: status,
+            limit: _loadedLengthOf(status),
+          ),
+      ]);
+      if (ticket != _boardSeq || _disposed) return;
+
+      for (var index = 0; index < boardStatuses.length; index++) {
+        final status = boardStatuses[index];
+        _columns[status] = SubmissionColumn(
+          rows: pages[index].submissions,
+          total: pages[index].total,
+        );
+      }
+      _isLoading = false;
+      _boardError = null;
+      notifyListeners();
+    } catch (e) {
+      if (ticket != _boardSeq || _disposed) return;
+      _isLoading = false;
+      _boardError = e.toString();
+      notifyListeners();
+    }
+  }
+
+  /// How many rows a column is read back with: what is on screen, and at
+  /// least one page.
+  int _loadedLengthOf(SubmissionStatus status) {
+    final loaded = _columns[status]!.rows.length;
+    return loaded > kReceptionSubmissionsPageSize
+        ? loaded
+        : kReceptionSubmissionsPageSize;
+  }
+
   @override
   void dispose() {
     _disposed = true;
     _searchDebounce?.cancel();
+    _liveRefreshTimer?.cancel();
+    _documentChanges?.cancel();
+    _documentChanges = null;
     super.dispose();
   }
 
@@ -244,6 +341,7 @@ class ReceptionQueueProvider extends ChangeNotifier {
   /// Each column is read on its own, so every count on the board is the
   /// server's exact count for that column and not the size of one page.
   Future<void> loadSubmissions() async {
+    final ticket = ++_boardSeq;
     _isLoading = true;
     _boardError = null;
     notifyListeners();
@@ -253,6 +351,8 @@ class ReceptionQueueProvider extends ChangeNotifier {
         for (final status in boardStatuses)
           _repository.getSubmissionsPage(status: status),
       ]);
+      // A newer read owns the board and clears the loading state when it ends.
+      if (ticket != _boardSeq || _disposed) return;
 
       for (var index = 0; index < boardStatuses.length; index++) {
         final status = boardStatuses[index];
@@ -266,6 +366,7 @@ class ReceptionQueueProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     } catch (e) {
+      if (ticket != _boardSeq || _disposed) return;
       _isLoading = false;
       _boardError = e.toString();
       notifyListeners();
@@ -291,6 +392,10 @@ class ReceptionQueueProvider extends ChangeNotifier {
         status: status,
         offset: column.rows.length,
       );
+      // A board write during this read replaced the column. Appending to the
+      // old one would undo that write, and the page was read at an offset that
+      // no longer lines up with the rows on screen, so it is dropped.
+      if (!identical(_columns[status], column)) return;
       _columns[status] = SubmissionColumn(
         rows: <Submission>[...column.rows, ...page.submissions],
         total: column.total,
