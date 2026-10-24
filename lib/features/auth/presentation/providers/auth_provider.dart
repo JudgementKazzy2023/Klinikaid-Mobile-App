@@ -13,9 +13,11 @@ import '../../domain/verification_state.dart';
 import '../../domain/patient_record_state.dart';
 import '../../data/verification_service.dart';
 import '../../data/patient_provisioning_service.dart';
+import '../../data/password_reset_service.dart';
 import '../../data/session_activity_service.dart';
 import '../../domain/password_reset_result.dart';
 import '../../domain/password_change_result.dart';
+import '../../domain/signup_outcome.dart';
 import '../../data/mfa_service.dart';
 import '../../domain/login_outcome.dart';
 
@@ -26,6 +28,7 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
   final ProfilesRepository _profilesRepo;
   final VerificationService _verificationService;
   final PatientProvisioningService _patientProvisioningService;
+  final PasswordResetService _passwordResetService;
   final PermissionService _permissionService;
   final SessionActivityService _activityService;
   final MfaService _mfaService;
@@ -149,6 +152,7 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
     ProfilesRepository? profilesRepo,
     VerificationService? verificationService,
     PatientProvisioningService? patientProvisioningService,
+    PasswordResetService? passwordResetService,
     PermissionService? permissionService,
     SessionActivityService? activityService,
     MfaService? mfaService,
@@ -159,6 +163,8 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
         _verificationService = verificationService ?? SupabaseVerificationService(),
         _patientProvisioningService =
             patientProvisioningService ?? SupabasePatientProvisioningService(),
+        _passwordResetService = passwordResetService ??
+            SupabasePasswordResetService.forClient(client ?? Supabase.instance.client),
         _permissionService = permissionService ??
             SupabasePermissionService(client: client ?? Supabase.instance.client),
         _activityService = activityService ?? SessionActivityService(),
@@ -455,27 +461,40 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
     notifyListeners();
   }
 
-  /// Triggers server-side secure password reset Edge Function request-password-reset.
+  /// Asks the server to send a password reset link for [email].
+  ///
+  /// The deployed `request-password-reset` function always answers HTTP 200
+  /// `{success:true}`, whether or not [email] has an account, and it adds a
+  /// fixed delay. So a non-2xx status seen here comes from the gateway or the
+  /// transport, never from the account. Only the gateway's 429 (too many
+  /// requests) and failures to get any answer or a 5xx are reported as
+  /// failures. Other 4xx statuses are reported as [PasswordResetResult.success].
+  /// Reporting a failed request as success would tell the user to check an
+  /// inbox for a link that was never sent.
   Future<PasswordResetResult> sendPasswordReset(String email) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
+    final result = await _requestResetOutcome(email);
+
+    _isLoading = false;
+    notifyListeners();
+    return result;
+  }
+
+  Future<PasswordResetResult> _requestResetOutcome(String email) async {
     try {
-      await _client.functions.invoke(
-        'request-password-reset',
-        body: {'email': email},
-      );
-      
-      _isLoading = false;
-      notifyListeners();
+      await _passwordResetService.requestReset(email);
       return PasswordResetResult.success;
+    } on FunctionException catch (e) {
+      if (e.status == 429) return PasswordResetResult.rateLimited;
+      return e.status >= 500
+          ? PasswordResetResult.retryableFailure
+          : PasswordResetResult.success;
     } catch (e) {
-      // Even on exception/error, return success to maintain uniform outcome
-      // and prevent account enumeration via timing or client-side error states
-      _isLoading = false;
-      notifyListeners();
-      return PasswordResetResult.success;
+      debugPrint('[AuthProvider sendPasswordReset] no answer from the server: $e');
+      return PasswordResetResult.retryableFailure;
     }
   }
 
@@ -618,7 +637,10 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
   }
 
   /// Registers a new user with patient demographic metadata and inserts patient details.
-  Future<bool> signUp({
+  ///
+  /// The result says how far registration got, so the caller can show the
+  /// matching recovery message. See [SignUpOutcome].
+  Future<SignUpOutcome> signUp({
     required String email,
     required String password,
     required String firstName,
@@ -642,83 +664,79 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
           'role': 'patient',
         },
       );
-      _session = response.session;
-      _user = response.user;
+      final user = response.user;
+      final session = response.session;
+      if (user == null || session == null) {
+        // Email confirmation is required, so there is no session. The patient
+        // record is written by an authenticated call, which cannot run without
+        // one, so nothing is provisioned here. The account is not signed in.
+        return _endFailedSignUp(SignUpOutcome.noSession, kSignUpNoSessionMessage);
+      }
+      _session = session;
+      _user = user;
 
-      if (_user != null) {
-        final provisionedPatient = await _provisionPatientAfterSignUp(
-          firstName: firstName,
-          lastName: lastName,
-          dateOfBirth: dateOfBirth,
-          gender: gender,
-          contactNumber: contactNumber,
-          email: email,
-          address: address,
-        );
-        if (provisionedPatient == null) {
-          return false;
-        }
-        _patient = provisionedPatient;
-        _isOnboarded = true;
+      final provisionedPatient = await _provisionPatientAfterSignUp(
+        firstName: firstName,
+        lastName: lastName,
+        dateOfBirth: dateOfBirth,
+        gender: gender,
+        contactNumber: contactNumber,
+        email: email,
+        address: address,
+      );
+      if (provisionedPatient == null) {
+        // The provisioning step has already ended the sign-up with its message.
+        return SignUpOutcome.failed;
+      }
+      _patient = provisionedPatient;
+      _isOnboarded = true;
 
-        // Record the privacy policy consent immediately
-        final profile = await _profilesRepo.getProfile(_user!.id);
-        final updatedProfile = Profile(
-          id: profile.id,
-          fullName: fullName,
-          role: profile.role,
-          roleId: profile.roleId,
-          department: profile.department,
-          employeeType: profile.employeeType,
-          isActive: profile.isActive,
-          acceptedPrivacyAt: DateTime.now(),
-          emailVerifiedAt: profile.emailVerifiedAt,
-          createdAt: profile.createdAt,
-          updatedAt: DateTime.now(),
-        );
-        _profile = await _profilesRepo.updateProfile(updatedProfile);
+      // The patient row exists from here on. A failure in the steps below must
+      // not be reported as a failed registration, or the user would retry and
+      // hit "already registered" with no way forward.
+      var codeSent = false;
+      try {
+        _profile = await _profilesRepo.recordPrivacyAcceptance(user.id, DateTime.now());
         _hasConsented = true;
-
         // Automatically send verification code upon successful signup
-        final sent = await sendVerificationCode(email);
-        if (!sent) {
-          // If sending fails, clean up local session
-          await _client.auth.signOut().catchError((_) {});
-          _user = null;
-          _session = null;
-          _profile = null;
-          _patient = null;
-          _permissions = const <String>{};
-          _permissionLoadState = PermissionLoadState.idle;
-          _permissionLoadError = null;
-          _hasConsented = false;
-          _isOnboarded = false;
-          _isLoading = false;
-          notifyListeners();
-          return false;
-        }
+        codeSent = await sendVerificationCode(email);
+      } catch (e) {
+        debugPrint('[AuthProvider signUp] setup after provisioning failed: $e');
+      }
+      if (!codeSent) {
+        return _endFailedSignUp(SignUpOutcome.setupIncomplete, kSignUpSetupIncompleteMessage);
       }
 
       _isLoading = false;
       notifyListeners();
-      return true;
+      return SignUpOutcome.registered;
+    } on AuthException catch (e) {
+      return _endFailedSignUp(SignUpOutcome.failed, e.message);
     } catch (e) {
-      _errorMessage = e is AuthException ? e.message : e.toString();
-      // Safe cleanup of local states on failure (orphan strategy: accept orphan but clean session)
-      await _client.auth.signOut().catchError((_) {});
-      _user = null;
-      _session = null;
-      _profile = null;
-      _patient = null;
-      _permissions = const <String>{};
-      _permissionLoadState = PermissionLoadState.idle;
-      _permissionLoadError = null;
-      _hasConsented = false;
-      _isOnboarded = false;
-      _isLoading = false;
-      notifyListeners();
-      return false;
+      return _endFailedSignUp(SignUpOutcome.failed, e.toString());
     }
+  }
+
+  /// Ends a sign-up that did not finish: signs the local session out, clears
+  /// the account state and shows [message].
+  ///
+  /// The message is set after the identity reset, because assigning `_user`
+  /// clears the error message.
+  Future<SignUpOutcome> _endFailedSignUp(SignUpOutcome outcome, String message) async {
+    await _client.auth.signOut().catchError((_) {});
+    _user = null;
+    _session = null;
+    _profile = null;
+    _patient = null;
+    _permissions = const <String>{};
+    _permissionLoadState = PermissionLoadState.idle;
+    _permissionLoadError = null;
+    _hasConsented = false;
+    _isOnboarded = false;
+    _isLoading = false;
+    _errorMessage = message;
+    notifyListeners();
+    return outcome;
   }
 
   Future<Patient?> _provisionPatientAfterSignUp({
@@ -861,31 +879,28 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
     _errorMessage = null;
     notifyListeners();
 
-    try {
-      // 1. Update profiles table (write directly to public.profiles.accepted_privacy_at)
-      final currentUser = _user;
-      if (currentUser != null) {
-        final profile = _profile ?? await _profilesRepo.getProfile(currentUser.id);
-        final updatedProfile = Profile(
-          id: profile.id,
-          fullName: profile.fullName,
-          role: profile.role,
-          roleId: profile.roleId,
-          department: profile.department,
-          employeeType: profile.employeeType,
-          isActive: profile.isActive,
-          acceptedPrivacyAt: DateTime.now(),
-          emailVerifiedAt: profile.emailVerifiedAt,
-          createdAt: profile.createdAt,
-          updatedAt: DateTime.now(),
-        );
-        _profile = await _profilesRepo.updateProfile(updatedProfile);
-      }
+    // Consent without an account to attach it to is not consent. Reporting
+    // success here would open the app with nothing recorded on the server.
+    final currentUser = _user;
+    if (currentUser == null) {
+      _errorMessage = 'Your session has expired. Sign in again to accept the agreement.';
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
 
+    try {
+      // Same write the web agreement page makes: the consent timestamp only.
+      _profile = await _profilesRepo.recordPrivacyAcceptance(currentUser.id, DateTime.now());
       _hasConsented = true;
       _isLoading = false;
       notifyListeners();
       return true;
+    } on Failure catch (e) {
+      _errorMessage = e.message;
+      _isLoading = false;
+      notifyListeners();
+      return false;
     } catch (e) {
       _errorMessage = e is AuthException ? e.message : e.toString();
       _isLoading = false;

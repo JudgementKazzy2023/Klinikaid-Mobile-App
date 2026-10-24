@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../providers/auth_provider.dart';
 import '../../domain/registration_validators.dart';
+import '../../domain/signup_outcome.dart';
 import '../../../../core/models/patient.dart';
 import '../widgets/privacy_policy_modal.dart';
 import '../widgets/terms_and_conditions_modal.dart';
@@ -111,7 +112,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     if (_formKey.currentState!.validate() && _dobError == null) {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final success = await authProvider.signUp(
+      final outcome = await authProvider.signUp(
         email: _emailController.text.trim(),
         password: _passwordController.text,
         firstName: _firstNameController.text.trim(),
@@ -122,7 +123,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         address: _addressController.text.trim(),
       );
 
-      if (success && mounted) {
+      // Every other outcome leaves its recovery message in the provider's error.
+      if (outcome == SignUpOutcome.registered && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Registration successful! Please check your email for the verification code.'),
