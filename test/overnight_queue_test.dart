@@ -33,7 +33,10 @@ void main() {
       expect(request.url.path, '/rest/v1/patient_queue');
       expect(request.url.queryParameters['department'], 'eq.laboratory');
       expect(request.url.queryParameters['status'], 'in.("waiting","in_progress")');
-      expect(request.url.queryParameters['order'], 'created_at.asc.nullslast');
+      // The order is total: oldest first, then the primary key, so a page
+      // boundary cannot skip or repeat an entry that shares a timestamp.
+      expect(request.url.queryParameters['order'],
+        'created_at.asc.nullslast,id.asc.nullslast');
       expect(request.url.queryParameters.containsKey('created_at'), isFalse);
       final data = [
         for (var i = 1; i <= 2; i++) {
@@ -44,12 +47,17 @@ void main() {
         },
       ];
       return http.Response(jsonEncode(data), 200, request: request,
-        headers: {'content-type': 'application/json'});
+        headers: {
+          'content-type': 'application/json',
+          // The exact count of the rows the filter matched.
+          'content-range': '0-1/2',
+        });
     }));
     final repo = DepartmentRepository(client: client)..adminDepartmentOverride = 'laboratory';
     final result = await repo.getActiveQueue();
-    expect(result.map((e) => e.id), [1, 2]);
-    expect(result.first.createdAt.isBefore(result.last.createdAt), isTrue);
+    expect(result.entries.map((e) => e.id), [1, 2]);
+    expect(result.total, 2);
+    expect(result.entries.first.createdAt.isBefore(result.entries.last.createdAt), isTrue);
     await client.dispose();
     client.fakeAuth.dispose();
   });

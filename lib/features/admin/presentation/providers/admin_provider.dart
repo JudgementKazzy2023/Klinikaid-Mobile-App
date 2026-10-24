@@ -581,7 +581,8 @@ class AdminProvider extends ChangeNotifier {
 
     try {
       _deptRepository.adminDepartmentOverride = department;
-      _deptQueueEntries = await _deptRepository.getActiveQueue();
+      final queue = await _deptRepository.getActiveQueue();
+      _deptQueueEntries = queue.entries;
     } catch (e) {
       _deptQueueError = e.toString();
     } finally {

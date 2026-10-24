@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../providers/reception_queue_provider.dart';
 import '../widgets/submission_card.dart';
 import '../../domain/submission.dart';
+import '../../domain/submission_status.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 
 class ReceptionQueueScreen extends StatefulWidget {
@@ -72,16 +73,68 @@ class _ReceptionQueueScreenState extends State<ReceptionQueueScreen> {
     );
   }
 
+  /// The state of a board read that failed.
+  ///
+  /// A failed read is not an empty board: the empty state would tell reception
+  /// that no document was ever uploaded while the read is broken.
+  Widget _buildErrorState(
+    BuildContext context,
+    ReceptionQueueProvider provider,
+  ) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.cloud_off_rounded,
+              size: 64,
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'The submissions could not be loaded.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.8),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              provider.boardError ?? 'Unknown error.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+              ),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              key: const Key('btn_retry_submissions'),
+              onPressed: provider.loadSubmissions,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildTabList(
     BuildContext context,
-    List<Submission> submissions,
+    SubmissionStatus status,
     String emptyMessage,
     IconData emptyIcon,
     ReceptionQueueProvider provider,
   ) {
-    final filtered = _filterList(submissions);
+    final loaded = provider.submissionsOf(status);
+    final filtered = _filterList(loaded);
+    final total = provider.totalOf(status);
 
-    if (filtered.isEmpty) {
+    if (filtered.isEmpty && !provider.hasMoreOf(status)) {
       return RefreshIndicator(
         onRefresh: () => provider.loadSubmissions(),
         child: SingleChildScrollView(
@@ -97,26 +150,109 @@ class _ReceptionQueueScreenState extends State<ReceptionQueueScreen> {
 
     return RefreshIndicator(
       onRefresh: () => provider.loadSubmissions(),
-      child: ListView.builder(
-        padding: const EdgeInsets.all(16.0),
-        itemCount: filtered.length,
-        itemBuilder: (context, index) {
-          final submission = filtered[index];
-          return SubmissionCard(
-            submission: submission,
-            onTap: () {
-              context.go('/reception/document/${submission.id}');
-            },
-          );
-        },
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                // The search runs over the pages that are on screen, so the
+                // label says so instead of claiming the whole column.
+                _searchQuery.isEmpty
+                    ? 'Showing ${loaded.length} of $total'
+                    : '${filtered.length} of ${loaded.length} loaded documents match',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16.0),
+              itemCount: filtered.length,
+              itemBuilder: (context, index) {
+                final submission = filtered[index];
+                return SubmissionCard(
+                  submission: submission,
+                  onTap: () {
+                    context.go('/reception/document/${submission.id}');
+                  },
+                );
+              },
+            ),
+          ),
+          _buildLoadMore(context, status, provider),
+        ],
       ),
     );
   }
 
-  Widget _buildTabHeader(String title, int count, ThemeData theme) {
+  /// The "load more" control of a board column.
+  ///
+  /// The columns are read page by page, so the column says how much of the
+  /// server's count is on screen and offers the next page.
+  Widget _buildLoadMore(
+    BuildContext context,
+    SubmissionStatus status,
+    ReceptionQueueProvider provider,
+  ) {
+    final hasMore = provider.hasMoreOf(status);
+    final error = provider.moreErrorOf(status);
+    final loading = provider.isLoadingMoreOf(status);
+    if (!hasMore && error == null) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Column(
+        children: [
+          if (error != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4.0),
+              child: Text(
+                error,
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 11, color: theme.colorScheme.error),
+              ),
+            ),
+          FilledButton.icon(
+            key: Key('btn_load_more_${status.name}'),
+            icon: loading
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.expand_more_rounded, size: 18),
+            label: Text(loading ? 'Loading...' : 'Load more'),
+            onPressed: loading ? null : () => provider.loadMore(status),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The count of a board column, or null when the count is unknown.
+  ///
+  /// A count of zero would claim the column is empty. While the board is
+  /// loading and after a failed read nobody could measure it, so the count is
+  /// left out instead.
+  int? _knownCount(ReceptionQueueProvider provider, int count) {
+    if (provider.isLoading || provider.boardError != null) return null;
+    return count;
+  }
+
+  /// The header of a board column.
+  ///
+  /// The count is the server's exact count for the column. It is left out
+  /// while the board is loading and after a failed read: a count of zero
+  /// would claim the column is empty when nobody could measure it.
+  Widget _buildTabHeader(String title, int? count, ThemeData theme) {
     return Tab(
       child: Text(
-        '$title ($count)',
+        count == null ? title : '$title ($count)',
         style: const TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w600,
@@ -190,20 +326,37 @@ class _ReceptionQueueScreenState extends State<ReceptionQueueScreen> {
                       unselectedLabelColor: theme.colorScheme.onSurface.withValues(alpha: 0.6),
                       indicatorSize: TabBarIndicatorSize.tab,
                       tabs: [
-                        _buildTabHeader('Pending', provider.submittedSubmissions.length, theme),
-                        _buildTabHeader('Approved', provider.approvedSubmissions.length, theme),
-                        _buildTabHeader('Rejected', provider.rejectedSubmissions.length, theme),
+                        _buildTabHeader(
+                          'Pending',
+                          _knownCount(provider, provider.pendingTotal),
+                          theme,
+                        ),
+                        _buildTabHeader(
+                          'Approved',
+                          _knownCount(provider, provider.approvedTotal),
+                          theme,
+                        ),
+                        _buildTabHeader(
+                          'Rejected',
+                          _knownCount(provider, provider.rejectedTotal),
+                          theme,
+                        ),
                       ],
                     ),
                     Expanded(
                       child: provider.isLoading
                           ? const Center(child: CircularProgressIndicator())
+                          : provider.boardError != null
+                          // A failed read is not an empty board: reception
+                          // reading three empty columns would conclude there
+                          // are no referrals while every upload sits unseen.
+                          ? _buildErrorState(context, provider)
                           : TabBarView(
                               children: [
                                 // Pending Tab
                                 _buildTabList(
                                   context,
-                                  provider.submittedSubmissions,
+                                  SubmissionStatus.submitted,
                                   'No pending documents.',
                                   Icons.assignment_turned_in_outlined,
                                   provider,
@@ -211,7 +364,7 @@ class _ReceptionQueueScreenState extends State<ReceptionQueueScreen> {
                                 // Approved Tab
                                 _buildTabList(
                                   context,
-                                  provider.approvedSubmissions,
+                                  SubmissionStatus.approved,
                                   'No approved documents.',
                                   Icons.check_circle_outline_rounded,
                                   provider,
@@ -219,7 +372,7 @@ class _ReceptionQueueScreenState extends State<ReceptionQueueScreen> {
                                 // Rejected Tab
                                 _buildTabList(
                                   context,
-                                  provider.rejectedSubmissions,
+                                  SubmissionStatus.rejected,
                                   'No rejected documents.',
                                   Icons.highlight_off_rounded,
                                   provider,

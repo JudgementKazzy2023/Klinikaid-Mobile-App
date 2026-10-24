@@ -26,6 +26,61 @@ class PagedReadResult {
   bool get truncated => rows.length < total;
 }
 
+/// One page of a paged read, plus the exact number of rows the filter matched.
+class PagedPageResult {
+  const PagedPageResult({required this.rows, required this.total});
+
+  /// The rows of this page.
+  final List<Map<String, dynamic>> rows;
+
+  /// The server's exact count for the same filter, independent of the page size.
+  final int total;
+}
+
+/// Reads one page of a result set and the exact number of rows its filter matched.
+///
+/// The page is read with a range, so the server answers with the rows of that
+/// range only. The order is the caller's sort plus [uniqueOrderColumn], the
+/// primary key that makes the sort a total order: two rows that share a sort
+/// value keep a fixed place in the order, so a page boundary cannot skip or
+/// repeat one of them.
+///
+/// The exact count is asked for with the first page only. The count costs the
+/// server a full scan and the number does not change between the pages of one
+/// read, so a later page keeps the total of the first one instead of paying for
+/// a second count.
+Future<PagedPageResult> readPage(
+  PostgrestTransformBuilder<PostgrestList> query, {
+  required String uniqueOrderColumn,
+  required int offset,
+  bool uniqueOrderAscending = false,
+  int pageSize = kPagedReadPageSize,
+}) async {
+  assert(
+    uniqueOrderColumn.trim().isNotEmpty,
+    'readPage needs the unique tiebreaker column (the table primary key).',
+  );
+  assert(offset >= 0, 'readPage needs a non-negative offset.');
+
+  // The tiebreaker turns the caller's sort into a total order.
+  final ordered = query.order(uniqueOrderColumn, ascending: uniqueOrderAscending);
+
+  final List<Map<String, dynamic>> rows;
+  final int total;
+  if (offset == 0) {
+    final response = await ordered
+        .range(offset, offset + pageSize - 1)
+        .count(CountOption.exact);
+    rows = response.data;
+    total = response.count;
+  } else {
+    rows = await ordered.range(offset, offset + pageSize - 1);
+    total = 0;
+  }
+
+  return PagedPageResult(rows: rows, total: total);
+}
+
 /// Reads every row a filter matches, one page at a time.
 ///
 /// [query] is a PostgREST builder with the filters already applied and with
