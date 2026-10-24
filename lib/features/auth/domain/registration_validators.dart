@@ -77,6 +77,10 @@ class RegistrationValidators {
   static const addressFieldMessage =
       'Address is required and must be no more than $addressMaxLength characters.';
 
+  /// For forms where the address is optional (specialist add-patient).
+  static const addressTooLongMessage =
+      'Address must be no more than $addressMaxLength characters.';
+
   /// Address is required and at most 255 characters (web validateAddress).
   static bool validateAddress(String address) {
     final trimmed = address.trim();

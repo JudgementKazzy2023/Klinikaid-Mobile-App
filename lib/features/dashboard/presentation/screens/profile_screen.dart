@@ -118,6 +118,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (success) {
         setState(() {
           _isEditing = false;
+          // Show what was stored: +639… is saved as 09….
+          _contactController.text = RegistrationValidators.normalizeContactNumber(
+            _contactController.text,
+          );
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

@@ -294,7 +294,7 @@ class AddPatientFormState extends State<AddPatientForm> {
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) return null;
                     if (!RegistrationValidators.validateAddress(value)) {
-                      return RegistrationValidators.addressFieldMessage;
+                      return RegistrationValidators.addressTooLongMessage;
                     }
                     return null;
                   },

@@ -88,7 +88,9 @@ void main() {
     await save(tester);
 
     expect(find.text('Invalid email address'), findsOneWidget);
-    expect(find.text(RegistrationValidators.addressFieldMessage), findsOneWidget);
+    expect(find.text(RegistrationValidators.addressTooLongMessage), findsOneWidget);
+    // The field is optional here, so it must not claim the address is required.
+    expect(find.text(RegistrationValidators.addressFieldMessage), findsNothing);
     expect(provider.calls, isEmpty);
   });
 }
