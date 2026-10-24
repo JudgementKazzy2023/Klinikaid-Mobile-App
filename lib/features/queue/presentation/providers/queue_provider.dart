@@ -29,13 +29,13 @@ class QueueProvider extends ChangeNotifier {
   List<PatientQueue> get queueEntries => _queueEntries;
 
   /// Returns the current active queue entry (waiting or in progress) if any.
+  ///
+  /// The rule runs on [PatientQueue.rawStatus], so a status this client does
+  /// not recognise is never active -- not even though it parses to
+  /// [QueueStatus.waiting].
   PatientQueue? get activeEntry {
     try {
-      return _queueEntries.firstWhere(
-        (q) =>
-            q.status == QueueStatus.waiting ||
-            q.status == QueueStatus.inProgress,
-      );
+      return _queueEntries.firstWhere((q) => isActiveQueueStatus(q.rawStatus));
     } catch (_) {
       return _queueEntries.isNotEmpty ? _queueEntries.first : null;
     }
@@ -69,7 +69,10 @@ class QueueProvider extends ChangeNotifier {
             (q) => CachedPatientQueue(
               id: q.id,
               patientId: q.patientId,
-              status: q.status.toJsonValue(),
+              // The raw server status, the same the dashboard caches: writing
+              // the canonicalised value here would turn an unknown status into
+              // `waiting` for every later offline read.
+              status: q.rawStatus,
               department: q.department.name,
               triageNotes: q.triageNotes,
               priorityLevel: q.priorityLevel.name,
@@ -110,6 +113,10 @@ class QueueProvider extends ChangeNotifier {
               id: driftQ.id,
               patientId: driftQ.patientId,
               status: QueueStatus.fromString(driftQ.status),
+              // Keep the cached string verbatim: [QueueStatus.fromString]
+              // maps unknown values to `waiting`, and only the raw spelling
+              // tells an unknown status apart from a real waiting one.
+              rawStatus: driftQ.status,
               department:
                   Department.fromString(driftQ.department) ??
                   Department.laboratory,

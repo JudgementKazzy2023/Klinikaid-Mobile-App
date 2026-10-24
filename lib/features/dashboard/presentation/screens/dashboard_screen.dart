@@ -107,47 +107,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ),
 
-                // Offline Notice
-                if (provider.isOffline)
+                // Data source notice: a failed read is shown as stale data,
+                // never as the server's answer.
+                if (provider.isStale)
                   SliverToBoxAdapter(
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.orange.withValues(alpha: 0.3), width: 1.5),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.cloud_off_rounded, color: Colors.orange, size: 20),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Offline Mode',
-                                  style: TextStyle(
-                                    color: Theme.of(context).colorScheme.onSurface,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'Displaying cached clinic data. Reconnect to sync.',
-                                  style: TextStyle(
-                                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                    child: _buildStaleBanner(provider),
                   ),
 
                 // Dashboard Content
@@ -221,7 +185,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                       const SizedBox(height: 12),
 
-                      if (provider.isLoading && provider.pendingDocumentsCount == 0 && provider.activeQueueEntry == null && provider.latestRecord == null)
+                      if (provider.dataState == DashboardDataState.error)
+                        _buildErrorState(provider)
+                      else if (provider.isLoading && provider.pendingDocumentsCount == 0 && provider.activeQueueEntry == null && provider.latestRecord == null)
                         Center(
                           child: Padding(
                             padding: const EdgeInsets.symmetric(vertical: 40.0),
@@ -347,7 +313,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   ],
                                 )
                               : Text(
-                                  'Not currently in triage queue.',
+                                  // Mirror of the web patient dashboard's
+                                  // "Not In Queue": only a row still waiting
+                                  // or in progress counts as the queue, so a
+                                  // finished visit lands here instead of
+                                  // being shown as the current queue.
+                                  'Not In Queue',
                                   style: TextStyle(
                                     color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
                                     fontSize: 14,
@@ -411,6 +382,113 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  /// Tells the patient where the numbers on screen came from.
+  ///
+  /// A cached copy shown without this notice reads exactly like a live answer,
+  /// which is how a failed read ends up looking like "this is your current
+  /// status". The notice is never shown as a live one.
+  Widget _buildStaleBanner(DashboardProvider provider) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.3), width: 1.5),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_rounded, color: Colors.orange, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Showing cached clinic data',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  provider.errorMessage ?? 'The server could not be reached.',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: _refreshData,
+            child: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Shown when the dashboard could not be read and nothing was cached to fall
+  /// back on. The screen says the data is unknown instead of showing "no
+  /// records" and "not in the queue", which would read as "there is nothing
+  /// there".
+  Widget _buildErrorState(DashboardProvider provider) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.error.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Theme.of(context).colorScheme.error.withValues(alpha: 0.3),
+          width: 1.2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.error_outline_rounded,
+                color: Theme.of(context).colorScheme.error,
+                size: 22,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Could not load your clinic data',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            provider.errorMessage ?? 'Unknown error',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: _refreshData,
+            child: const Text('Retry'),
+          ),
+        ],
       ),
     );
   }

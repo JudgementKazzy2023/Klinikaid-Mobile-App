@@ -78,38 +78,37 @@ class AdminShell extends StatelessWidget {
   }
 
   AdminProvider _createAdminProvider(AuthProvider authProvider) {
-    final provider = AdminProvider()..loadDashboard();
-    final legacyFallback = authProvider.usesLegacyPermissionFallback;
-    final canReceptionQueue = legacyFallback ||
-        authProvider.hasAllPermissions(PermissionConstants.receptionQueue);
-    final canDepartmentRecords = legacyFallback ||
-        authProvider.hasAnyPermission(PermissionConstants.departmentRecordsAny);
-    final canSystemLogs = legacyFallback ||
-        authProvider.hasPermission(PermissionConstants.systemLogsRead);
-    final canChatbotLogs = legacyFallback ||
-        authProvider.hasPermission(PermissionConstants.chatbotLogsRead);
+    final provider = AdminProvider(permissionSource: authProvider);
 
-    if (legacyFallback || authProvider.hasPermission(PermissionConstants.staffManage)) {
+    // The reads are pinned to the permissions the web requires for the same
+    // read, so the app does not ask the server for data the account may not
+    // see. The web checks them in its page guards and in its route handlers
+    // (web: `src/app/(dashboard)/layout.tsx`,
+    // `src/app/api/admin/staff/route.ts`).
+    if (authProvider.hasPermission(PermissionConstants.profilesManage)) {
+      provider.loadDashboard();
+    }
+    if (authProvider.hasPermission(PermissionConstants.staffManage)) {
       provider.loadStaff();
     }
-    if (canReceptionQueue) {
+    if (authProvider.hasAllPermissions(PermissionConstants.receptionQueue)) {
       provider.loadQueue();
     }
-    if (canDepartmentRecords) {
+    if (authProvider.hasAnyPermission(PermissionConstants.departmentRecordsAny)) {
       provider.loadDepartmentRecords('laboratory');
       provider.loadDepartmentQueue('laboratory');
     }
-    if (canSystemLogs) {
+    if (authProvider.hasPermission(PermissionConstants.systemLogsRead)) {
       provider.loadSystemEvents();
     }
-    if (canChatbotLogs) {
+    if (authProvider.hasPermission(PermissionConstants.chatbotLogsRead)) {
       provider.loadChatbotAudit();
       provider.loadApiCost();
     }
-    if (legacyFallback || authProvider.hasPermission(PermissionConstants.ragDocumentsManage)) {
+    if (authProvider.hasPermission(PermissionConstants.ragDocumentsManage)) {
       provider.loadRag();
     }
-    if (legacyFallback || authProvider.hasPermission(PermissionConstants.rolesRead)) {
+    if (authProvider.hasPermission(PermissionConstants.rolesRead)) {
       provider.loadRbacCatalog();
     }
     return provider;

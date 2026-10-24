@@ -7,22 +7,49 @@ import '../../../../core/models/document.dart';
 import '../../../../core/repositories/documents_repository.dart';
 import '../../../../core/supabase/supabase_client.dart';
 
+/// Where the documents currently on screen come from.
+enum DocumentDataState {
+  /// The last read succeeded and returned documents: they are the server's.
+  live,
+
+  /// The last read failed: the documents on screen are a cached copy, not the
+  /// server's answer. The reason for the failure is kept.
+  stale,
+
+  /// The last read succeeded and returned nothing.
+  empty,
+
+  /// The last read failed and there was nothing cached to show.
+  error,
+}
+
 class DocumentStatusProvider extends ChangeNotifier {
   final LocalDatabase _localDb;
-  final _docsRepo = DocumentsRepository();
+  final DocumentsRepository _docsRepo;
 
   bool _isLoading = false;
   bool _isOffline = false;
   String? _errorMessage;
   List<Document> _documents = [];
+  DocumentDataState _dataState = DocumentDataState.empty;
   RealtimeChannel? _realtimeChannel;
 
-  DocumentStatusProvider(this._localDb);
+  DocumentStatusProvider(
+    this._localDb, {
+    DocumentsRepository? documentsRepository,
+  }) : _docsRepo = documentsRepository ?? DocumentsRepository();
 
   bool get isLoading => _isLoading;
   bool get isOffline => _isOffline;
   String? get errorMessage => _errorMessage;
   List<Document> get documents => _documents;
+
+  /// The state of the documents currently on screen.
+  DocumentDataState get dataState => _dataState;
+
+  /// True when the documents on screen come from the cache because the last
+  /// server read failed. They must never be presented as the server's answer.
+  bool get isStale => _dataState == DocumentDataState.stale;
 
   /// Fetches submitted documents for [uploaderId] and subscribes to Realtime review updates.
   Future<void> fetchDocumentsAndSubscribe(String uploaderId) async {
@@ -34,8 +61,13 @@ class DocumentStatusProvider extends ChangeNotifier {
       final remoteDocs = await _docsRepo.getDocumentsForPatient(uploaderId);
       _documents = remoteDocs;
       _isOffline = false;
+      _errorMessage = null;
+      _dataState = remoteDocs.isEmpty
+          ? DocumentDataState.empty
+          : DocumentDataState.live;
 
-      // Cache documents locally
+      // Cache documents locally. A successful read replaces the uploader's
+      // cache, so rows the server no longer returns cannot resurface later on.
       final cachedDocs = remoteDocs.map((doc) => CachedDocument(
         id: doc.id,
         patientId: doc.patientId,
@@ -51,22 +83,28 @@ class DocumentStatusProvider extends ChangeNotifier {
         updatedAt: doc.updatedAt,
       )).toList();
 
-      await _localDb.cacheDocuments(cachedDocs);
+      await _localDb.replaceDocumentsForUploader(uploaderId, cachedDocs);
       _isLoading = false;
       notifyListeners();
 
       // Subscribe to updates (RLS scopes so patient only sees own uploads)
       subscribeToDocumentUpdates(uploaderId);
-    } on NetworkFailure catch (_) {
-      _isOffline = true;
-      await _loadFromCache(uploaderId);
+    } on Failure catch (e) {
+      // Every read failure is the same for the patient: the server's answer is
+      // unknown, so the cached copy is shown as stale with the reason.
+      _isOffline = e is NetworkFailure;
+      await _loadFromCache(uploaderId, e.message);
     } catch (e) {
-      _errorMessage = FailureMapper.fromException(e).message;
-      await _loadFromCache(uploaderId);
+      await _loadFromCache(uploaderId, FailureMapper.fromException(e).message);
     }
   }
 
-  Future<void> _loadFromCache(String uploaderId) async {
+  /// Falls back to the cached documents of [uploaderId] after a failed read.
+  ///
+  /// The cached rows are shown, but only as stale ones: the caller is told why
+  /// the server could not be read so the screen can say so.
+  Future<void> _loadFromCache(String uploaderId, String reason) async {
+    _errorMessage = reason;
     try {
       final cachedList = await _localDb.getDocumentsForPatient(uploaderId);
       _documents = cachedList.map((driftDoc) {
@@ -90,13 +128,17 @@ class DocumentStatusProvider extends ChangeNotifier {
         );
       }).toList();
 
-      _isLoading = false;
-      notifyListeners();
+      _dataState = _documents.isEmpty
+          ? DocumentDataState.error
+          : DocumentDataState.stale;
     } catch (e) {
-      _isLoading = false;
-      _errorMessage = 'Failed to load cached documents: ${e.toString()}';
-      notifyListeners();
+      _documents = [];
+      _dataState = DocumentDataState.error;
+      _errorMessage =
+          '$reason. The cached documents could not be read either: ${e.toString()}';
     }
+    _isLoading = false;
+    notifyListeners();
   }
 
   /// Establishes realtime subscription channel for document status transitions (pending -> approved/rejected).

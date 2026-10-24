@@ -8,6 +8,7 @@ import '../../../../core/models/patient.dart';
 import '../../../../core/models/profile.dart';
 import '../../../../core/errors/failures.dart';
 import '../../../../core/permissions/permission_service.dart';
+import '../../../../core/permissions/permission_source.dart';
 import '../../domain/verification_state.dart';
 import '../../domain/patient_record_state.dart';
 import '../../data/verification_service.dart';
@@ -19,7 +20,7 @@ import '../../data/mfa_service.dart';
 import '../../domain/login_outcome.dart';
 
 /// Provider that manages authentication state, RA 10173 consent, and patient onboarding flow.
-class AuthProvider extends ChangeNotifier {
+class AuthProvider extends ChangeNotifier implements PermissionSource {
   final SupabaseClient _client;
   final PatientsRepository _patientsRepo;
   final ProfilesRepository _profilesRepo;
@@ -52,7 +53,8 @@ class AuthProvider extends ChangeNotifier {
       _patientRecordState = PatientRecordState.unknown;
       _patientRecordError = null;
       _permissions = const <String>{};
-      _permissionFallbackActive = false;
+      _permissionLoadState = PermissionLoadState.idle;
+      _permissionLoadError = null;
     }
     _activeUser = value;
   }
@@ -71,7 +73,16 @@ class AuthProvider extends ChangeNotifier {
   String? _pendingMfaFactorId;
   bool _needsMfaEnrollment = false;
   Set<String> _permissions = const <String>{};
-  bool _permissionFallbackActive = false;
+
+  /// How the last permission load ended.
+  ///
+  /// A failed load is kept apart from a load that returned no grants: the
+  /// first leaves the grants unknown and offers a retry, the second is an
+  /// answer that denies every screen.
+  PermissionLoadState _permissionLoadState = PermissionLoadState.idle;
+
+  /// Why the last permission load failed, when it failed.
+  String? _permissionLoadError;
 
   Profile? get profile => _profile;
   Patient? get patient => _patient;
@@ -89,13 +100,35 @@ class AuthProvider extends ChangeNotifier {
   bool get needsMfaEnrollment => _needsMfaEnrollment;
   bool get isAal1Pending => _pendingMfaFactorId != null || _needsMfaEnrollment;
   Set<String> get permissions => _permissions;
-  bool get permissionFallbackActive => _permissionFallbackActive;
-  bool get usesLegacyPermissionFallback =>
-      _permissionFallbackActive || _permissions.isEmpty;
 
+  /// How the last permission load ended.
+  PermissionLoadState get permissionLoadState => _permissionLoadState;
+
+  /// Why the last permission load failed, when it failed.
+  String? get permissionLoadError => _permissionLoadError;
+
+  /// Whether the account is known to hold no permission at all.
+  ///
+  /// This is a successful load that returned no grants, not a failed load: the
+  /// server answered, and the answer was "nothing". A failed load leaves
+  /// [permissionLoadState] as [PermissionLoadState.failed] and the grants
+  /// unknown, so it is never read as an empty grant set.
+  bool get hasNoPermissions =>
+      _permissionLoadState == PermissionLoadState.loaded &&
+      _permissions.isEmpty;
+
+  /// Whether the grants could not be read.
+  bool get permissionLoadFailed =>
+      _permissionLoadState == PermissionLoadState.failed;
+
+  @override
   bool hasPermission(String permission) => _permissions.contains(permission);
+
+  @override
   bool hasAllPermissions(List<String> permissions) =>
       permissions.every(_permissions.contains);
+
+  @override
   bool hasAnyPermission(List<String> permissions) =>
       permissions.any(_permissions.contains);
 
@@ -203,7 +236,8 @@ class AuthProvider extends ChangeNotifier {
        _patientRecordState = PatientRecordState.unknown;
        _patientRecordError = null;
        _permissions = const <String>{};
-       _permissionFallbackActive = false;
+       _permissionLoadState = PermissionLoadState.idle;
+       _permissionLoadError = null;
        return;
      }
 
@@ -229,7 +263,8 @@ class AuthProvider extends ChangeNotifier {
       _patientRecordState = PatientRecordState.unknown;
       _patientRecordError = null;
       _permissions = const <String>{};
-      _permissionFallbackActive = false;
+      _permissionLoadState = PermissionLoadState.idle;
+      _permissionLoadError = null;
       _hasConsented = false;
       _isOnboarded = false;
       _client.auth.signOut().catchError((_) {});
@@ -654,7 +689,8 @@ class AuthProvider extends ChangeNotifier {
           _profile = null;
           _patient = null;
           _permissions = const <String>{};
-          _permissionFallbackActive = false;
+          _permissionLoadState = PermissionLoadState.idle;
+          _permissionLoadError = null;
           _hasConsented = false;
           _isOnboarded = false;
           _isLoading = false;
@@ -675,7 +711,8 @@ class AuthProvider extends ChangeNotifier {
       _profile = null;
       _patient = null;
       _permissions = const <String>{};
-      _permissionFallbackActive = false;
+      _permissionLoadState = PermissionLoadState.idle;
+      _permissionLoadError = null;
       _hasConsented = false;
       _isOnboarded = false;
       _isLoading = false;
@@ -749,7 +786,8 @@ class AuthProvider extends ChangeNotifier {
       _profile = null;
       _patient = null;
       _permissions = const <String>{};
-      _permissionFallbackActive = false;
+      _permissionLoadState = PermissionLoadState.idle;
+      _permissionLoadError = null;
       _hasConsented = false;
       _isOnboarded = false;
       _isLoading = false;
@@ -988,7 +1026,8 @@ class AuthProvider extends ChangeNotifier {
         _patientRecordState = PatientRecordState.unknown;
         _patientRecordError = null;
         _permissions = const <String>{};
-        _permissionFallbackActive = false;
+        _permissionLoadState = PermissionLoadState.idle;
+        _permissionLoadError = null;
         _hasConsented = false;
         _isOnboarded = false;
         _isLoading = false;
@@ -1007,32 +1046,61 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> _loadPermissionsForProfile(int epoch) async {
-    final roleId = _profile?.roleId;
-    if (roleId == null || roleId.trim().isEmpty) {
+    final profile = _profile;
+
+    // Without a profile there is no account to ask about, and a patient
+    // account has no permission-gated screen: the patient area is its own.
+    // Asking the server for grants a patient never uses would only add a
+    // round trip to every sign-in.
+    if (profile == null || profile.role == UserRole.patient) {
       _permissions = const <String>{};
-      _permissionFallbackActive = _profile?.role != UserRole.patient;
-      if (_permissionFallbackActive) {
-        debugPrint('[AuthProvider] Permission routing fallback active: missing role_id.');
-      }
+      _permissionLoadState = PermissionLoadState.idle;
+      _permissionLoadError = null;
       return;
     }
 
+    _permissionLoadState = PermissionLoadState.loading;
+    _permissionLoadError = null;
+
     try {
-      final loaded = await _permissionService.loadPermissionsForRole(roleId);
+      final loaded = await _permissionService.loadPermissions();
       if (epoch != _identityEpoch) return;
+      // An empty answer is an answer: the account holds no permission. It is
+      // not a failure, and it is not a reason to fall back to the role text
+      // on the profile.
       _permissions = loaded;
-      _permissionFallbackActive = loaded.isEmpty && _profile?.role != UserRole.patient;
-      if (_permissionFallbackActive) {
-        debugPrint('[AuthProvider] Permission routing fallback active: no permissions returned.');
-      }
+      _permissionLoadState = PermissionLoadState.loaded;
     } catch (e) {
       if (epoch != _identityEpoch) return;
+      // The grants are unknown here, not empty. The account is neither routed
+      // as if it held nothing nor as if it held everything: the router shows
+      // the failure and offers a retry.
       _permissions = const <String>{};
-      _permissionFallbackActive = _profile?.role != UserRole.patient;
-      if (_permissionFallbackActive) {
-        debugPrint('[AuthProvider] Permission routing fallback active: $e');
-      }
+      _permissionLoadState = PermissionLoadState.failed;
+      _permissionLoadError = e is PermissionLoadException
+          ? e.message
+          : 'Could not read your permissions. Check your connection and retry.';
     }
+  }
+
+  /// Re-runs the permission load for the active account.
+  ///
+  /// The retry belongs to the failed state: the grants are unknown then, and
+  /// the account cannot be routed until the server answers again. A load that
+  /// succeeds replaces the failure with the answer, empty or not.
+  Future<void> retryPermissionLoad() async {
+    if (_isDisposed) return;
+    if (_user == null || _profile == null) return;
+    if (_profile?.role == UserRole.patient) return;
+
+    final epoch = _identityEpoch;
+    _permissionLoadState = PermissionLoadState.loading;
+    _permissionLoadError = null;
+    notifyListeners();
+
+    await _loadPermissionsForProfile(epoch);
+    if (_isDisposed) return;
+    notifyListeners();
   }
 
   /// Triggers Edge Function to send email verification code.

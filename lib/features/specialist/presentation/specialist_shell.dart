@@ -26,12 +26,10 @@ class SpecialistShell extends StatelessWidget {
           ChangeNotifierProvider<SpecialistProvider>(
             create: (context) {
               final provider = SpecialistProvider();
-              if (auth.usesLegacyPermissionFallback ||
-                  auth.hasPermission(PermissionConstants.specialistAnalytics)) {
+              if (auth.hasPermission(PermissionConstants.specialistAnalytics)) {
                 provider.loadDashboard();
               }
-              if (auth.usesLegacyPermissionFallback ||
-                  auth.hasPermission(PermissionConstants.specialistPatients)) {
+              if (auth.hasPermission(PermissionConstants.specialistPatients)) {
                 provider.loadDirectory();
               }
               return provider;
@@ -51,16 +49,15 @@ class _SpecialistBottomNavBar extends StatelessWidget {
 
   List<_SpecialistNavItem> _items(BuildContext context) {
     final auth = Provider.of<AuthProvider>(context, listen: false);
-    final legacyFallback = auth.usesLegacyPermissionFallback;
     return [
-      if (legacyFallback || auth.hasPermission(PermissionConstants.specialistAnalytics))
+      if (auth.hasPermission(PermissionConstants.specialistAnalytics))
         const _SpecialistNavItem(
           path: '/specialist/dashboard',
           icon: Icons.dashboard_outlined,
           activeIcon: Icons.dashboard_rounded,
           label: 'Dashboard',
         ),
-      if (legacyFallback || auth.hasPermission(PermissionConstants.specialistPatients))
+      if (auth.hasPermission(PermissionConstants.specialistPatients))
         const _SpecialistNavItem(
           path: '/specialist/patients',
           icon: Icons.people_outline_rounded,
@@ -90,6 +87,11 @@ class _SpecialistBottomNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = _items(context);
     final selectedIndex = _calculateSelectedIndex(context, items);
+
+    // A bar needs at least two entries to be a bar. An account that may open
+    // neither the dashboard nor the patient list keeps the profile entry
+    // only, and a one-entry bar is not a bar.
+    if (items.length < 2) return const SizedBox.shrink();
 
     return Container(
       decoration: BoxDecoration(

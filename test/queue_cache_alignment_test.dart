@@ -188,7 +188,17 @@ void main() {
         remote = [row(1, 'A', status.toJsonValue())];
         await dashboard.fetchDashboardData('A', 'uploader-A');
         expect(dashboard.errorMessage, isNull);
-      expect(dashboard.activeQueueEntry!.status, status);
+        // Active-only, live and offline alike: completed and cancelled are
+        // history and never the current queue (web filters
+        // `status IN ('waiting','in_progress')`).
+        final isActive =
+            status == QueueStatus.waiting ||
+            status == QueueStatus.inProgress;
+        if (isActive) {
+          expect(dashboard.activeQueueEntry!.status, status);
+        } else {
+          expect(dashboard.activeQueueEntry, isNull);
+        }
         expect(
           (await db.getQueueForPatient('A')).single.status,
           status.toJsonValue(),
@@ -197,7 +207,11 @@ void main() {
         final fresh = DashboardProvider(db);
         await fresh.fetchDashboardData('A', 'uploader-A');
         expect(fresh.isOffline, isTrue);
-        expect(fresh.activeQueueEntry!.status, status);
+        if (isActive) {
+          expect(fresh.activeQueueEntry!.status, status);
+        } else {
+          expect(fresh.activeQueueEntry, isNull);
+        }
         fresh.dispose();
       },
     );
@@ -447,7 +461,10 @@ void main() {
       await tester.pumpWidget(screen(const DashboardScreen()));
       await tester.pumpAndSettle();
       expect(find.text('Now Being Called'), findsOneWidget);
-      expect(find.text('Offline Mode'), findsOneWidget);
+      // The failed read is shown as stale data with the reason that broke it,
+      // not as the server's current answer.
+      expect(find.text('Showing cached clinic data'), findsOneWidget);
+      expect(find.textContaining('Connection failed'), findsOneWidget);
       offline = false;
       remote = [];
       await tester.runAsync(

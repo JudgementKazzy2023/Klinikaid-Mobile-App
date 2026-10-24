@@ -59,6 +59,8 @@ void main() {
   );
 
   setUp(() async {
+    // These tests cover the kill switch: turned on, it must block every write.
+    PatientSubmissionContainment.activeForTesting = true;
     requests.clear();
     client = SupabaseClient(
       'https://example.invalid',
@@ -123,6 +125,7 @@ void main() {
   });
 
   tearDown(() async {
+    PatientSubmissionContainment.activeForTesting = false;
     uploads.dispose();
     await db.close();
     await client.dispose();

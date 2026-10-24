@@ -170,6 +170,7 @@ class _TriageRoutingSheetState extends State<TriageRoutingSheet> {
             const SizedBox(height: 6),
             DropdownButtonFormField<String>(
               value: _selectedDepartment,
+              isExpanded: true,
               decoration: InputDecoration(
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8)),
@@ -189,81 +190,86 @@ class _TriageRoutingSheetState extends State<TriageRoutingSheet> {
             ),
             const SizedBox(height: 16),
 
-            // Vitals row (optional)
+            // Vitals (optional). The blood-pressure field keeps a full-width
+            // row: its validation error has to stay readable on narrow
+            // screens, and three fields side by side leave it ~100px wide.
             _SectionLabel(label: 'VITALS (optional)'),
             const SizedBox(height: 6),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: TextFormField(
-                    key: const Key('bp_input_field'),
-                    controller: _bpController,
-                    decoration: InputDecoration(
-                      labelText: 'Blood Press.',
-                      hintText: '120/80',
-                      errorMaxLines: 4,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8)),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 14),
-                    ),
-                    keyboardType: TextInputType.text,
-                    inputFormatters: [BloodPressureFormatter()],
-                    validator: validateBloodPressure,
+                TextFormField(
+                  key: const Key('bp_input_field'),
+                  controller: _bpController,
+                  decoration: InputDecoration(
+                    labelText: 'Blood Press.',
+                    hintText: '120/80',
+                    errorMaxLines: 4,
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 14),
                   ),
+                  keyboardType: TextInputType.text,
+                  inputFormatters: [BloodPressureFormatter()],
+                  validator: validateBloodPressure,
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextFormField(
-                    key: const Key('weight_input_field'),
-                    controller: _weightController,
-                    decoration: InputDecoration(
-                      labelText: 'Weight (kg)',
-                      hintText: '70',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8)),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 14),
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        key: const Key('weight_input_field'),
+                        controller: _weightController,
+                        decoration: InputDecoration(
+                          labelText: 'Weight (kg)',
+                          hintText: '70',
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 14),
+                        ),
+                        keyboardType:
+                            const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                          const MaxIntegerDigitsFormatter(3, maxDecimalDigits: 1),
+                        ],
+                        validator: (val) => validateVitalsValue(
+                          val ?? '',
+                          maxIntegerDigits: 3,
+                          maxDecimalDigits: 1,
+                        ),
+                      ),
                     ),
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                      const MaxIntegerDigitsFormatter(3, maxDecimalDigits: 1),
-                    ],
-                    validator: (val) => validateVitalsValue(
-                      val ?? '',
-                      maxIntegerDigits: 3,
-                      maxDecimalDigits: 1,
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextFormField(
+                        key: const Key('temp_input_field'),
+                        controller: _tempController,
+                        decoration: InputDecoration(
+                          labelText: 'Temp (°C)',
+                          hintText: '36.5',
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 14),
+                        ),
+                        keyboardType:
+                            const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                          const MaxIntegerDigitsFormatter(3, maxDecimalDigits: 1),
+                        ],
+                        validator: (val) => validateVitalsValue(
+                          val ?? '',
+                          maxIntegerDigits: 3,
+                          maxDecimalDigits: 1,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextFormField(
-                    key: const Key('temp_input_field'),
-                    controller: _tempController,
-                    decoration: InputDecoration(
-                      labelText: 'Temp (°C)',
-                      hintText: '36.5',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8)),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 14),
-                    ),
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                      const MaxIntegerDigitsFormatter(3, maxDecimalDigits: 1),
-                    ],
-                    validator: (val) => validateVitalsValue(
-                      val ?? '',
-                      maxIntegerDigits: 3,
-                      maxDecimalDigits: 1,
-                    ),
-                  ),
+                  ],
                 ),
               ],
             ),
@@ -274,6 +280,7 @@ class _TriageRoutingSheetState extends State<TriageRoutingSheet> {
             const SizedBox(height: 6),
             DropdownButtonFormField<RoutingPriority>(
               value: _selectedPriority,
+              isExpanded: true,
               decoration: InputDecoration(
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8)),

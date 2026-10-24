@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:klinikaid_mobile/core/models/profile.dart';
+import 'package:klinikaid_mobile/core/permissions/permission_constants.dart';
+import 'package:klinikaid_mobile/core/permissions/permission_service.dart';
 import 'package:klinikaid_mobile/core/routing/app_router.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 
@@ -32,10 +34,28 @@ class RouterAuth extends ChangeNotifier implements AuthProvider {
   bool isAal2 = false;
   @override
   bool isAal1Pending = false;
+  // The grants that open each role's home, as the server would answer them.
+  // Routing follows the grants, not the role text, so a staff fake must hold
+  // them for the MFA exit to land on a screen.
   @override
-  bool get usesLegacyPermissionFallback => true;
+  Set<String> get permissions => switch (profile?.role) {
+    UserRole.admin => {PermissionConstants.profilesManage},
+    UserRole.receptionist => {
+      PermissionConstants.documentsManage,
+      PermissionConstants.queueManage,
+    },
+    UserRole.departmentStaff => {PermissionConstants.recordsManageOwnDept},
+    UserRole.medicalSpecialist => {
+      PermissionConstants.specialistPatients,
+      PermissionConstants.specialistAnalytics,
+    },
+    _ => const {},
+  };
   @override
-  Set<String> get permissions => const {};
+  PermissionLoadState get permissionLoadState =>
+      profile == null || profile!.role == UserRole.patient
+      ? PermissionLoadState.idle
+      : PermissionLoadState.loaded;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -45,7 +65,8 @@ void main() {
   const homes = {
     UserRole.admin: '/admin/dashboard',
     UserRole.receptionist: '/reception/queue',
-    UserRole.departmentStaff: '/department/queue',
+    // Web's landing order sends department grants to records first.
+    UserRole.departmentStaff: '/department/records',
     UserRole.medicalSpecialist: '/specialist/dashboard',
   };
 

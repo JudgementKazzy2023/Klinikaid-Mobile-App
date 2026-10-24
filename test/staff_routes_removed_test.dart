@@ -15,6 +15,7 @@ import 'package:klinikaid_mobile/core/cache/local_database.dart';
 import 'package:klinikaid_mobile/core/models/department_record.dart';
 import 'package:klinikaid_mobile/core/models/profile.dart';
 import 'package:klinikaid_mobile/core/permissions/permission_constants.dart';
+import 'package:klinikaid_mobile/core/permissions/permission_service.dart';
 import 'package:klinikaid_mobile/core/routing/app_router.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 import 'package:klinikaid_mobile/features/department/presentation/providers/department_provider.dart';
@@ -28,12 +29,10 @@ class MockAuthProvider extends AuthProvider {
   MockAuthProvider({
     required this.mockProfile,
     this.mockPermissions = const <String>{},
-    this.mockLegacyFallback = true,
   }) : super();
 
   final Profile mockProfile;
   final Set<String> mockPermissions;
-  final bool mockLegacyFallback;
 
   @override
   bool get isAuthenticated => true;
@@ -68,7 +67,7 @@ class MockAuthProvider extends AuthProvider {
       permissions.any(mockPermissions.contains);
 
   @override
-  bool get usesLegacyPermissionFallback => mockLegacyFallback;
+  PermissionLoadState get permissionLoadState => PermissionLoadState.loaded;
 }
 
 /// The department shell would otherwise open a realtime channel, so the
@@ -167,17 +166,40 @@ void main() {
   group('the removed staff routes', () {
     const legacyPaths = ['/staff/reception', '/staff/specialist'];
 
-    final staffHomes = <UserRole, String>{
-      UserRole.receptionist: '/reception/queue',
-      UserRole.departmentStaff: '/department/queue',
-      UserRole.medicalSpecialist: '/specialist/dashboard',
-      UserRole.admin: '/admin/dashboard',
+    // Since #53 the landing screen comes from the loaded grants, not the role.
+    final staffHomes = <UserRole, (Set<String>, String)>{
+      UserRole.receptionist: (
+        const {
+          PermissionConstants.documentsManage,
+          PermissionConstants.queueManage,
+        },
+        '/reception/queue',
+      ),
+      UserRole.departmentStaff: (
+        const {PermissionConstants.recordsManageOwnDept},
+        '/department/records',
+      ),
+      UserRole.medicalSpecialist: (
+        const {
+          PermissionConstants.specialistAnalytics,
+          PermissionConstants.specialistPatients,
+        },
+        '/specialist/dashboard',
+      ),
+      UserRole.admin: (
+        const {PermissionConstants.staffManage},
+        '/admin/staff',
+      ),
     };
 
-    staffHomes.forEach((role, home) {
+    staffHomes.forEach((role, entry) {
+      final (grants, home) = entry;
       testWidgets('$role lands on $home from the old staff paths',
           (tester) async {
-        final auth = MockAuthProvider(mockProfile: profileFor(role));
+        final auth = MockAuthProvider(
+          mockProfile: profileFor(role),
+          mockPermissions: grants,
+        );
         final router = await pumpRouter(tester, auth);
 
         for (final path in legacyPaths) {
@@ -192,45 +214,6 @@ void main() {
           );
         }
       });
-    });
-
-    testWidgets('staff roles keep their home with permissions loaded too',
-        (tester) async {
-      final permissionSets = <UserRole, Set<String>>{
-        UserRole.receptionist: const {
-          PermissionConstants.documentsManage,
-          PermissionConstants.queueManage,
-        },
-        UserRole.departmentStaff: const {
-          PermissionConstants.recordsManageOwnDept,
-        },
-        UserRole.medicalSpecialist: const {
-          PermissionConstants.specialistAnalytics,
-        },
-        UserRole.admin: const {PermissionConstants.staffManage},
-      };
-
-      for (final entry in staffHomes.entries) {
-        final auth = MockAuthProvider(
-          mockProfile: profileFor(entry.key),
-          mockPermissions: permissionSets[entry.key]!,
-          mockLegacyFallback: false,
-        );
-        final router = await pumpRouter(tester, auth);
-
-        for (final path in legacyPaths) {
-          router.router.go(path);
-          await tester.pump();
-          await tester.pump();
-
-          expect(
-            router.router.state.matchedLocation,
-            entry.value,
-            reason: '${entry.key.name} must land on ${entry.value} when '
-                'opening $path',
-          );
-        }
-      }
     });
 
     testWidgets('the old staff paths are no longer routes for a patient',

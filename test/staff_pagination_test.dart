@@ -13,10 +13,13 @@ import 'package:klinikaid_mobile/features/admin/data/admin_repository.dart';
 import 'package:klinikaid_mobile/features/admin/presentation/providers/admin_provider.dart';
 import 'package:klinikaid_mobile/features/admin/presentation/screens/admin_logs_screen.dart';
 import 'package:klinikaid_mobile/features/admin/presentation/screens/admin_staff_screen.dart';
+import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
+import 'package:klinikaid_mobile/core/permissions/permission_constants.dart';
 import 'package:klinikaid_mobile/features/department/data/department_repository.dart';
 import 'package:klinikaid_mobile/features/specialist/data/specialist_repository.dart';
 import 'package:klinikaid_mobile/features/specialist/presentation/providers/specialist_provider.dart';
 import 'package:klinikaid_mobile/features/specialist/presentation/screens/specialist_directory_screen.dart';
+import 'support/logs_grant_auth.dart';
 
 /// The index of the row that only a search finds.
 ///
@@ -455,7 +458,9 @@ void main() {
     await tester.pump();
 
     expect(state.staffTotal, 1500);
-    expect(find.text('1500 personnel'), findsOneWidget);
+    // The count reads like the web's: how many of the staff the filters keep,
+    // out of the staff the server holds.
+    expect(find.text('Showing 1500 of 1500 personnel'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     state.dispose();
   });
@@ -830,9 +835,15 @@ void main() {
       state = useAdmin();
     });
 
-    await tester.pumpWidget(ChangeNotifierProvider.value(
-      value: state,
-      child: const MaterialApp(home: AdminLogsScreen()),
+    await tester.pumpWidget(ChangeNotifierProvider<AuthProvider>.value(
+      value: LogsGrantAuth(const {
+        PermissionConstants.systemLogsRead,
+        PermissionConstants.chatbotLogsRead,
+      }),
+      child: ChangeNotifierProvider.value(
+        value: state,
+        child: const MaterialApp(home: AdminLogsScreen()),
+      ),
     ));
     await tester.pumpAndSettle();
 
@@ -875,9 +886,15 @@ void main() {
       state = useAdmin();
     });
 
-    await tester.pumpWidget(ChangeNotifierProvider.value(
-      value: state,
-      child: const MaterialApp(home: AdminLogsScreen()),
+    await tester.pumpWidget(ChangeNotifierProvider<AuthProvider>.value(
+      value: LogsGrantAuth(const {
+        PermissionConstants.systemLogsRead,
+        PermissionConstants.chatbotLogsRead,
+      }),
+      child: ChangeNotifierProvider.value(
+        value: state,
+        child: const MaterialApp(home: AdminLogsScreen()),
+      ),
     ));
     await tester.pumpAndSettle();
 

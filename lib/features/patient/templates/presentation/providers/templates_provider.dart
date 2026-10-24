@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import '../../../../../core/patient_submission_containment.dart';
 import '../../../../../core/utils/uuid_generator.dart';
 import '../../data/templates_repository.dart';
+import '../../document_templates.dart';
+import '../../template_answers.dart';
 import '../../../submissions/document_dedup.dart';
 
 enum TemplateRemediation { none, signIn, verifyEmail, consent, changePassword }
@@ -47,6 +49,9 @@ class TemplatesProvider extends ChangeNotifier {
   final Map<String, String> _fieldErrors = {};
   TemplateRemediation _remediation = TemplateRemediation.none;
 
+  /// The consent fields the patient declined in the last submission.
+  List<String> _declinedConsentFields = const <String>[];
+
   bool get isLoading => _isLoading;
   bool get success => _success;
   String? get errorMessage => _errorMessage;
@@ -67,6 +72,15 @@ class TemplatesProvider extends ChangeNotifier {
           _error?.code == 'FIELD_REQUIRED' ||
           _error?.code == 'FIELD_INVALID');
 
+  /// The consent fields the patient declined in the last submission.
+  ///
+  /// A declined form consent is a valid answer, not a failure: the form is
+  /// submitted and reception reviews the decline. It is kept apart from the
+  /// account's data-privacy consent, which the auth provider tracks on its
+  /// own — declining a clinic form never withdraws the account consent and
+  /// never trips the account consent gate.
+  List<String> get lastDeclinedConsentFields => _declinedConsentFields;
+
   void resetState() {
     // UI status resets must not erase an uncertain request's identity.
     if (_isLoading ||
@@ -78,9 +92,22 @@ class TemplatesProvider extends ChangeNotifier {
     _error = null;
     _errorMessage = null;
     _success = false;
+    _declinedConsentFields = const <String>[];
     _result = null;
     _fieldErrors.clear();
     _remediation = TemplateRemediation.none;
+  }
+
+  /// The consent fields of [templateId] the patient declined in [formValues].
+  List<String> declinedFormConsentFields(
+    String templateId,
+    Map<String, dynamic> formValues,
+  ) {
+    final template = clinicTemplateById(templateId);
+    if (template == null) return const <String>[];
+    return declinedConsentFields(template, formValues)
+        .map((field) => field.key)
+        .toList();
   }
 
   void answersChanged(Map<String, String> answers) {
@@ -179,13 +206,22 @@ class TemplatesProvider extends ChangeNotifier {
       _answers = {};
       resetState();
     }
-    final answers = Map<String, String>.from(formValues);
+    // Answers are stored trimmed, the way the shared rules count them.
+    final answers = Map<String, String>.fromEntries(
+      formValues.entries.map(
+        (entry) => MapEntry(entry.key, entry.value.toString().trim()),
+      ),
+    );
     answersChanged(answers);
     _requestId ??= UuidGenerator.generateV4();
     if (!canSubmit) return false;
     final retry = outcomeUnknown;
     var requestId = _requestId!;
     final snapshot = Map<String, String>.unmodifiable(answers);
+    // A declined consent travels with the form as the declined answer it is;
+    // it never blocks the submission and it never touches the account's
+    // privacy consent.
+    _declinedConsentFields = declinedFormConsentFields(templateId, snapshot);
     _isLoading = true;
     _error = null;
     _errorMessage = null;
