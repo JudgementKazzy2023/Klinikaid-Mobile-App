@@ -59,10 +59,13 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     // The success state is the same for a known and an unknown address. Only a
     // failure that says nothing about the address keeps the form open to retry.
     setState(() {
-      if (result == PasswordResetResult.retryableFailure) {
-        _customError = kPasswordResetRetryMessage;
-      } else {
-        _showSuccessState = true;
+      switch (result) {
+        case PasswordResetResult.success:
+          _showSuccessState = true;
+        case PasswordResetResult.retryableFailure:
+          _customError = kPasswordResetRetryMessage;
+        case PasswordResetResult.rateLimited:
+          _customError = kPasswordResetRateLimitMessage;
       }
     });
   }

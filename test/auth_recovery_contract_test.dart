@@ -208,6 +208,20 @@ void main() {
       expect(provider.errorMessage, isNull);
     });
 
+    test('a 429 from the gateway is rate-limited, with no account detail', () async {
+      final provider = _buildProvider(
+        passwordResetService: _FakePasswordResetService(
+          error: const FunctionException(status: 429, reasonPhrase: 'Too Many Requests'),
+        ),
+      );
+
+      expect(
+        await provider.sendPasswordReset('jane@example.com'),
+        PasswordResetResult.rateLimited,
+      );
+      expect(provider.errorMessage, isNull);
+    });
+
     test('no answer from the server (transport failure) is retryable', () async {
       final provider = _buildProvider(
         passwordResetService: _FakePasswordResetService(
@@ -325,6 +339,18 @@ void main() {
       expect(find.text('Send Reset Link'), findsOneWidget);
       expect(find.text('Check Your Email'), findsNothing);
       expect(find.text(kPasswordResetRetryMessage), findsOneWidget);
+    });
+
+    testWidgets('a rate-limited request shows the wait message, not the retry message', (tester) async {
+      final auth = _ResetAuth([PasswordResetResult.rateLimited]);
+      await tester.pumpWidget(app(auth));
+
+      await submit(tester, 'jane@example.com');
+
+      expect(find.text('Send Reset Link'), findsOneWidget);
+      expect(find.text('Check Your Email'), findsNothing);
+      expect(find.text(kPasswordResetRateLimitMessage), findsOneWidget);
+      expect(find.text(kPasswordResetRetryMessage), findsNothing);
     });
 
     testWidgets('a retry after a failed request can reach the sent state', (tester) async {

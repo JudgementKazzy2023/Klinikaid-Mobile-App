@@ -463,12 +463,14 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
 
   /// Asks the server to send a password reset link for [email].
   ///
-  /// The result never depends on whether [email] has an account. Any answer
-  /// the server gives, including a 4xx, is reported as [PasswordResetResult.success],
-  /// because the server answers a known and an unknown address the same way.
-  /// Only a failure that says nothing about the address is retryable: no
-  /// answer at all, or a 5xx. Reporting that as success would tell the user
-  /// to check an inbox for a link that was never sent.
+  /// The deployed `request-password-reset` function always answers HTTP 200
+  /// `{success:true}`, whether or not [email] has an account, and it adds a
+  /// fixed delay. So a non-2xx status seen here comes from the gateway or the
+  /// transport, never from the account. Only the gateway's 429 (too many
+  /// requests) and failures to get any answer or a 5xx are reported as
+  /// failures. Other 4xx statuses are reported as [PasswordResetResult.success].
+  /// Reporting a failed request as success would tell the user to check an
+  /// inbox for a link that was never sent.
   Future<PasswordResetResult> sendPasswordReset(String email) async {
     _isLoading = true;
     _errorMessage = null;
@@ -486,6 +488,7 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
       await _passwordResetService.requestReset(email);
       return PasswordResetResult.success;
     } on FunctionException catch (e) {
+      if (e.status == 429) return PasswordResetResult.rateLimited;
       return e.status >= 500
           ? PasswordResetResult.retryableFailure
           : PasswordResetResult.success;
