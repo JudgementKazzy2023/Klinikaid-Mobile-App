@@ -328,5 +328,98 @@ void main() {
       await tester.pumpAndSettle();
       expect(router.router.state.matchedLocation, '/reception/queue');
     });
+
+    testWidgets(
+        'a landing route the gate rejects is refused, not bypassed',
+        (tester) async {
+      // `roles.read` alone does not open the admin area, so `/admin/rbac` is
+      // rejected by the same gate the router consults. The redirect must not
+      // treat "redirect to the rejected home" as "no change" and leave the
+      // account on the screen.
+      final auth = RouterAuthProvider(
+        state: PermissionLoadState.loaded,
+        grants: <String>{PermissionConstants.rolesRead},
+      );
+      final router = AppRouter(auth);
+
+      await tester.pumpWidget(app(auth, router));
+      router.router.go('/admin/rbac');
+      await tester.pumpAndSettle();
+      expect(router.router.state.matchedLocation, kPermissionAccessRoute);
+
+      // The same holds for the landing route itself: a grant set whose home
+      // candidate the gate rejects ends on the denial, not on the rejected
+      // screen.
+      final queueOnly = RouterAuthProvider(
+        state: PermissionLoadState.loaded,
+        grants: <String>{PermissionConstants.queueManage},
+      );
+      final queueRouter = AppRouter(queueOnly);
+      await tester.pumpWidget(app(queueOnly, queueRouter));
+      queueRouter.router.go('/department/records');
+      await tester.pumpAndSettle();
+      expect(queueRouter.router.state.matchedLocation, kPermissionAccessRoute);
+    });
+
+    testWidgets(
+        'grants with no mobile screen say so instead of claiming no permission',
+        (tester) async {
+      // `chat.access` holds a permission the server resolved, but it opens no
+      // screen of the mobile app. The access screen must say that, not that
+      // the account holds no permission.
+      final auth = RouterAuthProvider(
+        state: PermissionLoadState.loaded,
+        grants: <String>{PermissionConstants.chatAccess},
+      );
+      final router = AppRouter(auth);
+
+      await tester.pumpWidget(app(auth, router));
+      router.router.go('/reception/queue');
+      await tester.pumpAndSettle();
+
+      expect(router.router.state.matchedLocation, kPermissionAccessRoute);
+      expect(
+        find.text(
+            "Your account's permissions don't include a screen available in the mobile app. "
+            'Your access is unchanged; an administrator can assign a role that opens a screen.'),
+        findsOneWidget,
+      );
+      // It is not the empty-grant denial.
+      expect(
+        find.textContaining('does not hold any permission'),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('permission_access_sign_out_button')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('permission_access_retry_button')),
+        findsNothing,
+      );
+    });
+
+    testWidgets('an empty grant set keeps the empty-grant copy',
+        (tester) async {
+      final auth = RouterAuthProvider(
+        state: PermissionLoadState.loaded,
+        grants: const <String>{},
+      );
+      final router = AppRouter(auth);
+
+      await tester.pumpWidget(app(auth, router));
+      router.router.go('/reception/queue');
+      await tester.pumpAndSettle();
+
+      expect(router.router.state.matchedLocation, kPermissionAccessRoute);
+      expect(
+        find.textContaining('does not hold any permission'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining("don't include a screen available"),
+        findsNothing,
+      );
+    });
   });
 }

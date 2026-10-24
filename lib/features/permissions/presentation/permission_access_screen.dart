@@ -6,13 +6,16 @@ import '../../auth/presentation/providers/auth_provider.dart';
 
 /// The screen the app shows when the account cannot be routed.
 ///
-/// Two different things end up here, and they are told apart on purpose:
+/// Three different things end up here, and they are told apart on purpose:
 ///
 /// * the permission read failed - the grants are unknown, so the screen says
 ///   so and offers a retry;
 /// * the read succeeded and the account holds no permission - the answer is
 ///   "nothing", so the screen says the account has no access and offers a way
-///   out.
+///   out;
+/// * the read succeeded and the account holds permissions, but none of them
+///   opens a screen of the mobile app - the screen says exactly that instead
+///   of claiming the account holds no permission.
 ///
 /// The screen never treats a failure as an empty grant set, and it never
 /// falls back to the role text on the profile.
@@ -33,14 +36,20 @@ class PermissionAccessScreen extends StatelessWidget {
     }
 
     final failed = state == PermissionLoadState.failed;
+    final noGrants = auth.permissions.isEmpty;
     final title = failed
         ? 'Your permissions could not be loaded'
-        : 'This account has no access yet';
+        : noGrants
+            ? 'This account has no access yet'
+            : 'No screen is available in the mobile app';
     final message = failed
         ? (auth.permissionLoadError ??
             'The server did not answer with your permissions. Nothing was changed; try again.')
-        : 'Your account does not hold any permission, so no screen of KlinikAid is open to it. '
-            'An administrator can assign a role with permissions.';
+        : noGrants
+            ? 'Your account does not hold any permission, so no screen of KlinikAid is open to it. '
+                'An administrator can assign a role with permissions.'
+            : "Your account's permissions don't include a screen available in the mobile app. "
+                'Your access is unchanged; an administrator can assign a role that opens a screen.';
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -67,6 +76,7 @@ class PermissionAccessScreen extends StatelessWidget {
                 const SizedBox(height: 12),
                 Text(
                   message,
+                  key: const Key('permission_access_message'),
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurface.withValues(alpha: 0.7),

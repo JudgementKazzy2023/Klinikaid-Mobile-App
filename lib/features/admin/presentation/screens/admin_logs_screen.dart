@@ -48,15 +48,19 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
   @override
   void initState() {
     super.initState();
-    var canSystemLogs = true;
-    var canChatbotLogs = true;
+    // Fail closed: when the permission check cannot run (the auth provider is
+    // unavailable) or when the account holds the permission neither log
+    // needs, no log tab opens. A thrown check must never widen access by
+    // opening every tab.
+    var canSystemLogs = false;
+    var canChatbotLogs = false;
     try {
       final auth = Provider.of<AuthProvider>(context, listen: false);
       canSystemLogs = auth.hasPermission(PermissionConstants.systemLogsRead);
       canChatbotLogs = auth.hasPermission(PermissionConstants.chatbotLogsRead);
     } catch (_) {
-      canSystemLogs = true;
-      canChatbotLogs = true;
+      canSystemLogs = false;
+      canChatbotLogs = false;
     }
     _tabs = [
       if (canSystemLogs) const _AdminLogTab('System Events', _AdminLogTabType.systemEvents),
@@ -100,8 +104,9 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> with SingleTickerProv
   }
 
   void _loadTab(BuildContext context, int index) {
-    final provider = Provider.of<AdminProvider>(context, listen: false);
+    // With no tabs there is nothing to load, and no provider to load it with.
     if (_tabs.isEmpty) return;
+    final provider = Provider.of<AdminProvider>(context, listen: false);
     final tab = _tabs[index].type;
     if (tab == _AdminLogTabType.systemEvents) {
       provider.loadSystemEvents(
