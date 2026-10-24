@@ -88,15 +88,12 @@ class DashboardProvider extends ChangeNotifier {
           .where((d) => d.status == DocumentStatus.pending)
           .length;
 
-      // Active queue entry is the first non-completed/non-cancelled one, or just the most recent
-      final activeIndex = queueEntries.indexWhere(
-        (q) =>
-            q.status == QueueStatus.waiting ||
-            q.status == QueueStatus.inProgress,
-      );
-      _activeQueueEntry = activeIndex != -1
-          ? queueEntries[activeIndex]
-          : (queueEntries.isEmpty ? null : queueEntries.first);
+      // The current queue entry is the newest entry still in the queue, the
+      // rule the web patient dashboard applies with
+      // `status IN ('waiting','in_progress') ORDER BY created_at DESC LIMIT 1`.
+      // There is no fallback to the most recent entry: a completed or
+      // cancelled visit is history, not the queue the patient is in now.
+      _activeQueueEntry = _newestActiveEntry(queueEntries);
 
       _latestRecord = records.isEmpty ? null : records.first;
 
@@ -119,6 +116,42 @@ class DashboardProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  /// The newest entry that is still in the queue, or null when there is none.
+  ///
+  /// This is the web patient dashboard's rule -- the newest row whose status is
+  /// `waiting` or `in_progress` -- so completed and cancelled history is never
+  /// the current queue, and neither is a status neither this client nor the
+  /// server recognizes. [entries] is normally already newest-first from the
+  /// repository; `createdAt` decides anyway, as the server's ordering does.
+  PatientQueue? _newestActiveEntry(Iterable<PatientQueue> entries) {
+    PatientQueue? newest;
+    for (final entry in entries) {
+      if (!isActiveQueueStatus(entry.rawStatus)) continue;
+      if (newest == null || entry.createdAt.isAfter(newest.createdAt)) {
+        newest = entry;
+      }
+    }
+    return newest;
+  }
+
+  /// Rebuilds the domain model for a cached queue row. The raw status string
+  /// is kept so an unrecognized cached value stays unrecognized instead of
+  /// reading back as `waiting`.
+  PatientQueue _queueFromCached(CachedPatientQueue row) {
+    return PatientQueue(
+      id: row.id,
+      patientId: row.patientId,
+      status: QueueStatus.fromString(row.status),
+      rawStatus: row.status,
+      department: Department.fromString(row.department) ?? Department.laboratory,
+      triageNotes: row.triageNotes,
+      priorityLevel: PriorityLevel.fromString(row.priorityLevel),
+      estimatedWaitMinutes: row.estimatedWaitMinutes,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    );
   }
 
   Future<void> _cacheDataLocally(
@@ -156,7 +189,7 @@ class DashboardProvider extends ChangeNotifier {
             (q) => CachedPatientQueue(
               id: q.id,
               patientId: q.patientId,
-              status: q.status.toJsonValue(),
+              status: q.rawStatus,
               department: q.department.name,
               triageNotes: q.triageNotes,
               priorityLevel: q.priorityLevel.name,
@@ -205,34 +238,12 @@ class DashboardProvider extends ChangeNotifier {
           .where((d) => d.status == 'pending')
           .length;
 
-      if (cachedQueue.isNotEmpty) {
-        final activeIndex = cachedQueue.indexWhere(
-          (q) =>
-              QueueStatus.fromString(q.status) == QueueStatus.waiting ||
-              QueueStatus.fromString(q.status) == QueueStatus.inProgress,
-        );
-        final activeDriftQueue = activeIndex != -1
-            ? cachedQueue[activeIndex]
-            : cachedQueue.first;
-
-        _activeQueueEntry = PatientQueue(
-          id: activeDriftQueue.id,
-          patientId: activeDriftQueue.patientId,
-          status: QueueStatus.fromString(activeDriftQueue.status),
-          department:
-              Department.fromString(activeDriftQueue.department) ??
-              Department.laboratory,
-          triageNotes: activeDriftQueue.triageNotes,
-          priorityLevel: PriorityLevel.fromString(
-            activeDriftQueue.priorityLevel,
-          ),
-          estimatedWaitMinutes: activeDriftQueue.estimatedWaitMinutes,
-          createdAt: activeDriftQueue.createdAt,
-          updatedAt: activeDriftQueue.updatedAt,
-        );
-      } else {
-        _activeQueueEntry = null;
-      }
+      // The same active-only rule as the live read, applied to the cached
+      // snapshot: an offline dashboard must not promote a finished visit to
+      // the queue the patient is in now.
+      _activeQueueEntry = _newestActiveEntry(
+        cachedQueue.map(_queueFromCached),
+      );
 
       if (cachedRecords.isNotEmpty) {
         final latestDriftRec = cachedRecords.first;
