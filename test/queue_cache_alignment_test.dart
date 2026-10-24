@@ -447,7 +447,10 @@ void main() {
       await tester.pumpWidget(screen(const DashboardScreen()));
       await tester.pumpAndSettle();
       expect(find.text('Now Being Called'), findsOneWidget);
-      expect(find.text('Offline Mode'), findsOneWidget);
+      // The failed read is shown as stale data with the reason that broke it,
+      // not as the server's current answer.
+      expect(find.text('Showing cached clinic data'), findsOneWidget);
+      expect(find.textContaining('Connection failed'), findsOneWidget);
       offline = false;
       remote = [];
       await tester.runAsync(
