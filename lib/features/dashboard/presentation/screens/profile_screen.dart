@@ -110,7 +110,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       lastName: _lastNameController.text.trim(),
       dateOfBirth: _selectedDateOfBirth!,
       gender: _selectedGender,
-      contactNumber: _contactController.text.trim(),
+      contactNumber: RegistrationValidators.normalizeContactNumber(_contactController.text),
       address: _addressController.text.trim(),
     );
 
@@ -118,6 +118,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (success) {
         setState(() {
           _isEditing = false;
+          // Show what was stored: +639… is saved as 09….
+          _contactController.text = RegistrationValidators.normalizeContactNumber(
+            _contactController.text,
+          );
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
