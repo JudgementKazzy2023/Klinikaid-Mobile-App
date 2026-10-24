@@ -31,6 +31,14 @@ class UnknownFailure extends Failure {
   const UnknownFailure(super.message);
 }
 
+/// Represents an input the app rejected before it reached the server.
+///
+/// The caller can fix it — no network round trip happened, and retrying the
+/// same input unchanged would fail again.
+class ValidationFailure extends Failure {
+  const ValidationFailure(super.message);
+}
+
 /// Mapper utility to map raw library exceptions to structured [Failure] objects.
 class FailureMapper {
   static Failure fromException(dynamic exception) {
