@@ -19,6 +19,7 @@ import 'package:klinikaid_mobile/core/permissions/permission_service.dart';
 import 'package:klinikaid_mobile/core/routing/app_router.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 import 'package:klinikaid_mobile/features/department/presentation/providers/department_provider.dart';
+import 'package:klinikaid_mobile/features/reception/data/reception_repository.dart';
 import 'package:klinikaid_mobile/features/records/domain/record_grouper.dart';
 
 /// The staff module was removed together with its two routes
@@ -90,6 +91,17 @@ class MockDepartmentProvider extends DepartmentProvider {
   }
 }
 
+/// The reception shell subscribes to document changes once it is built. The
+/// stub keeps that subscription off the Realtime socket, so the test never
+/// opens a channel or leaves a reconnect timer behind.
+class SilentReceptionRepository extends ReceptionRepository {
+  SilentReceptionRepository(supabase.SupabaseClient client)
+      : super(client: client);
+
+  @override
+  Stream<void> documentChanges() => const Stream<void>.empty();
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   HttpOverrides.global = null;
@@ -151,6 +163,9 @@ void main() {
       MultiProvider(
         providers: [
           Provider<LocalDatabase>.value(value: localDatabase),
+          Provider<ReceptionRepository>.value(
+            value: SilentReceptionRepository(supabase.Supabase.instance.client),
+          ),
           ChangeNotifierProvider<AuthProvider>.value(value: auth),
           ChangeNotifierProvider<DepartmentProvider>(
             create: (_) => MockDepartmentProvider('laboratory'),
