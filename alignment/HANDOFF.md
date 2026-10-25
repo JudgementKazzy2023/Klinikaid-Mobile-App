@@ -1,28 +1,30 @@
 # Alignment handoff
 
-Preserved checkouts: mobile main `d749c50`, web `06ccce1`; web remote master refreshed to `9aedf87`. Laboratory/submission contract files are unchanged across the web refresh. Private evidence lives on the audit host; public scope/acceptance is tracked in [LEDGER.md](LEDGER.md) and [roadmap #9](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/9).
+Mobile `main` `fd37ec5` (2026-10-24); web `master` `1c879a2` (verified 2026-10-25). Public scope and acceptance are tracked in [LEDGER.md](LEDGER.md) and [roadmap #9](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/9). Private evidence lives on the audit host.
 
-| Draft PR | Tested revision | Covered local evidence |
+| Draft PR (at last handoff) | Merge commit on `main` | Status |
 |---|---|---|
-| #5 email validation | `412335d` |40 focused checks |
-| #6 authenticated triage | `8d39378` |9 focused checks |
-| #7 saved-results/queue outcome | `cb6f981` |10 focused checks |
-| #8 blood pressure | `9559bc8` |8 focused checks plus narrow-screen visual |
-| #24 MFA/transient identity state | `77302ee` |24 focused checks |
-| #25 deterministic default tests | `f65fd9d` |205 pass/1 existing skip/0 failures; analyzer142 |
-| #26 queue/cache snapshots | `7b4fabd` |22 focused checks |
-| #27 deferred draft ownership | `3270ad4` |19 ownership checks |
-| #28 narrative laboratory results | `ca69849` |36 narrative/94 combined focused checks; full237 pass/1 skip/2 baseline failures |
-| #29 immediate ownership, stacked on #27 | `0c9f7b0` |45 combined focused checks; full236 pass/1 skip/2 baseline failures |
+| #5 email validation | `449721f` | merged 2026-10-21; #22 closed |
+| #6 authenticated triage | `ede6d90` | merged 2026-10-21; #13 closed |
+| #7 saved-results/queue outcome | `e7c9f84` | merged 2026-10-21; #14 closed |
+| #8 blood pressure | `882b3f0` | merged 2026-10-21; #13 closed |
+| #24 MFA/transient identity state | `f33dfc7` | merged 2026-10-21; #11 closed |
+| #25 deterministic default tests | `0925d73` | merged 2026-10-21; #10 closed |
+| #26 queue/cache snapshots | `38fa386` | merged 2026-10-21; #12 closed |
+| #27 deferred draft ownership | `aeef078` | merged 2026-10-21; #11 closed |
+| #28 narrative laboratory results | `f7595e2` | merged 2026-10-21; #15 closed |
+| #29 immediate ownership, stacked on #27 | `364656e` | merged 2026-10-21; #11 closed |
 
-Covered local acceptance passes for those revisions; none is a claim of merged/shipped parity or deployed authorization. Most implementation branches retain the two default-test failures repaired separately by #25. Full analyzer remains red (typically152 baseline findings); #28/#29 have no changed-file findings. #24 retains23 pre-existing infos. Earlier #5/#6 evidence used Flutter3.47.7; later native gates use pinned3.44.0/Dart3.12.0 and unchanged lockfile.
+Merges are recorded by GitHub; closure of an issue does not re-verify live behavior. [PR #3](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/pull/3) was closed unmerged on 2026-10-24; its Stage 1 contract is archived by #63. [PR #4](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/pull/4) (this docs draft) remains open.
 
-Combined scratch `d552ca1` passes374 tests/1 existing skip/0 failures with #25 included; full analyzer retains141 existing findings. [VERIFICATION.md](VERIFICATION.md) records scope, merge order and limitations. Its single test-only interaction fix has been propagated to #28 (`ca69849`) and rerun. No main merge or production change occurred.
+Still open or blocked:
 
-Two Pi MiMo high workers are active: #5/#6 inherited-doc history cleanup with byte-identical implementation, and mobile chat row-identity/request-lifecycle fixes under #20. No other implementation workers remain active. Task IDs and exact receipts are retained in the durable host handoff under `refresh-7`.
+- #17 (`blocked:backend`): shared Auth and onboarding contract. Backend items are open; the 2026-10-23 Edge/Auth record is in its comments.
+- #20: CB4 decision (single-turn vs history) needed from JudgementKazzy2023.
+- #23: release owner, `applicationId`, signing and version decisions needed from JudgementKazzy2023.
+- #70 (`blocked:backend`, owner Setsuna-guwah): sign-in attempt limit does not cover mobile or direct Auth calls.
+- #9: roadmap issue, still open.
 
-Remaining priorities: issue #15 clinical numeric/reference criteria, session/permission and live Auth evidence under #11/#17/#18, shared backend submission contract under #16, read/cache honesty, chat identity/concurrency and language transport alignment, pagination, configuration and release provenance. Web opt-in dark mode is a platform/product decision; its new chat-language behavior needs shared-transport review.
+Remaining priorities: #17 backend contracts and #70 limiter decision; #20 CB4; #23 release provenance and device checks for live Realtime/RLS, Auth ordering and AAL2; #14 atomic save-and-complete follow-up; ST-07 label accuracy; DOC-05 and DOC-06 durable-file and duplicate-policy acceptance; chat transport alignment after web's language change.
 
-PR #3 remains a review-only source draft (`3db90ac`):21 local Deno checks pass/3 integration cases blocked, persistence unwired. Planning, reconciliation UX and interim-function questions were answered in the PR; no deployment or interim-route approval was granted. No production mutations, fixtures or deployments. Already-dispatched requests, ambiguous commits and server idempotency remain backend requirements.
-
-Read-only schema evidence does not establish policy/function bodies, grants or shipped versions. The checked local public key returned401; Edge management inventory lacks a token. Android SDK/device access and installed-artifact provenance remain unavailable. Every worked PR is linked; no watches run.
+Worker task status was not checked in this refresh. No deployment, production change or GitHub write was made by this refresh.

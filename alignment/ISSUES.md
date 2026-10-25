@@ -1,6 +1,6 @@
 # Ordered GitHub alignment work
 
-[Roadmap #9](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/9) tracks updates against mobile `d749c50` and web `06ccce1`. Each issue has pinned evidence, ownership, dependencies and acceptance checks. The numbers below are execution order, not an instruction to serialize independent work. Existing PRs are linked instead of duplicated.
+[Roadmap #9](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/9) tracks updates against mobile `fd37ec5` and web `1c879a2` (refreshed 2026-10-25; issue bodies keep their original pins). Each issue has pinned evidence, ownership, dependencies and acceptance checks. The numbers below are execution order, not an instruction to serialize independent work. Existing PRs are linked instead of duplicated.
 
 - 01 · P1 · [#10: Restore deterministic native verification before acceptance](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/10)
 - 02 · P1 · [#11: Complete session, account-switch and deferred-work isolation](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/11)
@@ -17,6 +17,8 @@
 - 13 · P2 · [#22: Share intended form, calendar and email validation across clients](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/22)
 - 14 · P2 · [#23: Establish Android release configuration and shipped-build provenance](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/23)
 
-Backend-blocked tasks remain explicit. PR #3 retains its submission execution/release hold. Focused passing checks do not waive native gates, live-contract evidence or release ownership.
+Added after the initial list: [#70: Enforce the sign-in attempt limit server-side so it covers mobile and direct Auth calls](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/70) (`blocked:backend`, owner Setsuna-guwah).
 
-Delivery updates: draft #24 covers the MFA/transient portion of #11; draft #25 repairs the two default-test failures under #10; draft #26 covers the locally verified queue/cache portion of #12. Deferred-draft ownership under #11 is the next bounded implementation. These are draft changes, not shipped parity or closed acceptance issues.
+Backend-blocked tasks remain explicit. PR #3 was closed unmerged on 2026-10-24. Focused passing checks do not waive native gates, live-contract evidence or release ownership.
+
+Delivery: the MFA/transient portion of #11 (#24), the default-test repair under #10 (#25) and the queue/cache portion of #12 (#26) are merged. Closed-issue state is listed in [LEDGER.md](LEDGER.md).
