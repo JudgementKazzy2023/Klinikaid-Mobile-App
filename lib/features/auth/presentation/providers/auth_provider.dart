@@ -20,6 +20,7 @@ import '../../domain/password_change_result.dart';
 import '../../domain/signup_outcome.dart';
 import '../../data/mfa_service.dart';
 import '../../domain/login_outcome.dart';
+import '../../domain/temporary_password.dart' as temporary_password;
 
 /// Provider that manages authentication state, RA 10173 consent, and patient onboarding flow.
 class AuthProvider extends ChangeNotifier implements PermissionSource {
@@ -176,6 +177,9 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
   User? get user => _user;
   Session? get session => _session;
   bool get isAuthenticated => _session != null;
+
+  /// The account still holds the temporary password reception set.
+  bool get mustChangePassword => temporary_password.mustChangePassword(_user);
   bool get hasConsented => _hasConsented;
   bool get isOnboarded => _isOnboarded;
   bool get isLoading => _isLoading;

@@ -25,6 +25,8 @@ import '../../features/documents/presentation/providers/document_submission_prov
 import '../cache/local_database.dart';
 import '../models/profile.dart';
 import '../../features/auth/presentation/screens/totp_verify_screen.dart';
+import '../../features/auth/presentation/screens/temporary_password_screen.dart';
+import '../../features/auth/domain/temporary_password.dart';
 import '../../features/reception/presentation/reception_shell.dart';
 import '../../features/reception/presentation/screens/reception_queue_screen.dart';
 import '../../features/reception/presentation/screens/document_validation_screen.dart';
@@ -200,6 +202,15 @@ class AppRouter {
         return '/mfa-verify';
       }
 
+      // 3b. A temporary password from reception must be replaced on web before
+      // any screen opens, as web holds it at /set-password (#17).
+      if (authProvider.mustChangePassword) {
+        return location == kTemporaryPasswordRoute ? null : kTemporaryPasswordRoute;
+      }
+      if (location == kTemporaryPasswordRoute) {
+        return role == UserRole.patient ? '/patient' : _homeForCurrentUser();
+      }
+
       // 4. Role-based routing
       if (role == UserRole.patient) {
         // Enforce Email OTP Verification Gate
@@ -283,6 +294,10 @@ class AppRouter {
       GoRoute(
         path: kPermissionAccessRoute,
         builder: (context, state) => const PermissionAccessScreen(),
+      ),
+      GoRoute(
+        path: kTemporaryPasswordRoute,
+        builder: (context, state) => const TemporaryPasswordScreen(),
       ),
 
       GoRoute(
