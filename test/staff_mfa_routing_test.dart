@@ -31,6 +31,8 @@ class RouterAuth extends ChangeNotifier implements AuthProvider {
   @override
   bool get hasConsented => true;
   @override
+  bool get mustChangePassword => false;
+  @override
   bool isAal2 = false;
   @override
   bool isAal1Pending = false;
