@@ -4,13 +4,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:klinikaid_mobile/core/patient_submission_containment.dart';
 import 'package:klinikaid_mobile/core/cache/local_database.dart';
 import 'package:klinikaid_mobile/core/models/patient.dart';
 import 'package:klinikaid_mobile/core/supabase/supabase_client.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 import 'package:klinikaid_mobile/features/documents/presentation/providers/document_submission_provider.dart';
 import 'package:klinikaid_mobile/features/documents/presentation/screens/submit_document_screen.dart';
-import 'package:klinikaid_mobile/features/patient/templates/presentation/providers/templates_provider.dart';
 import 'package:klinikaid_mobile/features/patient/submissions/document_dedup.dart';
 
 // Simple Mocks for Supabase Client query chain
@@ -109,8 +109,6 @@ class MockDocumentSubmissionProvider extends DocumentSubmissionProvider {
   @override
   List<OfflineDocument> get queuedSubmissions => [];
   @override
-  List<OfflineDocument> get orphanedSubmissions => [];
-  @override
   String? get errorMessage => mockErrorMessage;
 
   @override
@@ -123,10 +121,10 @@ class MockDocumentSubmissionProvider extends DocumentSubmissionProvider {
     List<String>? selectedTestIds,
     bool isTest = false,
   }) async {
-    final duplicateDate = await checkPendingDuplicate(patient.id, documentType);
-    if (duplicateDate != null) {
+    final duplicateCheck = await checkPendingDuplicate(patient.id, documentType);
+    if (duplicateCheck.state == DuplicateCheckState.duplicate) {
       final label = getCategoryLabel(documentType);
-      mockErrorMessage = "You already have a pending [$label] submitted on $duplicateDate. You can submit a new one once it's reviewed.";
+      mockErrorMessage = "You already have a pending [$label] submitted on ${duplicateCheck.duplicateDate}. You can submit a new one once it's reviewed.";
       return false;
     }
     return true;
@@ -134,6 +132,10 @@ class MockDocumentSubmissionProvider extends DocumentSubmissionProvider {
 }
 
 void main() {
+  // These tests exercise the submit flows that containment blocks.
+  setUp(() => PatientSubmissionContainment.activeForTesting = false);
+  tearDown(() => PatientSubmissionContainment.activeForTesting = true);
+
   TestWidgetsFlutterBinding.ensureInitialized();
 
   // Mock shared_preferences MethodChannel to avoid MissingPluginException in tests
@@ -148,8 +150,8 @@ void main() {
 
   setUpAll(() async {
     await Supabase.initialize(
-      url: 'https://onzeyejlfydvvbkejvwf.supabase.co',
-      anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9uemV5ZWpsZnlkdnZia2VqdndmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNjcxMjYsImV4cCI6MjA5NDk0MzEyNn0.FJNbbuBZ2LdutVNrloYsxOLGZWbP-oLLTLJaKBOFkMM',
+      url: 'https://example.invalid',
+      anonKey: 'synthetic-test-key',
       authOptions: const FlutterAuthClientOptions(
         localStorage: EmptyLocalStorage(),
       ),
@@ -225,10 +227,11 @@ void main() {
       ];
 
       final blockedDate = await checkPendingDuplicate(testPatient.id, 'lab-request');
-      expect(blockedDate, isNotNull); // Blocked!
+      expect(blockedDate.state, DuplicateCheckState.duplicate); // Blocked!
+      expect(blockedDate.duplicateDate, isNotNull);
 
       final allowedDate = await checkPendingDuplicate(testPatient.id, 'referral-form');
-      expect(allowedDate, isNull); // Allowed (different type)!
+      expect(allowedDate.state, DuplicateCheckState.clear); // Allowed (different type)!
 
       // A pending 'other' blocks a second 'other'
       fakeClient.mockDocuments = [
@@ -240,7 +243,7 @@ void main() {
         }
       ];
       final otherBlockedDate = await checkPendingDuplicate(testPatient.id, 'other');
-      expect(otherBlockedDate, isNotNull); // Blocked!
+      expect(otherBlockedDate.state, DuplicateCheckState.duplicate); // Blocked!
 
       // 2. Approved same-type document does not block
       fakeClient.mockDocuments = [
@@ -252,7 +255,7 @@ void main() {
         }
       ];
       final approvedCheck = await checkPendingDuplicate(testPatient.id, 'lab-request');
-      expect(approvedCheck, isNull); // Allowed (no longer pending)!
+      expect(approvedCheck.state, DuplicateCheckState.clear); // Allowed (no longer pending)!
 
       // Approved 'other' does not block
       fakeClient.mockDocuments = [
@@ -264,7 +267,7 @@ void main() {
         }
       ];
       final otherApprovedCheck = await checkPendingDuplicate(testPatient.id, 'other');
-      expect(otherApprovedCheck, isNull);
+      expect(otherApprovedCheck.state, DuplicateCheckState.clear);
 
       // 3. Rejected same-type document does not block
       fakeClient.mockDocuments = [
@@ -276,7 +279,7 @@ void main() {
         }
       ];
       final rejectedCheck = await checkPendingDuplicate(testPatient.id, 'lab-request');
-      expect(rejectedCheck, isNull); // Allowed (no longer pending)!
+      expect(rejectedCheck.state, DuplicateCheckState.clear); // Allowed (no longer pending)!
 
       // Rejected 'other' does not block
       fakeClient.mockDocuments = [
@@ -288,7 +291,7 @@ void main() {
         }
       ];
       final otherRejectedCheck = await checkPendingDuplicate(testPatient.id, 'other');
-      expect(otherRejectedCheck, isNull);
+      expect(otherRejectedCheck.state, DuplicateCheckState.clear);
     });
   });
 
@@ -352,7 +355,6 @@ void main() {
       await tester.tap(submitBtn);
       await tester.pumpAndSettle();
 
-      print('DEBUG mockErrorMessage is: ${submissionProvider.mockErrorMessage}');
       expect(
         find.textContaining('You already have a pending [Laboratory Request] submitted on'),
         findsOneWidget,

@@ -1,17 +1,26 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:klinikaid_mobile/core/errors/failures.dart';
 import 'package:klinikaid_mobile/core/models/patient.dart';
 import 'package:klinikaid_mobile/core/models/profile.dart';
 import 'package:klinikaid_mobile/core/repositories/patients_repository.dart';
 import 'package:klinikaid_mobile/core/repositories/profiles_repository.dart';
 import 'package:klinikaid_mobile/features/auth/data/patient_provisioning_service.dart';
 import 'package:klinikaid_mobile/features/auth/data/verification_service.dart';
+import 'package:klinikaid_mobile/features/auth/domain/signup_outcome.dart';
 import 'package:klinikaid_mobile/features/auth/domain/verification_state.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 
 class MockGoTrueClient extends GoTrueClient {
   bool signOutCalled = false;
+
+  /// Auth returns no session, as when email confirmation is required.
+  bool confirmationRequired = false;
+
+  /// Auth refuses the sign-up because the address already has an account.
+  bool alreadyRegistered = false;
+  int signUpCalls = 0;
 
   MockGoTrueClient() : super(autoRefreshToken: false);
 
@@ -28,6 +37,10 @@ class MockGoTrueClient extends GoTrueClient {
     String? captchaToken,
     OtpChannel channel = OtpChannel.sms,
   }) async {
+    signUpCalls++;
+    if (alreadyRegistered) {
+      throw const AuthException('User already registered');
+    }
     final user = User(
       id: 'auth-user-1',
       appMetadata: const {},
@@ -36,6 +49,9 @@ class MockGoTrueClient extends GoTrueClient {
       createdAt: DateTime.now().toIso8601String(),
       email: email,
     );
+    if (confirmationRequired) {
+      return AuthResponse(user: user);
+    }
     final session = Session(
       accessToken: 'access-token',
       tokenType: 'bearer',
@@ -53,19 +69,38 @@ class MockGoTrueClient extends GoTrueClient {
 class MockSupabaseClient extends SupabaseClient {
   final MockGoTrueClient mockAuth;
 
-  MockSupabaseClient(this.mockAuth) : super('https://example.supabase.co', 'mock-anon-key');
+  MockSupabaseClient(this.mockAuth) : super('https://example.invalid', 'mock-anon-key');
 
   @override
   GoTrueClient get auth => mockAuth;
 }
 
 class MockProfilesRepository extends ProfilesRepository {
+  bool failConsentWrite = false;
+  int consentWrites = 0;
+
   @override
   Future<Profile> getProfile(String id) async {
     return Profile(
       id: id,
       fullName: 'Jane Patient',
       role: UserRole.patient,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  @override
+  Future<Profile> recordPrivacyAcceptance(String id, DateTime acceptedAt) async {
+    consentWrites++;
+    if (failConsentWrite) {
+      throw const DatabaseFailure('Could not record consent.');
+    }
+    return Profile(
+      id: id,
+      fullName: 'Jane Patient',
+      role: UserRole.patient,
+      acceptedPrivacyAt: acceptedAt,
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
     );
@@ -88,9 +123,66 @@ class ThrowingPatientsRepository extends PatientsRepository {
   Future<Patient?> getPatientByProfileId(String profileId) async => null;
 }
 
+/// Simulates a device that cannot read the patients table at all.
+class OfflinePatientsRepository extends PatientsRepository {
+  int createPatientCalls = 0;
+  int lookupCalls = 0;
+
+  @override
+  Future<Patient> createPatient(Patient patient) async {
+    createPatientCalls++;
+    throw StateError('Direct patients insert should not be called from registration.');
+  }
+
+  @override
+  Future<Patient?> getPatientByProfileId(String profileId) async {
+    lookupCalls++;
+    throw StateError('Lookup failed: device is offline.');
+  }
+}
+
+/// Fails every provisioning call with the outcome of its call index
+/// (the last one repeats), so a first attempt and its retry can differ.
+class SequencedProvisioningService implements PatientProvisioningService {
+  SequencedProvisioningService(this.outcomes);
+
+  final List<PatientProvisioningOutcome> outcomes;
+  int callCount = 0;
+
+  @override
+  Future<Patient?> createPatientRecord({
+    required String firstName,
+    required String lastName,
+    required DateTime dateOfBirth,
+    required Gender gender,
+    required String contactNumber,
+    required String email,
+    required String address,
+  }) async {
+    final outcome = outcomes[callCount < outcomes.length ? callCount : outcomes.length - 1];
+    callCount++;
+    throw PatientProvisioningException(
+      outcome == PatientProvisioningOutcome.rejected
+          ? 'Patient provisioning failed.'
+          : 'Network failure.',
+      outcome: outcome,
+    );
+  }
+}
+
+class FakePatientsRepository extends PatientsRepository {
+  final Patient? patient;
+
+  FakePatientsRepository(this.patient);
+
+  @override
+  Future<Patient?> getPatientByProfileId(String profileId) async => patient;
+}
+
 class FakeVerificationService implements VerificationService {
   bool sendCodeCalled = false;
   bool deletePendingUserCalled = false;
+  bool sendFails = false;
 
   @override
   Future<bool> deletePendingUser() async {
@@ -101,6 +193,12 @@ class FakeVerificationService implements VerificationService {
   @override
   Future<VerificationResult> sendCode({required String email}) async {
     sendCodeCalled = true;
+    if (sendFails) {
+      return VerificationResult(
+        status: VerificationStatus.networkError,
+        errorMessage: 'Code not sent.',
+      );
+    }
     return VerificationResult(
       status: VerificationStatus.codeSent,
       expiresAt: DateTime.now().add(const Duration(minutes: 10)),
@@ -115,14 +213,15 @@ class FakeVerificationService implements VerificationService {
 
 AuthProvider buildProvider({
   required MockGoTrueClient auth,
-  required ThrowingPatientsRepository patientsRepo,
+  required PatientsRepository patientsRepo,
   required FakeVerificationService verificationService,
   required PatientProvisioningService provisioningService,
+  MockProfilesRepository? profilesRepo,
 }) {
   return AuthProvider(
     client: MockSupabaseClient(auth),
     patientsRepo: patientsRepo,
-    profilesRepo: MockProfilesRepository(),
+    profilesRepo: profilesRepo ?? MockProfilesRepository(),
     verificationService: verificationService,
     patientProvisioningService: provisioningService,
   );
@@ -159,8 +258,8 @@ void main() {
   setUpAll(() async {
     try {
       await Supabase.initialize(
-        url: 'https://example.supabase.co',
-        anonKey: 'mock-anon-key',
+        url: 'https://example.invalid',
+        anonKey: 'synthetic-test-key',
         authOptions: const FlutterAuthClientOptions(
           localStorage: EmptyLocalStorage(),
         ),
@@ -181,7 +280,7 @@ void main() {
         provisioningService: provisioningService,
       );
 
-      final success = await provider.signUp(
+      final outcome = await provider.signUp(
         email: 'jane@example.com',
         password: 'Password123!',
         firstName: 'Jane',
@@ -192,7 +291,7 @@ void main() {
         address: '123 Test St',
       );
 
-      expect(success, true);
+      expect(outcome, SignUpOutcome.registered);
       expect(provisioningService.wasCalled, true);
       expect(patientsRepo.createPatientCalls, 0);
       expect(verificationService.sendCodeCalled, true);
@@ -206,7 +305,7 @@ void main() {
       final verificationService = FakeVerificationService();
       final provisioningService = MockPatientProvisioningService()
         ..shouldFail = true
-        ..functionRan = true;
+        ..outcome = PatientProvisioningOutcome.rejected;
       final provider = buildProvider(
         auth: auth,
         patientsRepo: patientsRepo,
@@ -214,7 +313,7 @@ void main() {
         provisioningService: provisioningService,
       );
 
-      final success = await provider.signUp(
+      final outcome = await provider.signUp(
         email: 'jane@example.com',
         password: 'Password123!',
         firstName: 'Jane',
@@ -225,19 +324,21 @@ void main() {
         address: '123 Test St',
       );
 
-      expect(success, false);
+      expect(outcome, SignUpOutcome.failed);
       expect(auth.signOutCalled, true);
       expect(verificationService.deletePendingUserCalled, false);
       expect(patientsRepo.createPatientCalls, 0);
+      expect(provider.errorMessage, 'Patient provisioning failed.');
     });
 
-    test('invoke network failure calls deletePendingUser before local sign out', () async {
+    test('a 400 field rejection deletes the pending user and shows the error', () async {
       final auth = MockGoTrueClient();
       final patientsRepo = ThrowingPatientsRepository();
       final verificationService = FakeVerificationService();
       final provisioningService = MockPatientProvisioningService()
         ..shouldFail = true
-        ..functionRan = false;
+        ..outcome = PatientProvisioningOutcome.rejected
+        ..status = 400;
       final provider = buildProvider(
         auth: auth,
         patientsRepo: patientsRepo,
@@ -245,7 +346,7 @@ void main() {
         provisioningService: provisioningService,
       );
 
-      final success = await provider.signUp(
+      final outcome = await provider.signUp(
         email: 'jane@example.com',
         password: 'Password123!',
         firstName: 'Jane',
@@ -256,10 +357,319 @@ void main() {
         address: '123 Test St',
       );
 
-      expect(success, false);
+      expect(outcome, SignUpOutcome.failed);
+      expect(verificationService.deletePendingUserCalled, true);
+      expect(auth.signOutCalled, true);
+      expect(provisioningService.callCount, 1);
+      expect(provider.errorMessage, 'Patient provisioning failed.');
+    });
+
+    test('uncertain outcome keeps the account and uses the existing patient row', () async {
+      final auth = MockGoTrueClient();
+      final patientsRepo = FakePatientsRepository(patient());
+      final verificationService = FakeVerificationService();
+      final provisioningService = MockPatientProvisioningService()
+        ..shouldFail = true
+        ..outcome = PatientProvisioningOutcome.uncertain;
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: patientsRepo,
+        verificationService: verificationService,
+        provisioningService: provisioningService,
+      );
+
+      final outcome = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(outcome, SignUpOutcome.registered);
+      expect(verificationService.deletePendingUserCalled, false);
+      expect(provider.patient?.profileId, 'auth-user-1');
+      expect(provisioningService.callCount, 1);
+      expect(auth.signOutCalled, false);
+    });
+
+    test('uncertain outcome retries the idempotent function when no row exists', () async {
+      final auth = MockGoTrueClient();
+      final patientsRepo = ThrowingPatientsRepository();
+      final verificationService = FakeVerificationService();
+      final provisioningService = MockPatientProvisioningService()
+        ..outcome = PatientProvisioningOutcome.uncertain
+        ..failFirstCalls = 1
+        ..patient = patient();
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: patientsRepo,
+        verificationService: verificationService,
+        provisioningService: provisioningService,
+      );
+
+      final outcome = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(outcome, SignUpOutcome.registered);
+      expect(provisioningService.callCount, 2);
+      expect(verificationService.deletePendingUserCalled, false);
+      expect(provider.patient?.profileId, 'auth-user-1');
+    });
+
+    test('invoke network failure never deletes the pending user', () async {
+      final auth = MockGoTrueClient();
+      final patientsRepo = ThrowingPatientsRepository();
+      final verificationService = FakeVerificationService();
+      final provisioningService = MockPatientProvisioningService()
+        ..shouldFail = true
+        ..outcome = PatientProvisioningOutcome.uncertain;
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: patientsRepo,
+        verificationService: verificationService,
+        provisioningService: provisioningService,
+      );
+
+      final outcome = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(outcome, SignUpOutcome.failed);
+      expect(verificationService.deletePendingUserCalled, false);
+      expect(auth.signOutCalled, true);
+      expect(patientsRepo.createPatientCalls, 0);
+      expect(provisioningService.callCount, 2);      expect(provider.errorMessage, isNotNull);
+    });
+
+    test('known rejection after a clean lookup deletes the pending user', () async {
+      final auth = MockGoTrueClient();
+      final patientsRepo = ThrowingPatientsRepository();
+      final verificationService = FakeVerificationService();
+      final provisioningService = SequencedProvisioningService([
+        PatientProvisioningOutcome.uncertain,
+        PatientProvisioningOutcome.rejected,
+      ]);
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: patientsRepo,
+        verificationService: verificationService,
+        provisioningService: provisioningService,
+      );
+
+      final outcome = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(outcome, SignUpOutcome.failed);
+      expect(provisioningService.callCount, 2);
       expect(verificationService.deletePendingUserCalled, true);
       expect(auth.signOutCalled, true);
       expect(patientsRepo.createPatientCalls, 0);
+    });
+
+    test('failed lookup with an uncertain retry keeps the account', () async {
+      final auth = MockGoTrueClient();
+      final patientsRepo = OfflinePatientsRepository();
+      final verificationService = FakeVerificationService();
+      final provisioningService = SequencedProvisioningService([
+        PatientProvisioningOutcome.uncertain,
+        PatientProvisioningOutcome.uncertain,
+      ]);
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: patientsRepo,
+        verificationService: verificationService,
+        provisioningService: provisioningService,
+      );
+
+      final outcome = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(outcome, SignUpOutcome.failed);
+      expect(provisioningService.callCount, 2);
+      expect(patientsRepo.lookupCalls, 1);
+      expect(verificationService.deletePendingUserCalled, false);
+      expect(auth.signOutCalled, true);
+      expect(patientsRepo.createPatientCalls, 0);
+    });
+
+    test('no session (confirmation required) provisions nothing and says to contact reception', () async {
+      final auth = MockGoTrueClient()..confirmationRequired = true;
+      final patientsRepo = ThrowingPatientsRepository();
+      final verificationService = FakeVerificationService();
+      final provisioningService = MockPatientProvisioningService()..patient = patient();
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: patientsRepo,
+        verificationService: verificationService,
+        provisioningService: provisioningService,
+      );
+
+      final outcome = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(outcome, SignUpOutcome.noSession);
+      expect(provisioningService.wasCalled, false);
+      expect(patientsRepo.createPatientCalls, 0);
+      expect(verificationService.sendCodeCalled, false);
+      expect(provider.isAuthenticated, false);
+      expect(provider.user, isNull);
+      expect(auth.signOutCalled, true);
+      expect(provider.errorMessage, kSignUpNoSessionMessage);
+    });
+
+    test('a refused sign-up keeps the reason on screen and provisions nothing', () async {
+      final auth = MockGoTrueClient()..alreadyRegistered = true;
+      final patientsRepo = ThrowingPatientsRepository();
+      final verificationService = FakeVerificationService();
+      final provisioningService = MockPatientProvisioningService()..patient = patient();
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: patientsRepo,
+        verificationService: verificationService,
+        provisioningService: provisioningService,
+      );
+
+      final outcome = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(outcome, SignUpOutcome.failed);
+      expect(provisioningService.wasCalled, false);
+      expect(verificationService.sendCodeCalled, false);
+      // Assigning `_user` clears the error message, so the reason must be set
+      // after that reset for it to reach the screen.
+      expect(provider.errorMessage, 'User already registered');
+    });
+
+    test('a consent write that fails after provisioning keeps the record and says to sign in', () async {
+      final auth = MockGoTrueClient();
+      final profilesRepo = MockProfilesRepository()..failConsentWrite = true;
+      final verificationService = FakeVerificationService();
+      final provisioningService = MockPatientProvisioningService()..patient = patient();
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: ThrowingPatientsRepository(),
+        verificationService: verificationService,
+        provisioningService: provisioningService,
+        profilesRepo: profilesRepo,
+      );
+
+      final outcome = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(outcome, SignUpOutcome.setupIncomplete);
+      expect(provisioningService.callCount, 1);
+      expect(verificationService.sendCodeCalled, false);
+      expect(provider.errorMessage, kSignUpSetupIncompleteMessage);
+      expect(provider.isAuthenticated, false);
+
+      // The retry is refused by Auth before any provisioning call, so the
+      // patient row is not duplicated.
+      auth.alreadyRegistered = true;
+      final retry = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(retry, SignUpOutcome.failed);
+      expect(provisioningService.callCount, 1);
+      expect(provider.errorMessage, 'User already registered');
+    });
+
+    test('a verification code that fails to send after provisioning says to sign in', () async {
+      final auth = MockGoTrueClient();
+      final verificationService = FakeVerificationService()..sendFails = true;
+      final profilesRepo = MockProfilesRepository();
+      final provisioningService = MockPatientProvisioningService()..patient = patient();
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: ThrowingPatientsRepository(),
+        verificationService: verificationService,
+        provisioningService: provisioningService,
+        profilesRepo: profilesRepo,
+      );
+
+      final outcome = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(outcome, SignUpOutcome.setupIncomplete);
+      expect(provisioningService.callCount, 1);
+      expect(profilesRepo.consentWrites, 1);
+      expect(verificationService.deletePendingUserCalled, false);
+      expect(auth.signOutCalled, true);
+      expect(provider.errorMessage, kSignUpSetupIncompleteMessage);
     });
   });
 }

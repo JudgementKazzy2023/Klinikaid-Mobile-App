@@ -40,7 +40,11 @@ class ReceptionShell extends StatelessWidget {
           ChangeNotifierProvider<ReceptionQueueProvider>.value(value: parentQueue)
         else
           ChangeNotifierProvider<ReceptionQueueProvider>(
-            create: (context) => ReceptionQueueProvider(repository: repo)..loadSubmissions(),
+            // The provider's dispose ends the realtime subscription, so leaving
+            // the shell (sign-out included) stops the live board.
+            create: (context) => ReceptionQueueProvider(repository: repo)
+              ..loadSubmissions()
+              ..startLiveUpdates(),
           ),
         if (parentDashboard != null)
           ChangeNotifierProvider<ReceptionDashboardProvider>.value(value: parentDashboard)
@@ -62,8 +66,7 @@ class _ReceptionBottomNavBar extends StatelessWidget {
 
   List<_ReceptionNavItem> _items(BuildContext context) {
     final auth = Provider.of<AuthProvider>(context, listen: false);
-    final canQueue = auth.usesLegacyPermissionFallback ||
-        auth.hasAllPermissions(PermissionConstants.receptionQueue);
+    final canQueue = auth.hasAllPermissions(PermissionConstants.receptionQueue);
     return [
       if (canQueue)
         const _ReceptionNavItem(
@@ -102,6 +105,11 @@ class _ReceptionBottomNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = _items(context);
     final selectedIndex = _calculateSelectedIndex(context, items);
+
+    // A bar needs at least two entries to be a bar. An account that may open
+    // neither the dashboard nor the queue keeps the profile entry only, and a
+    // one-entry bar is not a bar.
+    if (items.length < 2) return const SizedBox.shrink();
 
     return Container(
       decoration: BoxDecoration(

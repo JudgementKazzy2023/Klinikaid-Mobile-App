@@ -8,11 +8,14 @@ import 'package:http/http.dart' as http;
 // ignore: depend_on_referenced_packages
 import 'package:http/testing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:klinikaid_mobile/core/permissions/permission_constants.dart';
 import 'package:klinikaid_mobile/core/repositories/rag_documents_repository.dart';
 import 'package:klinikaid_mobile/features/admin/data/admin_repository.dart';
 import 'package:klinikaid_mobile/features/admin/presentation/providers/admin_provider.dart';
 import 'package:klinikaid_mobile/features/admin/presentation/screens/admin_logs_screen.dart';
+import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 import 'package:klinikaid_mobile/features/department/data/department_repository.dart';
+import 'support/logs_grant_auth.dart';
 
 // No Supabase.initialize or platform plugins: every HTTP request is intercepted.
 class UnusedRag implements RagDocumentsRepository {
@@ -160,8 +163,13 @@ void main() {
   });
   testWidgets('failed log refresh clears rows and disables export; Retry recovers', (tester) async {
     populated = true;
-    await tester.pumpWidget(ChangeNotifierProvider.value(value: state,
-      child: const MaterialApp(home: Scaffold(body: AdminLogsScreen()))));
+    await tester.pumpWidget(ChangeNotifierProvider<AuthProvider>.value(
+      value: LogsGrantAuth(const {
+        PermissionConstants.systemLogsRead,
+        PermissionConstants.chatbotLogsRead,
+      }),
+      child: ChangeNotifierProvider.value(value: state,
+        child: const MaterialApp(home: Scaffold(body: AdminLogsScreen())))));
     await tester.pumpAndSettle();
     expect(find.text('Fixture event'), findsOneWidget);
     failPath = '*';
@@ -173,6 +181,48 @@ void main() {
     failPath = null;
     await tester.tap(find.text('Retry')); await tester.pumpAndSettle();
     expect(find.text('Fixture event'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+  testWidgets('the log screen fails closed when the permission check throws', (tester) async {
+    // No AuthProvider is supplied, so the screen's permission read throws.
+    // It must open no log tab rather than defaulting every tab open.
+    await tester.pumpWidget(ChangeNotifierProvider.value(
+      value: state,
+      child: const MaterialApp(home: Scaffold(body: AdminLogsScreen())),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('System Events'), findsNothing);
+    expect(find.text('Chatbot Audit'), findsNothing);
+    expect(find.text('API Cost Tracker'), findsNothing);
+    expect(find.text('You do not have access to audit logs.'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+  testWidgets('a grant set without log permissions opens no log tab', (tester) async {
+    await tester.pumpWidget(ChangeNotifierProvider<AuthProvider>.value(
+      value: LogsGrantAuth(const {PermissionConstants.chatAccess}),
+      child: ChangeNotifierProvider.value(
+        value: state,
+        child: const MaterialApp(home: Scaffold(body: AdminLogsScreen())),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('System Events'), findsNothing);
+    expect(find.text('Chatbot Audit'), findsNothing);
+    expect(find.text('You do not have access to audit logs.'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+  testWidgets('each log permission opens only its own tab', (tester) async {
+    await tester.pumpWidget(ChangeNotifierProvider<AuthProvider>.value(
+      value: LogsGrantAuth(const {PermissionConstants.systemLogsRead}),
+      child: ChangeNotifierProvider.value(
+        value: state,
+        child: const MaterialApp(home: Scaffold(body: AdminLogsScreen())),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('System Events'), findsOneWidget);
+    expect(find.text('Chatbot Audit'), findsNothing);
+    expect(find.text('API Cost Tracker'), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 }

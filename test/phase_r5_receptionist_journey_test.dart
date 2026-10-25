@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
-import 'package:go_router/go_router.dart';
 import 'package:klinikaid_mobile/features/reception/data/reception_repository.dart';
 import 'package:klinikaid_mobile/features/reception/domain/submission.dart';
 import 'package:klinikaid_mobile/features/reception/domain/submission_detail.dart';
@@ -11,15 +10,15 @@ import 'package:klinikaid_mobile/features/reception/domain/submission_status.dar
 import 'package:klinikaid_mobile/features/reception/domain/recent_triage_entry.dart';
 import 'package:klinikaid_mobile/core/models/patient_queue.dart';
 import 'package:klinikaid_mobile/core/models/profile.dart';
+import 'package:klinikaid_mobile/core/permissions/permission_constants.dart';
+import 'package:klinikaid_mobile/core/permissions/permission_service.dart';
 import 'package:klinikaid_mobile/features/reception/presentation/providers/reception_queue_provider.dart';
 import 'package:klinikaid_mobile/features/reception/presentation/providers/reception_dashboard_provider.dart';
 import 'package:klinikaid_mobile/features/reception/presentation/screens/reception_queue_screen.dart';
 import 'package:klinikaid_mobile/features/reception/presentation/screens/reception_dashboard_screen.dart';
 import 'package:klinikaid_mobile/features/reception/presentation/screens/document_validation_screen.dart';
-import 'package:klinikaid_mobile/features/reception/presentation/reception_shell.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 import 'package:klinikaid_mobile/core/routing/app_router.dart';
-import 'package:klinikaid_mobile/features/dashboard/presentation/screens/profile_screen.dart';
 
 // ─── Journey Mock Repository ────────────────────────────────────────────────
 
@@ -80,9 +79,18 @@ class MockReceptionJourneyRepository extends ReceptionRepository {
   }
 
   @override
-  Future<List<Submission>> getSubmissions({SubmissionStatus? status}) async {
-    if (status == null) return mockSubmissions;
-    return mockSubmissions.where((s) => s.status == status).toList();
+  Future<SubmissionsPage> getSubmissionsPage({
+    SubmissionStatus? status,
+    int offset = 0,
+    int limit = kReceptionSubmissionsPageSize,
+  }) async {
+    final matching = status == null
+        ? mockSubmissions
+        : mockSubmissions.where((s) => s.status == status).toList();
+    return SubmissionsPage(
+      submissions: matching.skip(offset).take(limit).toList(),
+      total: matching.length,
+    );
   }
 
   @override
@@ -189,6 +197,10 @@ class MockReceptionJourneyRepository extends ReceptionRepository {
 // ─── Journey Mock AuthProvider ──────────────────────────────────────────────
 
 class MockJourneyAuthProvider extends AuthProvider {
+  // These screen tests start after staff MFA verification.
+  @override
+  bool get isAal2 => true;
+
   bool _mockIsAuthenticated = false;
   Profile? _mockProfile;
 
@@ -212,6 +224,19 @@ class MockJourneyAuthProvider extends AuthProvider {
 
   @override
   Profile? get profile => _mockProfile;
+
+  // The journey runs as a receptionist, so the account holds the permissions
+  // the shared backend grants that role. The app routes by these, not by the
+  // role text on the profile.
+  @override
+  Set<String> get permissions => {
+        PermissionConstants.documentsManage,
+        PermissionConstants.queueManage,
+        PermissionConstants.patientsManage,
+      };
+
+  @override
+  PermissionLoadState get permissionLoadState => PermissionLoadState.loaded;
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -228,9 +253,8 @@ void main() {
 
   setUpAll(() async {
     await supabase.Supabase.initialize(
-      url: 'https://onzeyejlfydvvbkejvwf.supabase.co',
-      anonKey:
-          'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9uemV5ZWpsZnlkdnZia2VqdndmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNjcxMjYsImV4cCI6MjA5NDk0MzEyNn0.FJNbbuBZ2LdutVNrloYsxOLGZWbP-oLLTLJaKBOFkMM',
+      url: 'https://example.invalid',
+      anonKey: 'synthetic-test-key',
       authOptions: const supabase.FlutterAuthClientOptions(
         localStorage: supabase.EmptyLocalStorage(),
       ),

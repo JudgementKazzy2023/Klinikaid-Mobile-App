@@ -18,10 +18,14 @@ import 'package:klinikaid_mobile/features/department/presentation/providers/depa
 import 'package:klinikaid_mobile/features/department/presentation/screens/department_queue_screen.dart';
 
 class MockAuthProvider extends AuthProvider {
+  // These screen tests start after staff MFA verification.
+  @override
+  bool get isAal2 => !_mockIsAal1Pending;
+
   bool _mockIsAuthenticated = false;
   bool _mockHasConsented = false;
   bool _mockIsOnboarded = false;
-  bool _mockIsLoading = false;
+  final bool _mockIsLoading = false;
   Profile? _mockProfile;
   Patient? _mockPatient;
   supabase.User? _mockUser;
@@ -106,6 +110,9 @@ class MockDepartmentProvider extends DepartmentProvider {
   List<PatientQueue> get queueEntries => mockQueueEntries;
 
   @override
+  int get queueTotal => mockQueueEntries.length;
+
+  @override
   Future<void> loadDashboard() async {
     // No-op
   }
@@ -137,8 +144,8 @@ void main() {
   setUpAll(() async {
     try {
       await supabase.Supabase.initialize(
-        url: 'https://onzeyejlfydvvbkejvwf.supabase.co',
-        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9uemV5ZWpsZnlkdnZia2VqdndmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNjcxMjYsImV4cCI6MjA5NDk0MzEyNn0.FJNbbuBZ2LdutVNrloYsxOLGZWbP-oLLTLJaKBOFkMM',
+        url: 'https://example.invalid',
+        anonKey: 'synthetic-test-key',
         authOptions: const supabase.FlutterAuthClientOptions(
           localStorage: supabase.EmptyLocalStorage(),
         ),
@@ -347,7 +354,14 @@ void main() {
       appRouter.router.go('/department/queue');
       await tester.pumpAndSettle();
 
-      expect(find.text("No patients queued. Today's queue is empty."), findsOneWidget);
+      // Source-proven label: department_queue_screen.dart renders
+      // "No active patients queued." when the queue is empty and no search
+      // text is entered.
+      expect(find.text('No active patients queued.'), findsOneWidget);
+
+      // Meaningful empty state: no queue cards or result-entry actions render.
+      expect(find.widgetWithText(ElevatedButton, 'Enter Results'), findsNothing);
+      expect(find.textContaining('Triage Note:'), findsNothing);
     });
 
     testWidgets('7. Search filters queue entries by patient name client-side', (tester) async {

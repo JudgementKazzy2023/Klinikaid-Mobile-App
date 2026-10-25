@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Base class representing any app-level failure or error.
@@ -29,6 +31,14 @@ class UnknownFailure extends Failure {
   const UnknownFailure(super.message);
 }
 
+/// Represents an input the app rejected before it reached the server.
+///
+/// The caller can fix it — no network round trip happened, and retrying the
+/// same input unchanged would fail again.
+class ValidationFailure extends Failure {
+  const ValidationFailure(super.message);
+}
+
 /// Mapper utility to map raw library exceptions to structured [Failure] objects.
 class FailureMapper {
   static Failure fromException(dynamic exception) {
@@ -55,5 +65,18 @@ class FailureMapper {
     }
 
     return UnknownFailure(errStr);
+  }
+
+  /// Whether [exception] means the device could not reach the server.
+  ///
+  /// The offline fallback of the document submission path and the pending
+  /// duplicate check classify connectivity failures the same way, so a check
+  /// that failed for connectivity reasons takes the same offline branch as an
+  /// upload that failed for the same reason.
+  static bool isNetworkFailure(dynamic exception) {
+    if (exception is SocketException) {
+      return true;
+    }
+    return fromException(exception) is NetworkFailure;
   }
 }

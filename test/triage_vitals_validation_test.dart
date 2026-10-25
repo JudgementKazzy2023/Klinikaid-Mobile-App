@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:klinikaid_mobile/core/utils/lab_validators.dart';
 import 'package:klinikaid_mobile/features/reception/presentation/widgets/triage_routing_sheet.dart';
@@ -127,6 +126,15 @@ void main() {
       expect(validateBloodPressure('12//8'), isNotNull); // multiple slashes
       expect(validateBloodPressure('abc'), isNotNull); // alphabetic
     });
+
+    test('blood pressure follows shared web bounds and ordering', () {
+      for (final reading in [null, '', '  ', '120/80', ' 120/80 ', '40/20', '300/200', '201/200']) {
+        expect(validateBloodPressure(reading), isNull, reason: '$reading');
+      }
+      for (final reading in ['39/20', '301/200', '40/19', '210/201', '999/999', '80/120', '120/120', '200/200', '1/2', '120/80/90', '120 /80']) {
+        expect(validateBloodPressure(reading), isNotNull, reason: reading);
+      }
+    });
   });
 
   group('Triage Vitals Validation — Widget Tests', () {
@@ -189,6 +197,10 @@ void main() {
       final bpField = find.byKey(const Key('bp_input_field'));
       expect(bpField, findsOneWidget);
       await tester.enterText(bpField, '120');
+      // Let the focused field relayout settle before scrolling the action row
+      // into view, otherwise the field's own "keep the caret visible" scroll
+      // races with ensureVisible and the tap lands off-screen.
+      await tester.pumpAndSettle();
 
       // Tap Confirm Routing
       final confirmBtn = find.text('Confirm Routing');
@@ -241,6 +253,9 @@ void main() {
       await tester.enterText(find.byKey(const Key('bp_input_field')), '120/80');
       await tester.enterText(find.byKey(const Key('weight_input_field')), '70.5');
       await tester.enterText(find.byKey(const Key('temp_input_field')), '36.5');
+      // Let the focused field relayout settle before scrolling the action row
+      // into view (see the invalid-vitals case above).
+      await tester.pumpAndSettle();
 
       // Tap Confirm Routing
       final confirmBtn = find.text('Confirm Routing');
@@ -254,6 +269,41 @@ void main() {
       expect(routedBp, equals('120/80'));
       expect(routedWeight, equals(70.5));
       expect(routedTemp, equals(36.5));
+    });
+
+    testWidgets('reversed blood pressure blocks routing until corrected', (tester) async {
+      var calls = 0;
+      await tester.pumpWidget(buildTestWidget(onConfirm: ({
+        required String department,
+        required String priority,
+        String? bloodPressure,
+        num? weightKg,
+        num? temperatureC,
+        String? triageNotes,
+      }) { calls++; }));
+      await tester.tap(find.text('Show Sheet'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButtonFormField<String>).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ultrasound').last);
+      await tester.pumpAndSettle();
+      final field = find.byKey(const Key('bp_input_field'));
+      await tester.enterText(field, '80/120');
+      // Let the focused field relayout settle before scrolling the action row
+      // into view (see the invalid-vitals case above).
+      await tester.pumpAndSettle();
+      final confirm = find.text('Confirm Routing');
+      await tester.ensureVisible(confirm);
+      await tester.tap(confirm);
+      await tester.pumpAndSettle();
+      expect(calls, 0);
+      expect(find.text('Systolic must be higher than diastolic.'), findsOneWidget);
+      await tester.enterText(field, '120/80');
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(confirm);
+      await tester.tap(confirm);
+      await tester.pumpAndSettle();
+      expect(calls, 1);
     });
   });
 }

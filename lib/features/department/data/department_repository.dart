@@ -2,6 +2,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/models/patient_queue.dart';
 import '../../../core/models/department_record.dart';
 import '../../../core/models/patient.dart';
+import '../../../core/supabase/paged_read.dart';
 import '../../../core/supabase/supabase_client.dart';
 import '../../../core/errors/failures.dart';
 
@@ -70,6 +71,20 @@ class LabResultRow {
   }
 }
 
+/// The department's active queue and the exact number of entries it holds.
+class DepartmentQueuePage {
+  const DepartmentQueuePage({required this.entries, required this.total});
+
+  /// Every open entry of the department, oldest first.
+  final List<PatientQueue> entries;
+
+  /// The server's exact count of the open entries of the department.
+  ///
+  /// Independent of how many entries were read back, so a screen that shows a
+  /// count never reports the size of one page as the size of the queue.
+  final int total;
+}
+
 class DepartmentRepository {
   DepartmentRepository({SupabaseClient? client}) : _injectedClient = client;
   final SupabaseClient? _injectedClient;
@@ -106,20 +121,41 @@ class DepartmentRepository {
 
   /// Fetches all active queue entries for the user's department.
   /// No parameters to enforce server-side scoping.
-  Future<List<PatientQueue>> getActiveQueue() async {
+  ///
+  /// The read is paged: PostgREST caps one response at its max-rows (1,000)
+  /// and reports no error when it drops the rest, so an unpaginated select
+  /// would hide every entry past the cap - a waiting patient the department
+  /// would never see.
+  ///
+  /// The order is total (oldest first, then the primary key): entries that
+  /// share a timestamp keep a fixed place in the order, so a page boundary
+  /// never skips or repeats one of them. The read carries no date cutoff, so
+  /// an entry that was routed before midnight is still listed and still
+  /// closeable, exactly like the web's department queue.
+  ///
+  /// The server's exact count comes with the read, so the screen can report
+  /// the size of the queue instead of the size of one page.
+  Future<DepartmentQueuePage> getActiveQueue() async {
     try {
       final department = await _getCurrentUserDept();
-      
-      final response = await _client
-          .from('patient_queue')
-          .select('*, patient:patients(*)')
-          .eq('department', department)
-          .inFilter('status', ['waiting', 'in_progress'])
-          .order('created_at', ascending: true);
-          
-      return (response as List)
-          .map((json) => PatientQueue.fromJson(json as Map<String, dynamic>))
-          .toList();
+
+      final read = await readAllPages(
+        _client
+            .from('patient_queue')
+            .select('*, patient:patients(*)')
+            .eq('department', department)
+            .inFilter('status', ['waiting', 'in_progress'])
+            .order('created_at', ascending: true),
+        uniqueOrderColumn: 'id',
+        uniqueOrderAscending: true,
+      );
+
+      return DepartmentQueuePage(
+        entries: read.rows
+            .map((json) => PatientQueue.fromJson(json))
+            .toList(),
+        total: read.total,
+      );
     } catch (e) {
       if (e is DepartmentUnassignedException) rethrow;
       throw FailureMapper.fromException(e);
@@ -161,6 +197,35 @@ class DepartmentRepository {
     }
   }
 
+  // A successful HTTP response can still update zero rows (including RLS
+  // filtering). Keep the saved-results outcome separate from queue completion.
+  Future<void> _completeQueue(String patientId, String department) async {
+    try {
+      final updated = await _client
+          .from('patient_queue')
+          .update({'status': 'completed'})
+          .eq('patient_id', patientId)
+          .eq('department', department)
+          .inFilter('status', ['waiting', 'in_progress'])
+          .select('id');
+      if (updated.isEmpty) throw const QueueCompletionFailure();
+    } catch (_) {
+      throw const QueueCompletionFailure();
+    }
+  }
+
+  /// Completes the queue entry alone, after results were saved but completion
+  /// failed. Never re-inserts results. Throws [QueueCompletionFailure].
+  Future<void> completeQueue(String patientId) async {
+    final String department;
+    try {
+      department = await _getCurrentUserDept();
+    } catch (_) {
+      throw const QueueCompletionFailure();
+    }
+    await _completeQueue(patientId, department);
+  }
+
   /// Submits laboratory result rows to Supabase and updates patient queue.
   /// Implements sequential non-atomic write logic matching web route.ts.
   Future<void> submitLabResults({
@@ -176,17 +241,7 @@ class DepartmentRepository {
           .from('department_records')
           .insert(rows.map((row) => row.toJson()).toList());
 
-      // 2. Sequential queue update with no transaction/RPC fallback
-      try {
-        await _client
-            .from('patient_queue')
-            .update({'status': 'completed'})
-            .eq('patient_id', patientId)
-            .eq('department', department)
-            .inFilter('status', ['waiting', 'in_progress']);
-      } catch (e) {
-        throw const QueueCompletionFailure();
-      }
+      await _completeQueue(patientId, department);
     } catch (e) {
       if (e is QueueCompletionFailure) rethrow;
       throw FailureMapper.fromException(e);
@@ -195,6 +250,10 @@ class DepartmentRepository {
 
   /// Submits free-text findings & impression rows to Supabase and updates patient queue.
   /// Implements sequential non-atomic write logic matching web route.ts.
+  ///
+  /// Renders a Findings row and, when an impression is provided, a second
+  /// Impression row. Laboratory narrative tests reuse this path; the non-lab
+  /// entry forms require an impression before calling it.
   Future<void> submitFreeTextResult({
     required String patientId,
     required String testName,
@@ -211,7 +270,6 @@ class DepartmentRepository {
 
       final sharedNotes = notes?.trim().isEmpty == true ? null : notes?.trim();
 
-      // Renders exactly two records rows representing Findings and Impression respectively.
       final rowsJson = [
         {
           'patient_id': patientId,
@@ -226,35 +284,26 @@ class DepartmentRepository {
           'is_flagged': false,
           'notes': sharedNotes,
         },
-        {
-          'patient_id': patientId,
-          'recorder_id': userId,
-          'department': department,
-          'test_type': testName.trim(),
-          'test_name': 'Impression',
-          'test_value': impression.trim(),
-          'unit': null,
-          'reference_range_min': null,
-          'reference_range_max': null,
-          'is_flagged': false,
-          'notes': sharedNotes,
-        }
+        if (impression.trim().isNotEmpty)
+          {
+            'patient_id': patientId,
+            'recorder_id': userId,
+            'department': department,
+            'test_type': testName.trim(),
+            'test_name': 'Impression',
+            'test_value': impression.trim(),
+            'unit': null,
+            'reference_range_min': null,
+            'reference_range_max': null,
+            'is_flagged': false,
+            'notes': sharedNotes,
+          }
       ];
 
       // 1. Insert records rows to public.department_records
       await _client.from('department_records').insert(rowsJson);
 
-      // 2. Sequential queue update with no transaction/RPC fallback
-      try {
-        await _client
-            .from('patient_queue')
-            .update({'status': 'completed'})
-            .eq('patient_id', patientId)
-            .eq('department', department)
-            .inFilter('status', ['waiting', 'in_progress']);
-      } catch (e) {
-        throw const QueueCompletionFailure();
-      }
+      await _completeQueue(patientId, department);
     } catch (e) {
       if (e is QueueCompletionFailure) rethrow;
       throw FailureMapper.fromException(e);

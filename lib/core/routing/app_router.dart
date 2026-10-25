@@ -13,7 +13,6 @@ import '../../features/documents/presentation/screens/submit_document_screen.dar
 import '../../features/records/presentation/screens/records_screen.dart';
 import '../../features/patient/templates/presentation/screens/template_picker_screen.dart';
 import '../../features/patient/templates/presentation/screens/template_form_renderer_screen.dart';
-import '../../features/patient/templates/presentation/providers/templates_provider.dart';
 import '../../features/records/presentation/providers/records_provider.dart';
 import '../../features/queue/presentation/screens/queue_screen.dart';
 import '../../features/queue/presentation/providers/queue_provider.dart';
@@ -25,8 +24,6 @@ import '../../features/dashboard/presentation/providers/dashboard_provider.dart'
 import '../../features/documents/presentation/providers/document_submission_provider.dart';
 import '../cache/local_database.dart';
 import '../models/profile.dart';
-import '../../features/staff/presentation/screens/reception_home_screen.dart';
-import '../../features/staff/presentation/screens/specialist_home_screen.dart';
 import '../../features/auth/presentation/screens/totp_verify_screen.dart';
 import '../../features/reception/presentation/reception_shell.dart';
 import '../../features/reception/presentation/screens/reception_queue_screen.dart';
@@ -53,7 +50,16 @@ import '../../features/admin/presentation/screens/admin_records_screen.dart';
 import '../../features/admin/presentation/screens/admin_logs_screen.dart';
 import '../../features/admin/presentation/screens/admin_rag_screen.dart';
 import '../../features/admin/presentation/screens/admin_rbac_screen.dart';
+import '../../features/permissions/presentation/permission_access_screen.dart';
 import '../permissions/permission_route_policy.dart';
+import '../permissions/permission_service.dart';
+
+/// The route the app shows when the account cannot be routed.
+///
+/// It holds both the retry state (the permission read failed) and the denial
+/// state (the read succeeded and the account holds no permission), because
+/// both are answers the app must give before it opens a screen.
+const String kPermissionAccessRoute = '/access-denied';
 
 /// AppRouter defines the structural gating/redirection rules for the application.
 class AppRouter {
@@ -66,15 +72,18 @@ class AppRouter {
         legacyRole: authProvider.profile?.role,
       );
 
-  String? _legacyHomeForRole(UserRole? role) {
-    if (role == UserRole.patient) return '/patient';
-    if (role == UserRole.admin) return '/admin/dashboard';
-    if (role == UserRole.receptionist) return '/reception/queue';
-    if (role == UserRole.departmentStaff) return '/department/queue';
-    if (role == UserRole.medicalSpecialist) return '/specialist/dashboard';
-    return null;
+  String? _homeForCurrentUser() {
+    // Without a profile the grants are unknown, so there is no home to send
+    // the account to and no grounds to deny it one.
+    if (authProvider.profile == null) return null;
+
+    // An account that may open no screen at all belongs on the access
+    // screen, not on a screen it is not allowed to open.
+    return _permissionHomeForRole(authProvider.profile?.role) ??
+        kPermissionAccessRoute;
   }
 
+  /// The screen the account lands on, given the permissions it holds.
   String? _permissionHomeForRole(UserRole? role) {
     return PermissionRoutePolicy(
       permissions: authProvider.permissions,
@@ -82,30 +91,46 @@ class AppRouter {
     ).home();
   }
 
-  String? _homeForCurrentUser() {
-    final role = authProvider.profile?.role;
-    if (authProvider.usesLegacyPermissionFallback) {
-      return _legacyHomeForRole(role);
-    }
-    return _permissionHomeForRole(role);
-  }
-
+  /// Where the account goes, given what the server said it may do.
+  ///
+  /// A failed read and a read that returned no grants are different answers
+  /// and lead to different screens:
+  ///
+  /// * the read failed - the grants are unknown, so the account is not routed
+  ///   as if it held nothing and not as if it held everything. The access
+  ///   screen says the read failed and offers a retry.
+  /// * the read succeeded with no grants - that is an answer, and the answer
+  ///   is that no screen opens for the account. The access screen says so.
+  /// * the read is still running, or the account has no profile - the grants
+  ///   are unknown, so the app does not deny a screen it cannot judge yet.
+  ///
+  /// The role text on the profile is not used as a stand-in for the grants:
+  /// only the server decides what an account may open.
   String? _permissionRedirect(String location) {
-    if (location == '/login' ||
-        location == '/register' ||
-        location == '/consent' ||
-        location == '/verify' ||
-        location == '/' ||
-        location == '/staff/reception' ||
-        location == '/staff/specialist') {
-      return _permissionHomeForRole(authProvider.profile?.role);
+    final state = authProvider.permissionLoadState;
+    final onAccessRoute = location == kPermissionAccessRoute;
+
+    if (state == PermissionLoadState.failed) {
+      return onAccessRoute ? null : kPermissionAccessRoute;
     }
 
-    if (_isPermissionAllowedPath(location)) {
-      return null;
+    if (state == PermissionLoadState.loaded) {
+      if (authProvider.permissions.isEmpty) {
+        return onAccessRoute ? null : kPermissionAccessRoute;
+      }
+
+      if (_isPermissionAllowedPath(location)) {
+        return null;
+      }
+
+      // The account may hold permissions, but not for this screen. It lands
+      // on a screen it may open, or on the access screen when it may open
+      // none.
+      return _permissionHomeForRole(authProvider.profile?.role) ??
+          kPermissionAccessRoute;
     }
 
-    return _permissionHomeForRole(authProvider.profile?.role);
+    return null;
   }
 
   bool _isPermissionAllowedPath(String location) {
@@ -162,14 +187,16 @@ class AppRouter {
 
       // Prevent non-pending users from accessing /mfa-verify
       if (location == '/mfa-verify') {
-        if (role == UserRole.admin && !authProvider.isAal2) {
+        if (role != null && role != UserRole.patient && !authProvider.isAal2) {
           return null;
         }
         return _homeForCurrentUser();
       }
 
-      // 3. Admin AAL2 guarding remains tied to the legacy admin role.
-      if (role == UserRole.admin && !authProvider.isAal2) {
+      // 3. All staff require AAL2 before protected routes can load.
+      // Patient RLS exemption also requires role_id to link to the patient role;
+      // a missing link is a backend data issue, not a reason to enroll a patient.
+      if (role != null && role != UserRole.patient && !authProvider.isAal2) {
         return '/mfa-verify';
       }
 
@@ -202,8 +229,7 @@ class AppRouter {
         }
 
         // Patient trying to access staff/admin routes is redirected to /patient
-        if (location.startsWith('/staff/') ||
-            location.startsWith('/reception/') ||
+        if (location.startsWith('/reception/') ||
             location.startsWith('/department/') ||
             location.startsWith('/admin/') ||
             location.startsWith('/specialist/')) {
@@ -213,79 +239,21 @@ class AppRouter {
         return null; // Allow patient routes
       }
 
-      if (!authProvider.usesLegacyPermissionFallback) {
-        return _permissionRedirect(location);
+      // A department staff member without a department has no department to
+      // work in. The account is signed out, the way it always was; this is a
+      // question about the profile, not about the permissions.
+      if (role == UserRole.departmentStaff &&
+          authProvider.profile?.department == null) {
+        authProvider.signOut();
+        return '/login';
       }
 
-      // 4b. Legacy fallback routing. This activates when role_id is missing or
-      // permissions cannot be loaded, and preserves the old production behavior.
-      if (role == UserRole.admin) {
-        final isAdminPath = location.startsWith('/admin/');
-        if (!isAdminPath && location != '/login') {
-          return '/admin/dashboard';
-        }
-        return null;
-      }
-
-      // 5. Staff Roles (receptionist, departmentStaff, medicalSpecialist)
-      if (role == UserRole.receptionist ||
-          role == UserRole.departmentStaff ||
-          role == UserRole.medicalSpecialist) {
-        
-        // Block other staff roles from admin paths
-        if (location.startsWith('/admin/')) {
-          if (role == UserRole.receptionist) {
-            return '/reception/queue';
-          } else if (role == UserRole.departmentStaff) {
-            return '/department/queue';
-          } else if (role == UserRole.medicalSpecialist) {
-            return '/specialist/dashboard';
-          }
-        }
-
-        final isStaffPath = location.startsWith('/staff/') ||
-                            location.startsWith('/reception/') ||
-                            location.startsWith('/department/') ||
-                            location.startsWith('/specialist/');
-        final isCommonPath = isLoggingIn || isRegistering || isConsenting;
-
-        // Staff trying to access / or patient routes are routed to their home
-        if (!isStaffPath && !isCommonPath) {
-          if (role == UserRole.receptionist) {
-            return '/reception/queue';
-          } else if (role == UserRole.departmentStaff) {
-            return '/department/queue';
-          } else if (role == UserRole.medicalSpecialist) {
-            return '/specialist/dashboard';
-          }
-        }
-
-        // Enforce staff role guards (cross-role isolation)
-        if (role == UserRole.receptionist) {
-          if (!location.startsWith('/reception/')) {
-            return '/reception/queue';
-          }
-        }
-        if (role == UserRole.departmentStaff) {
-          final dept = authProvider.profile?.department;
-          if (dept == null) {
-            authProvider.signOut();
-            return '/login';
-          }
-          if (!location.startsWith('/department/')) {
-            return '/department/queue';
-          }
-        }
-        if (role == UserRole.medicalSpecialist) {
-          if (!location.startsWith('/specialist/')) {
-            return '/specialist/dashboard';
-          }
-        }
-
-        return null; // Allow staff routes
-      }
-
-      return null;
+      // 5. Staff routing is decided by the permissions the server resolved.
+      // The role text on the profile is not a stand-in for them: an account
+      // that holds no permission is not given the screens of its role, and an
+      // account whose permissions could not be read is not treated as if it
+      // held none.
+      return _permissionRedirect(location);
     },
     routes: [
       GoRoute(
@@ -312,14 +280,14 @@ class AppRouter {
         path: '/consent',
         builder: (context, state) => const ConsentScreen(),
       ),
+      GoRoute(
+        path: kPermissionAccessRoute,
+        builder: (context, state) => const PermissionAccessScreen(),
+      ),
 
       GoRoute(
         path: '/verify',
         builder: (context, state) => const VerificationCodeScreen(),
-      ),
-      GoRoute(
-        path: '/staff/reception',
-        builder: (context, state) => const ReceptionHomeScreen(),
       ),
       ShellRoute(
         builder: (context, state, child) {
@@ -366,10 +334,6 @@ class AppRouter {
             departmentOverride: dept,
           );
         },
-      ),
-      GoRoute(
-        path: '/staff/specialist',
-        builder: (context, state) => const SpecialistHomeScreen(),
       ),
       ShellRoute(
         builder: (context, state, child) {
@@ -552,7 +516,8 @@ class AppRouter {
           ),
           GoRoute(
             path: '/documents/status',
-            builder: (context, state) => const DocumentStatusScreen(),
+            builder: (context, state) => DocumentStatusScreen(
+              documentId: state.uri.queryParameters['document_id']),
           ),
           GoRoute(
             path: '/chatbot',
@@ -596,9 +561,6 @@ class AppShell extends StatelessWidget {
         ),
         ChangeNotifierProvider<DocumentStatusProvider>(
           create: (_) => DocumentStatusProvider(localDb),
-        ),
-        ChangeNotifierProvider<TemplatesProvider>(
-          create: (_) => TemplatesProvider(),
         ),
       ],
       child: Scaffold(

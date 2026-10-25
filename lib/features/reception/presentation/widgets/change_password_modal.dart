@@ -64,7 +64,7 @@ class _ChangePasswordModalState extends State<ChangePasswordModal> {
     final v = _newController.text;
     if (v.isEmpty) return null; // show error only after user types
     if (!RegistrationValidators.validatePassword(v)) {
-      return 'Min 8 characters, 1 number, 1 special character';
+      return RegistrationValidators.passwordRequirementText;
     }
     if (!_hasMfa && v == _currentController.text && _currentController.text.isNotEmpty) {
       return 'New password must differ from current password';

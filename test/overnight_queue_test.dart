@@ -19,7 +19,7 @@ class TestAuth extends GoTrueClient {
 
 class TestClient extends SupabaseClient {
   final fakeAuth = TestAuth();
-  TestClient(http.Client transport) : super('https://example.supabase.co', 'fake',
+  TestClient(http.Client transport) : super('https://example.invalid', 'fake',
     httpClient: transport, authOptions: const AuthClientOptions(autoRefreshToken: false));
   @override
   GoTrueClient get auth => fakeAuth;
@@ -33,7 +33,10 @@ void main() {
       expect(request.url.path, '/rest/v1/patient_queue');
       expect(request.url.queryParameters['department'], 'eq.laboratory');
       expect(request.url.queryParameters['status'], 'in.("waiting","in_progress")');
-      expect(request.url.queryParameters['order'], 'created_at.asc.nullslast');
+      // The order is total: oldest first, then the primary key, so a page
+      // boundary cannot skip or repeat an entry that shares a timestamp.
+      expect(request.url.queryParameters['order'],
+        'created_at.asc.nullslast,id.asc.nullslast');
       expect(request.url.queryParameters.containsKey('created_at'), isFalse);
       final data = [
         for (var i = 1; i <= 2; i++) {
@@ -44,18 +47,23 @@ void main() {
         },
       ];
       return http.Response(jsonEncode(data), 200, request: request,
-        headers: {'content-type': 'application/json'});
+        headers: {
+          'content-type': 'application/json',
+          // The exact count of the rows the filter matched.
+          'content-range': '0-1/2',
+        });
     }));
     final repo = DepartmentRepository(client: client)..adminDepartmentOverride = 'laboratory';
     final result = await repo.getActiveQueue();
-    expect(result.map((e) => e.id), [1, 2]);
-    expect(result.first.createdAt.isBefore(result.last.createdAt), isTrue);
+    expect(result.entries.map((e) => e.id), [1, 2]);
+    expect(result.total, 2);
+    expect(result.entries.first.createdAt.isBefore(result.entries.last.createdAt), isTrue);
     await client.dispose();
     client.fakeAuth.dispose();
   });
 
   for (final lab in [true, false]) {
-    for (final outcome in ['success', 'insert-failed', 'queue-failed']) {
+    for (final outcome in ['success', 'insert-failed', 'queue-failed', 'queue-empty']) {
       test('${lab ? 'lab' : 'free text'} $outcome preserves write filters and save outcome', () async {
         final requests = <http.Request>[];
         final dept = lab ? 'laboratory' : 'imaging';
@@ -67,11 +75,13 @@ void main() {
             expect(request.url.queryParameters, {
               'patient_id': 'eq.patient', 'department': 'eq.$dept',
               'status': 'in.("waiting","in_progress")',
+              'select': 'id',
             });
             expect(jsonDecode(request.body), {'status': 'completed'});
           }
           final failed = insert ? outcome == 'insert-failed' : outcome == 'queue-failed';
-          return http.Response(failed ? '{"message":"denied","code":"42501"}' : '',
+          final body = insert ? '' : outcome == 'queue-empty' ? '[]' : '[{"id":1}]';
+          return http.Response(failed ? '{"message":"denied","code":"42501"}' : body,
             failed ? 403 : 201, request: request, headers: {'content-type': 'application/json'});
         }));
         final repo = DepartmentRepository(client: client)..adminDepartmentOverride = dept;
@@ -85,7 +95,8 @@ void main() {
         expect(saved, outcome != 'insert-failed');
         expect(requests.length, outcome == 'insert-failed' ? 1 : 2);
         expect(provider.queueCompletionWarning,
-          outcome == 'queue-failed' ? QueueCompletionFailure.message : isNull);
+          outcome == 'queue-failed' || outcome == 'queue-empty'
+              ? QueueCompletionFailure.message : isNull);
         if (outcome == 'insert-failed') expect(provider.errorMessage, isNotNull);
         await client.dispose();
         client.fakeAuth.dispose();
@@ -117,5 +128,43 @@ void main() {
     await tester.tap(find.text('Dismiss'));
     await tester.pumpAndSettle();
     expect(find.byType(MaterialBanner), findsNothing);
+  });
+
+  for (final queueBody in ['[{"id":1}]', '[]']) {
+    test('completeQueue retries only the queue update (response $queueBody)', () async {
+      final requests = <http.Request>[];
+      final client = TestClient(MockClient((request) async {
+        requests.add(request);
+        return http.Response(queueBody, 200, request: request,
+          headers: {'content-type': 'application/json'});
+      }));
+      final repo = DepartmentRepository(client: client)..adminDepartmentOverride = 'laboratory';
+      final retry = repo.completeQueue('patient');
+      if (queueBody == '[]') {
+        await expectLater(retry, throwsA(isA<QueueCompletionFailure>()));
+      } else {
+        await retry;
+      }
+      expect(requests.map((r) => '${r.method} ${r.url.path}'),
+        ['PATCH /rest/v1/patient_queue']);
+      expect(requests.single.url.queryParameters, {
+        'patient_id': 'eq.patient', 'department': 'eq.laboratory',
+        'status': 'in.("waiting","in_progress")', 'select': 'id',
+      });
+      expect(jsonDecode(requests.single.body), {'status': 'completed'});
+      await client.dispose();
+      client.fakeAuth.dispose();
+    });
+  }
+
+  testWidgets('banner offers a queue-only retry when given one', (tester) async {
+    var retries = 0;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: queueCompletionBanner(
+      QueueCompletionFailure.message, () {}, onRetry: () => retries++))));
+    await tester.tap(find.text('Retry queue update'));
+    expect(retries, 1);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: queueCompletionBanner(
+      QueueCompletionFailure.message, () {}))));
+    expect(find.text('Retry queue update'), findsNothing);
   });
 }

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../providers/auth_provider.dart';
 import '../../domain/registration_validators.dart';
+import '../../domain/signup_outcome.dart';
 import '../../../../core/models/patient.dart';
 import '../widgets/privacy_policy_modal.dart';
 import '../widgets/terms_and_conditions_modal.dart';
@@ -88,12 +89,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (password.isEmpty) return '';
     if (password.length < 8) return 'Weak (min 8 characters)';
     
-    final hasDigit = RegExp(r'[0-9]').hasMatch(password);
-    final hasSpecial = RegExp(r'[^a-zA-Z0-9]').hasMatch(password);
-    
-    if (hasDigit && hasSpecial) return 'Strong';
-    if (hasDigit || hasSpecial) return 'Medium';
-    return 'Weak (needs digit and special character)';
+    if (RegistrationValidators.validatePassword(password)) return 'Strong';
+    final met = [r'[a-z]', r'[A-Z]', r'\d', r'[^A-Za-z\d]']
+        .where((p) => RegExp(p).hasMatch(password))
+        .length;
+    if (met >= 3) return 'Medium';
+    return 'Weak (needs upper and lower case, a number and a special character)';
   }
 
   Color _getPasswordStrengthColor() {
@@ -111,18 +112,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     if (_formKey.currentState!.validate() && _dobError == null) {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final success = await authProvider.signUp(
+      final outcome = await authProvider.signUp(
         email: _emailController.text.trim(),
         password: _passwordController.text,
         firstName: _firstNameController.text.trim(),
         lastName: _lastNameController.text.trim(),
         dateOfBirth: _dateOfBirth!,
         gender: _gender,
-        contactNumber: _contactController.text.trim(),
+        contactNumber: RegistrationValidators.normalizeContactNumber(_contactController.text),
         address: _addressController.text.trim(),
       );
 
-      if (success && mounted) {
+      // Every other outcome leaves its recovery message in the provider's error.
+      if (outcome == SignUpOutcome.registered && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Registration successful! Please check your email for the verification code.'),
@@ -240,7 +242,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 return 'Please enter a password';
                               }
                               if (!RegistrationValidators.validatePassword(value)) {
-                                return 'Password must be at least 8 characters and contain at least 1 digit (e.g. 1, 2, 3) and 1 special character (e.g. \$, @, !)';
+                                return RegistrationValidators.passwordRequirementText;
                               }
                               return null;
                             },
@@ -314,7 +316,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             ),
                             validator: (value) {
                               if (value == null || !RegistrationValidators.validateFirstName(value)) {
-                                return 'First name must be at least 3 characters';
+                                return RegistrationValidators.nameFieldMessage('First name');
                               }
                               return null;
                             },
@@ -331,7 +333,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             ),
                             validator: (value) {
                               if (value == null || !RegistrationValidators.validateLastName(value)) {
-                                return 'Last name is required';
+                                return RegistrationValidators.nameFieldMessage('Last name');
                               }
                               return null;
                             },
@@ -464,7 +466,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             ),
                             validator: (value) {
                               if (value == null || !RegistrationValidators.validateAddress(value)) {
-                                return 'Please enter your complete address';
+                                return RegistrationValidators.addressFieldMessage;
                               }
                               return null;
                             },

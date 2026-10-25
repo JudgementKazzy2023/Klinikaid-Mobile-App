@@ -76,6 +76,89 @@ class GroupedRecordDetailModal extends StatelessWidget {
     );
   }
 
+  /// Renders the measured values of a single record.
+  ///
+  /// The reference bounds are shown as one range instead of two raw columns,
+  /// so the reader sees the same thing the server recorded: the value, its
+  /// unit, and the range it is read against.
+  Widget _buildResultsTable(DepartmentRecord record, ThemeData theme) {
+    final entries = record.testResults.entries
+        .where((entry) =>
+            entry.key != 'reference_range_min' && entry.key != 'reference_range_max')
+        .toList();
+    final rangeLabel = record.referenceRangeLabel;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.scaffoldBackgroundColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.colorScheme.outline, width: 1),
+      ),
+      child: Table(
+        columnWidths: const {
+          0: FlexColumnWidth(1.2),
+          1: FlexColumnWidth(1.0),
+        },
+        border: TableBorder.symmetric(
+          inside: BorderSide(color: theme.colorScheme.outline, width: 1),
+        ),
+        children: [
+          ...entries.map((entry) => TableRow(
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Text(
+                  entry.key.replaceAll('_', ' ').toUpperCase(),
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Text(
+                  entry.value.toString(),
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurface,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
+          )),
+          if (rangeLabel != null)
+            TableRow(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Text(
+                    'REFERENCE RANGE',
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Text(
+                    rangeLabel,
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -145,49 +228,7 @@ class GroupedRecordDetailModal extends StatelessWidget {
                 ),
               )
             else
-              Container(
-                decoration: BoxDecoration(
-                  color: theme.scaffoldBackgroundColor,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: theme.colorScheme.outline, width: 1),
-                ),
-                child: Table(
-                  columnWidths: const {
-                    0: FlexColumnWidth(1.2),
-                    1: FlexColumnWidth(1.0),
-                  },
-                  border: TableBorder.symmetric(
-                    inside: BorderSide(color: theme.colorScheme.outline, width: 1),
-                  ),
-                  children: record.testResults.entries.map((entry) {
-                    return TableRow(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                          child: Text(
-                            entry.key.replaceAll('_', ' ').toUpperCase(),
-                            style: TextStyle(
-                              color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                          child: Text(
-                            entry.value.toString(),
-                            style: TextStyle(
-                              color: theme.colorScheme.onSurface,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  }).toList(),
-                ),
-              ),
+              _buildResultsTable(record, theme),
             
             const SizedBox(height: 24),
             if (record.notes != null && record.notes!.isNotEmpty) ...[
@@ -309,7 +350,8 @@ class GroupedRecordDetailModal extends StatelessWidget {
               return list;
             })().expand((r) {
               final parameterName = r.testResults['test_name']?.toString() ?? r.testType;
-              final parameterValue = r.testResults['test_value']?.toString() ?? '';
+              final parameterValue = r.valueLabel;
+              final rangeLabel = r.referenceRangeLabel;
               final formattedHeader = parameterName.isNotEmpty
                   ? parameterName[0].toUpperCase() + parameterName.substring(1)
                   : '';
@@ -331,13 +373,29 @@ class GroupedRecordDetailModal extends StatelessWidget {
                     color: theme.scaffoldBackgroundColor,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Text(
-                    parameterValue,
-                    style: TextStyle(
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
-                      fontSize: 14,
-                      height: 1.4,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        parameterValue,
+                        style: TextStyle(
+                          color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                          fontSize: 14,
+                          height: 1.4,
+                        ),
+                      ),
+                      if (rangeLabel != null) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          'Reference range: $rangeLabel',
+                          style: TextStyle(
+                            color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                            fontSize: 12,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 const SizedBox(height: 24),

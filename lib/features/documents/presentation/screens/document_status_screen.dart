@@ -5,7 +5,8 @@ import '../../../../core/models/document.dart';
 import '../providers/document_status_provider.dart';
 
 class DocumentStatusScreen extends StatefulWidget {
-  const DocumentStatusScreen({super.key});
+  final String? documentId;
+  const DocumentStatusScreen({super.key, this.documentId});
 
   @override
   State<DocumentStatusScreen> createState() => _DocumentStatusScreenState();
@@ -50,29 +51,8 @@ class _DocumentStatusScreenState extends State<DocumentStatusScreen> {
             );
           }
 
-          if (provider.errorMessage != null && provider.documents.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.error_outline_rounded, color: Theme.of(context).colorScheme.error, size: 48),
-                    const SizedBox(height: 16),
-                    Text(
-                      provider.errorMessage!,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7)),
-                    ),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: _loadDocuments,
-                      child: const Text('Try Again'),
-                    ),
-                  ],
-                ),
-              ),
-            );
+          if (provider.dataState == DocumentDataState.error) {
+            return _buildErrorState(provider);
           }
 
           return RefreshIndicator(
@@ -86,10 +66,14 @@ class _DocumentStatusScreenState extends State<DocumentStatusScreen> {
                 _buildRealtimeBanner(provider),
                 const SizedBox(height: 16),
 
-                if (provider.documents.isEmpty)
+                if (widget.documentId != null && !provider.documents.any((doc) => doc.id == widget.documentId))
+                  const Text('This document is not available in your records. Pull down to refresh.')
+                else if (provider.documents.isEmpty)
                   _buildEmptyState()
                 else
-                  ...provider.documents.map((doc) => _buildDocumentCard(doc)),
+                  ...provider.documents
+                      .where((doc) => widget.documentId == null || doc.id == widget.documentId)
+                      .map((doc) => _buildDocumentCard(doc)),
               ],
             ),
           );
@@ -98,7 +82,56 @@ class _DocumentStatusScreenState extends State<DocumentStatusScreen> {
     );
   }
 
+  /// Tells the patient where the documents on screen came from.
+  ///
+  /// A cached copy shown without this notice reads exactly like a live answer,
+  /// which is how a failed read ends up looking like "these are your
+  /// submissions". The notice is never shown as a live one.
   Widget _buildRealtimeBanner(DocumentStatusProvider provider) {
+    if (provider.isStale) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.orange.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.orange.withValues(alpha: 0.3), width: 1.5),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.cloud_off_rounded, color: Colors.orange, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Showing cached documents',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurface,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    provider.errorMessage ?? 'The server could not be reached.',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: _loadDocuments,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+
     final isOffline = provider.isOffline;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -137,6 +170,44 @@ class _DocumentStatusScreenState extends State<DocumentStatusScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Shown when the documents could not be read and nothing was cached to fall
+  /// back on. The screen says the data is unknown instead of showing an empty
+  /// list, which would read as "you have no submissions".
+  Widget _buildErrorState(DocumentStatusProvider provider) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline_rounded, color: Theme.of(context).colorScheme.error, size: 48),
+            const SizedBox(height: 16),
+            Text(
+              'Could not load your documents',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              provider.errorMessage ?? 'Unknown error',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7)),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _loadDocuments,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
       ),
     );
   }

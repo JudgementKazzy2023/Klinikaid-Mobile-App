@@ -21,6 +21,26 @@ class ProfilesRepository {
     }
   }
 
+  /// Records the data privacy consent on the profile.
+  ///
+  /// Writes only `accepted_privacy_at`, the single column the web agreement
+  /// page writes. Sending the whole row back would overwrite role and active
+  /// status with a copy that may be stale.
+  /// Throws a [Failure] on error.
+  Future<Profile> recordPrivacyAcceptance(String id, DateTime acceptedAt) async {
+    try {
+      final response = await _client
+          .from('profiles')
+          .update({'accepted_privacy_at': acceptedAt.toIso8601String()})
+          .eq('id', id)
+          .select()
+          .single();
+      return Profile.fromJson(response);
+    } catch (e) {
+      throw FailureMapper.fromException(e);
+    }
+  }
+
   /// Updates the profile data. Respects role protections in the database.
   /// Throws a [Failure] on error.
   Future<Profile> updateProfile(Profile profile) async {

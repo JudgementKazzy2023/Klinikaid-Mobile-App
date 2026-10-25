@@ -1,4 +1,6 @@
+import '../utils/uuid_generator.dart';
 import 'dart:io';
+
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:path_provider/path_provider.dart';
@@ -78,6 +80,10 @@ class CachedDepartmentRecords extends Table {
 
 @DataClassName('OfflineDocument')
 class OfflineDocumentsQueue extends Table {
+  TextColumn get requestId => text().nullable()();
+  TextColumn get assessmentId => text().nullable()();
+  TextColumn get uploadState => text().withDefault(const Constant('draft'))();
+  TextColumn get submissionContent => text().nullable()();
   TextColumn get id => text()();
   TextColumn get patientId => text().nullable()();
   TextColumn get uploaderId => text()();
@@ -92,18 +98,58 @@ class OfflineDocumentsQueue extends Table {
   Set<Column> get primaryKey => {id};
 }
 
-@DriftDatabase(tables: [
-  CachedPatients,
-  CachedDocuments,
-  CachedPatientQueues,
-  CachedDepartmentRecords,
-  OfflineDocumentsQueue,
-])
+@DriftDatabase(
+  tables: [
+    CachedPatients,
+    CachedDocuments,
+    CachedPatientQueues,
+    CachedDepartmentRecords,
+    OfflineDocumentsQueue,
+  ],
+)
 class LocalDatabase extends _$LocalDatabase {
   LocalDatabase([QueryExecutor? e]) : super(e ?? _openConnection());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+    onUpgrade: (m, from, to) async {
+      if (from < 2) {
+        await m.addColumn(
+          offlineDocumentsQueue,
+          offlineDocumentsQueue.requestId,
+        );
+        await m.addColumn(
+          offlineDocumentsQueue,
+          offlineDocumentsQueue.assessmentId,
+        );
+        await m.addColumn(
+          offlineDocumentsQueue,
+          offlineDocumentsQueue.uploadState,
+        );
+        await m.addColumn(
+          offlineDocumentsQueue,
+          offlineDocumentsQueue.submissionContent,
+        );
+        final rows = await customSelect(
+          'SELECT id FROM offline_documents_queue',
+        ).get();
+        for (final row in rows) {
+          await customStatement(
+            'UPDATE offline_documents_queue SET request_id = ?, assessment_id = ?, upload_state = ? WHERE id = ?',
+            [
+              UuidGenerator.generateV4(),
+              UuidGenerator.generateV4(),
+              'legacy',
+              row.read<String>('id'),
+            ],
+          );
+        }
+      }
+    },
+  );
 
   // Helpers to fetch and update cached dashboard data
   Future<void> cachePatient(CachedPatient patient) async {
@@ -111,13 +157,21 @@ class LocalDatabase extends _$LocalDatabase {
   }
 
   Future<CachedPatient?> getPatient(String id) async {
-    return (select(cachedPatients)..where((t) => t.id.equals(id))).getSingleOrNull();
+    return (select(
+      cachedPatients,
+    )..where((t) => t.id.equals(id))).getSingleOrNull();
   }
 
   Future<void> cacheDocuments(List<CachedDocument> docs) async {
     await batch((batch) {
       batch.insertAllOnConflictUpdate(cachedDocuments, docs);
     });
+  }
+
+  /// Removes one cached document by id. The offline upload queue is a separate
+  /// table and is left untouched.
+  Future<void> deleteCachedDocument(String id) async {
+    await (delete(cachedDocuments)..where((t) => t.id.equals(id))).go();
   }
 
   Future<List<CachedDocument>> getDocumentsForPatient(String uploaderId) async {
@@ -127,9 +181,56 @@ class LocalDatabase extends _$LocalDatabase {
         .get();
   }
 
+  /// Replaces the cached documents of [uploaderId] with [documents].
+  ///
+  /// Rows the server no longer returns are dropped, and an empty [documents]
+  /// list clears that uploader's cache entirely. A successful read that returns
+  /// nothing means the account has no submissions, not that the old ones are
+  /// still valid. Other accounts' cached documents are left untouched, and the
+  /// offline upload queue is never touched.
+  Future<void> replaceDocumentsForUploader(
+    String uploaderId,
+    List<CachedDocument> documents,
+  ) async {
+    await transaction(() async {
+      final ids = documents.map((doc) => doc.id).toList();
+      if (ids.isEmpty) {
+        await (delete(cachedDocuments)
+              ..where((t) => t.uploaderId.equals(uploaderId)))
+            .go();
+      } else {
+        await (delete(cachedDocuments)
+              ..where((t) => t.uploaderId.equals(uploaderId) & t.id.isNotIn(ids)))
+            .go();
+      }
+      if (documents.isNotEmpty) {
+        await batch((batch) {
+          batch.insertAllOnConflictUpdate(cachedDocuments, documents);
+        });
+      }
+    });
+  }
+
   Future<void> cacheQueueEntries(List<CachedPatientQueue> entries) async {
     await batch((batch) {
       batch.insertAllOnConflictUpdate(cachedPatientQueues, entries);
+    });
+  }
+
+  /// Reconcile one successful remote snapshot, including an empty result.
+  /// Incremental callers retain the upsert semantics of cacheQueueEntries.
+  Future<void> replaceQueueForPatient(
+    String patientId,
+    List<CachedPatientQueue> entries,
+  ) async {
+    if (entries.any((entry) => entry.patientId != patientId)) {
+      throw ArgumentError('Queue snapshot contains another patient');
+    }
+    await transaction(() async {
+      await (delete(
+        cachedPatientQueues,
+      )..where((t) => t.patientId.equals(patientId))).go();
+      await cacheQueueEntries(entries);
     });
   }
 
@@ -140,30 +241,82 @@ class LocalDatabase extends _$LocalDatabase {
         .get();
   }
 
-  Future<void> cacheDepartmentRecords(List<CachedDepartmentRecord> records) async {
+  Future<void> cacheDepartmentRecords(
+    List<CachedDepartmentRecord> records,
+  ) async {
     await batch((batch) {
       batch.insertAllOnConflictUpdate(cachedDepartmentRecords, records);
     });
   }
 
-  Future<List<CachedDepartmentRecord>> getRecordsForPatient(String patientId) async {
+  /// Replaces the cached records of [patientId] with [records].
+  ///
+  /// Rows the server no longer returns are dropped, and an empty [records] list
+  /// clears the patient's cache entirely. A successful read that returns nothing
+  /// means the patient has no results, not that the old ones are still valid.
+  /// Other patients' cached records are left untouched.
+  Future<void> replaceDepartmentRecords(
+    String patientId,
+    List<CachedDepartmentRecord> records,
+  ) async {
+    await transaction(() async {
+      final ids = records.map((r) => r.id).toList();
+      if (ids.isEmpty) {
+        await (delete(
+          cachedDepartmentRecords,
+        )..where((t) => t.patientId.equals(patientId))).go();
+      } else {
+        await (delete(cachedDepartmentRecords)
+              ..where((t) => t.patientId.equals(patientId) & t.id.isNotIn(ids)))
+            .go();
+      }
+      if (records.isNotEmpty) {
+        await batch((batch) {
+          batch.insertAllOnConflictUpdate(cachedDepartmentRecords, records);
+        });
+      }
+    });
+  }
+
+  Future<List<CachedDepartmentRecord>> getRecordsForPatient(
+    String patientId,
+  ) async {
     return (select(cachedDepartmentRecords)
           ..where((t) => t.patientId.equals(patientId))
           ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))
         .get();
   }
 
-  // Offline Upload Queue Helpers
+  // Offline Upload Queue Helpers (owner-scoped: every queue read/delete must
+  // name the account the rows belong to)
   Future<void> queueOfflineDocument(OfflineDocument doc) async {
-    await into(offlineDocumentsQueue).insert(doc);
+    await into(offlineDocumentsQueue).insert(
+      doc.copyWith(
+        requestId: Value(doc.requestId ?? UuidGenerator.generateV4()),
+        assessmentId: Value(doc.assessmentId ?? UuidGenerator.generateV4()),
+      ),
+    );
   }
 
-  Future<List<OfflineDocument>> getQueuedDocuments() async {
-    return select(offlineDocumentsQueue).get();
+  Future<List<OfflineDocument>> getQueuedDocuments(String uploaderId) async {
+    return (select(
+      offlineDocumentsQueue,
+    )..where((t) => t.uploaderId.equals(uploaderId))).get();
   }
 
-  Future<void> removeQueuedDocument(String id) async {
-    await (delete(offlineDocumentsQueue)..where((t) => t.id.equals(id))).go();
+  /// Deletes [id] only when it is queued by [uploaderId]. Returns the number
+  /// of deleted rows, so 0 means the id is unknown to that owner.
+  Future<int> removeQueuedDocument(String id, String uploaderId) async {
+    return (delete(
+      offlineDocumentsQueue,
+    )..where((t) => t.id.equals(id) & t.uploaderId.equals(uploaderId))).go();
+  }
+
+  Future<void> updateUploadDraft(OfflineDocument doc, String owner) async {
+    if (doc.uploaderId != owner) throw StateError('Draft owner changed');
+    await (update(offlineDocumentsQueue)
+          ..where((t) => t.id.equals(doc.id) & t.uploaderId.equals(owner)))
+        .write(doc);
   }
 
   Future<void> clearAllCache() async {
