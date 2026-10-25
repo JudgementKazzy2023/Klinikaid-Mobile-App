@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:klinikaid_mobile/features/auth/presentation/providers/auth_provider.dart';
 import 'package:klinikaid_mobile/features/auth/domain/password_change_result.dart';
+import 'package:klinikaid_mobile/features/auth/domain/sign_in_rate_limit.dart';
 import 'package:klinikaid_mobile/features/auth/domain/registration_validators.dart';
 
 /// Modal dialog for self-service password change with current-password
@@ -121,6 +122,11 @@ class _ChangePasswordModalState extends State<ChangePasswordModal> {
       case PasswordChangeResult.wrongCurrentPassword:
         setState(() {
           _errorMessage = authProvider.errorMessage ?? 'Current password is incorrect';
+          _isLoading = false;
+        });
+      case PasswordChangeResult.rateLimited:
+        setState(() {
+          _errorMessage = authProvider.errorMessage ?? signInRateLimitMessage(null);
           _isLoading = false;
         });
       case PasswordChangeResult.notAuthenticated:

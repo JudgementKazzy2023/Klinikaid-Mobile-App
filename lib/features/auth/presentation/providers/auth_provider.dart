@@ -20,6 +20,29 @@ import '../../domain/password_change_result.dart';
 import '../../domain/signup_outcome.dart';
 import '../../data/mfa_service.dart';
 import '../../domain/login_outcome.dart';
+import '../../domain/sign_in_rate_limit.dart';
+
+/// Whether [error] is a sign-in lockout rather than a wrong password. Supabase
+/// Auth's built-in limiter answers HTTP 429. The planned shared sign-in answers
+/// HTTP 429 with code `login_locked`, which may carry `retry_after_seconds`.
+bool _isSignInRateLimit(Object error) {
+  if (error is AuthException) {
+    return error.statusCode == '429' || error.code == 'login_locked';
+  }
+  if (error is FunctionException) return error.status == 429;
+  return false;
+}
+
+/// The wait the server gave with a lockout, or null when it gave none. Only a
+/// [FunctionException] carries the response body, so the built-in limiter
+/// always yields null.
+int? _signInRetryAfterSeconds(Object error) {
+  if (error is! FunctionException) return null;
+  final details = error.details;
+  if (details is! Map) return null;
+  final seconds = details['retry_after_seconds'];
+  return seconds is int && seconds > 0 ? seconds : null;
+}
 
 /// Provider that manages authentication state, RA 10173 consent, and patient onboarding flow.
 class AuthProvider extends ChangeNotifier implements PermissionSource {
@@ -552,6 +575,12 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
       return LoginOutcome.success;
     } catch (e) {
       if (loginEpoch == _identityEpoch && signOutGeneration == _signOutGeneration) {
+        if (_isSignInRateLimit(e)) {
+          _errorMessage = signInRateLimitMessage(_signInRetryAfterSeconds(e));
+          _isLoading = false;
+          notifyListeners();
+          return LoginOutcome.rateLimited;
+        }
         _errorMessage = e is AuthException ? e.message : e.toString();
         _isLoading = false;
         notifyListeners();
@@ -1293,6 +1322,11 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
             password: currentPassword,
           );
         } on AuthException catch (e) {
+          if (_isSignInRateLimit(e)) {
+            _errorMessage = signInRateLimitMessage(_signInRetryAfterSeconds(e));
+            notifyListeners();
+            return PasswordChangeResult.rateLimited;
+          }
           _errorMessage = e.message;
           notifyListeners();
           return PasswordChangeResult.wrongCurrentPassword;

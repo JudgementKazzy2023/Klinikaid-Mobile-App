@@ -11,6 +11,10 @@ enum PasswordChangeResult {
   /// The current password supplied failed reauthentication.
   wrongCurrentPassword,
 
+  /// Reauthentication was refused for too many attempts (HTTP 429). The
+  /// password update was never attempted.
+  rateLimited,
+
   /// No authenticated session was found (should not happen in normal flow).
   notAuthenticated,
 
