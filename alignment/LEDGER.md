@@ -95,7 +95,7 @@ Native receipts for earlier fixes use documented Flutter 3.44.0 with the committ
 | #22 · 13 | Closed 2026-10-24 | #5 (`449721f`), #39 (`678d176`), #50 (`a35a722`) |
 | #23 · 14 | Open, release decisions with JudgementKazzy2023 | None |
 | #70 | Open, `blocked:backend`, owner Setsuna-guwah | None |
-| Other | — | #42: #49 (`f9a338e`), closed 2026-10-22; #40: #45 (`49d97ed`), closed 2026-10-22; #41: #46 (`39eb461`), closed 2026-10-23; #44: #47 (`7532649`), closed 2026-10-22; #43: #48 (`c03e1b2`), closed 2026-10-24; #66: #68 (`268af26`), closed 2026-10-24; #59 (`d035be2`) lab queue retry and reception decision guard; #36 closed 2026-10-24 (see #16) |
+| Other | — | #42: #49 (`f9a338f`), closed 2026-10-22; #40: #45 (`49d97ed`), closed 2026-10-22; #41: #46 (`39eb461`), closed 2026-10-23; #44: #47 (`7532649`), closed 2026-10-22; #43: #48 (`c03e1b2`), closed 2026-10-24; #66: #68 (`268af26`), closed 2026-10-24; #59 (`d035be2`) lab queue retry and reception decision guard; #36 closed 2026-10-24 (see #16) |
 
 Roadmap #9's last status comment is dated 2026-10-22 and pins mobile `7532649` and web `27e7bbc`. It is superseded by this refresh. The previous draft note on [PR #4](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/pull/4) is also stale.
 
