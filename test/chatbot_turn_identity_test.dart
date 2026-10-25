@@ -10,6 +10,8 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+// ignore: depend_on_referenced_packages
+import 'package:yet_another_json_isolate/yet_another_json_isolate.dart';
 
 import 'package:klinikaid_mobile/core/models/chatbot_log.dart';
 import 'package:klinikaid_mobile/core/supabase/supabase_client.dart';
@@ -35,6 +37,24 @@ class TestAuth extends GoTrueClient {
         );
 }
 
+/// Encodes and decodes JSON on the test's own event loop. The default client
+/// does it in a background isolate, so a request reached the fake transport
+/// after a wall-clock delay that no number of [settle] turns could cover, and
+/// the tests failed on a slow CI runner.
+class InlineJsonIsolate extends YAJsonIsolate {
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  Future<void> dispose() async {}
+
+  @override
+  Future<dynamic> decode(String json) async => jsonDecode(json);
+
+  @override
+  Future<String> encode(Object? json) async => jsonEncode(json);
+}
+
 class TestClient extends SupabaseClient {
   TestClient(http.Client transport, this.fakeAuth)
       : super(
@@ -42,6 +62,7 @@ class TestClient extends SupabaseClient {
           'fake-key',
           httpClient: transport,
           authOptions: const AuthClientOptions(autoRefreshToken: false),
+          isolate: InlineJsonIsolate(),
         );
 
   final TestAuth fakeAuth;
