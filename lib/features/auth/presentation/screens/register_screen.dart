@@ -112,6 +112,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     if (_formKey.currentState!.validate() && _dobError == null) {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      // A second tap before the button rebuilds disabled would sign up again,
+      // get "already registered", and sign out the first tap's new session.
+      if (authProvider.isLoading) return;
       final outcome = await authProvider.signUp(
         email: _emailController.text.trim(),
         password: _passwordController.text,

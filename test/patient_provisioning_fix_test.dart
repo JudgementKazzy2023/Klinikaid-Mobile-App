@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -60,9 +62,17 @@ class MockGoTrueClient extends GoTrueClient {
     return AuthResponse(user: user, session: session);
   }
 
+  final events = StreamController<AuthState>.broadcast();
+
+  @override
+  Stream<AuthState> get onAuthStateChange => events.stream;
+
   @override
   Future<void> signOut({SignOutScope scope = SignOutScope.global}) async {
     signOutCalled = true;
+    // Like the SDK: listeners hear about the sign-out after the caller has
+    // moved on.
+    Future(() => events.add(const AuthState(AuthChangeEvent.signedOut, null)));
   }
 }
 
@@ -620,6 +630,10 @@ void main() {
       expect(verificationService.sendCodeCalled, false);
       expect(provider.errorMessage, kSignUpSetupIncompleteMessage);
       expect(provider.isAuthenticated, false);
+
+      // The signed-out event that follows must leave the message on screen.
+      await pumpEventQueue();
+      expect(provider.errorMessage, kSignUpSetupIncompleteMessage);
 
       // The retry is refused by Auth before any provisioning call, so the
       // patient row is not duplicated.

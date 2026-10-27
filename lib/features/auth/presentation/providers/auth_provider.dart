@@ -44,7 +44,9 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
   int _signOutGeneration = 0;
   User? get _user => _activeUser;
   set _user(User? value) {
-    if (value == null || value.id != _activeUser?.id) {
+    // Only a real identity change resets state. The signed-out event that
+    // follows a local sign-out must not wipe the message that explains it.
+    if (value?.id != _activeUser?.id) {
       _identityEpoch++;
       _pendingMfaFactorId = null;
       _needsMfaEnrollment = false;
