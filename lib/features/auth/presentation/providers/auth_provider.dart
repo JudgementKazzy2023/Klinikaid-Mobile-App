@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/cache/local_database.dart';
 import '../../../../core/repositories/patients_repository.dart';
@@ -44,7 +45,9 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
   int _signOutGeneration = 0;
   User? get _user => _activeUser;
   set _user(User? value) {
-    if (value == null || value.id != _activeUser?.id) {
+    // Only a real identity change resets state. The signed-out event that
+    // follows a local sign-out must not wipe the message that explains it.
+    if (value?.id != _activeUser?.id) {
       _identityEpoch++;
       _pendingMfaFactorId = null;
       _needsMfaEnrollment = false;
@@ -52,6 +55,7 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
       _errorMessage = null;
       _hasConsented = false;
       _isOnboarded = false;
+      _awaitingSignUpCode = false;
       _profile = null;
       _patient = null;
       _patientRecordState = PatientRecordState.unknown;
@@ -181,8 +185,19 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
   /// The account still holds the temporary password reception set.
   bool get mustChangePassword => temporary_password.mustChangePassword(_user);
   bool get hasConsented => _hasConsented;
+
+  /// The patient still has to enter the emailed code. Supabase auto-confirms
+  /// mobile sign-ups, which the server copies into `email_verified_at`, so a
+  /// new account is also held here until its code is entered.
+  bool get needsEmailCode =>
+      profile?.emailVerifiedAt == null || _awaitingSignUpCode;
+  bool _awaitingSignUpCode = false;
   bool get isOnboarded => _isOnboarded;
-  bool get isLoading => _isLoading;
+  // While sign-up runs, Auth's signed-in event refreshes the account before the
+  // consent is saved; staying loading keeps the router from showing the
+  // half-finished state (the consent screen) in between.
+  bool get isLoading => _isLoading || _signingUp;
+  bool _signingUp = false;
   String? get errorMessage => _errorMessage;
 
   /// Initializes the provider by checking current session and subscribing to auth changes.
@@ -239,6 +254,9 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
       final currentUser = _user;
       final epoch = _identityEpoch;
       if (currentUser == null) {
+       // No session was restored, so there is no idle time to judge: a later
+       // sign-in or sign-up is fresh, not a resumed session.
+       _isFirstAuthCheck = false;
        _hasConsented = false;
        _isOnboarded = false;
        _profile = null;
@@ -323,6 +341,8 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
       _needsMfaEnrollment = false;
       // 2. Evaluate Privacy Consent (read exclusively from database profiles.accepted_privacy_at)
       _hasConsented = _profile?.acceptedPrivacyAt != null;
+      _awaitingSignUpCode = await _isSignUpCodePending(currentUser.id);
+      if (epoch != _identityEpoch) return;
 
       // 3. Evaluate Onboarding Status (linked patients row)
       //
@@ -655,6 +675,7 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
     required String address,
   }) async {
     _isLoading = true;
+    _signingUp = true;
     _errorMessage = null;
     notifyListeners();
 
@@ -694,6 +715,9 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
       }
       _patient = provisionedPatient;
       _isOnboarded = true;
+      // Set before anything below can stop the sign-up, so the code page is
+      // still shown when the patient signs in to finish.
+      await _setSignUpCodePending(user.id, true);
 
       // The patient row exists from here on. A failure in the steps below must
       // not be reported as a failed registration, or the user would retry and
@@ -711,6 +735,21 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
         return _endFailedSignUp(SignUpOutcome.setupIncomplete, kSignUpSetupIncompleteMessage);
       }
 
+      // The signed-in event's refresh may still be running with the account as
+      // it was before provisioning and consent. Let it finish, then keep what
+      // this sign-up established.
+      final profile = _profile;
+      while (_currentUpdateFuture != null) {
+        await _currentUpdateFuture;
+      }
+      if (_user?.id == user.id) {
+        _profile = profile ?? _profile;
+        _patient = provisionedPatient;
+        _patientRecordState = PatientRecordState.loaded;
+        _isOnboarded = true;
+        _hasConsented = true;
+        _awaitingSignUpCode = true;
+      }
       _isLoading = false;
       notifyListeners();
       return SignUpOutcome.registered;
@@ -718,6 +757,9 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
       return _endFailedSignUp(SignUpOutcome.failed, e.message);
     } catch (e) {
       return _endFailedSignUp(SignUpOutcome.failed, e.toString());
+    } finally {
+      _signingUp = false;
+      notifyListeners();
     }
   }
 
@@ -1122,6 +1164,33 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
     notifyListeners();
   }
 
+  // Kept on the phone so closing the app before entering the code still lands
+  // on the code page next time. shortcut: the server cannot tell this account
+  // apart from a verified one; replace once sign-ups are created unconfirmed.
+  static String _signUpCodeKey(String userId) => 'signup_code_pending_$userId';
+
+  Future<void> _setSignUpCodePending(String userId, bool pending) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (pending) {
+        await prefs.setBool(_signUpCodeKey(userId), true);
+      } else {
+        await prefs.remove(_signUpCodeKey(userId));
+      }
+    } catch (e) {
+      debugPrint('[AuthProvider] sign-up code flag not saved: $e');
+    }
+  }
+
+  Future<bool> _isSignUpCodePending(String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(_signUpCodeKey(userId)) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Triggers Edge Function to send email verification code.
   Future<bool> sendVerificationCode(String email) async {
     final epoch = _identityEpoch;
@@ -1167,6 +1236,8 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
     if (result.status == VerificationStatus.verified) {
       _verificationState = VerificationState(status: VerificationStatus.verified);
       _errorMessage = null;
+      final userId = _user?.id;
+      if (userId != null) await _setSignUpCodePending(userId, false);
       await _updateLocalStates();
       notifyListeners();
       return true;

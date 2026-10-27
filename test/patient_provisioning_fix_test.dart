@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:klinikaid_mobile/core/errors/failures.dart';
 import 'package:klinikaid_mobile/core/models/patient.dart';
@@ -20,6 +23,9 @@ class MockGoTrueClient extends GoTrueClient {
 
   /// Auth refuses the sign-up because the address already has an account.
   bool alreadyRegistered = false;
+
+  /// Announces the new session to listeners, as the SDK does.
+  bool emitSignedIn = false;
   int signUpCalls = 0;
 
   MockGoTrueClient() : super(autoRefreshToken: false);
@@ -57,12 +63,23 @@ class MockGoTrueClient extends GoTrueClient {
       tokenType: 'bearer',
       user: user,
     );
+    // Like the SDK: listeners hear about the new session as sign-up returns,
+    // while the caller carries on.
+    if (emitSignedIn) events.add(AuthState(AuthChangeEvent.signedIn, session));
     return AuthResponse(user: user, session: session);
   }
+
+  final events = StreamController<AuthState>.broadcast();
+
+  @override
+  Stream<AuthState> get onAuthStateChange => events.stream;
 
   @override
   Future<void> signOut({SignOutScope scope = SignOutScope.global}) async {
     signOutCalled = true;
+    // Like the SDK: listeners hear about the sign-out after the caller has
+    // moved on.
+    Future(() => events.add(const AuthState(AuthChangeEvent.signedOut, null)));
   }
 }
 
@@ -78,6 +95,10 @@ class MockSupabaseClient extends SupabaseClient {
 class MockProfilesRepository extends ProfilesRepository {
   bool failConsentWrite = false;
   int consentWrites = 0;
+  DateTime? savedConsentAt;
+
+  /// Set when Auth auto-confirmed the address at sign-up.
+  DateTime? emailVerifiedAt;
 
   @override
   Future<Profile> getProfile(String id) async {
@@ -85,6 +106,8 @@ class MockProfilesRepository extends ProfilesRepository {
       id: id,
       fullName: 'Jane Patient',
       role: UserRole.patient,
+      acceptedPrivacyAt: savedConsentAt,
+      emailVerifiedAt: emailVerifiedAt,
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
     );
@@ -96,6 +119,7 @@ class MockProfilesRepository extends ProfilesRepository {
     if (failConsentWrite) {
       throw const DatabaseFailure('Could not record consent.');
     }
+    savedConsentAt = acceptedAt;
     return Profile(
       id: id,
       fullName: 'Jane Patient',
@@ -621,6 +645,10 @@ void main() {
       expect(provider.errorMessage, kSignUpSetupIncompleteMessage);
       expect(provider.isAuthenticated, false);
 
+      // The signed-out event that follows must leave the message on screen.
+      await pumpEventQueue();
+      expect(provider.errorMessage, kSignUpSetupIncompleteMessage);
+
       // The retry is refused by Auth before any provisioning call, so the
       // patient row is not duplicated.
       auth.alreadyRegistered = true;
@@ -638,6 +666,104 @@ void main() {
       expect(retry, SignUpOutcome.failed);
       expect(provisioningService.callCount, 1);
       expect(provider.errorMessage, 'User already registered');
+    });
+
+    test('a fresh sign-up is not signed out for an idle time saved long ago', () async {
+      // The last activity the phone saved is days old, from an earlier session.
+      SharedPreferences.setMockInitialValues({'last_activity_ms': 0});
+      final auth = MockGoTrueClient();
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: ThrowingPatientsRepository(),
+        verificationService: FakeVerificationService(),
+        provisioningService: MockPatientProvisioningService()..patient = patient(),
+      );
+      await pumpEventQueue();
+
+      final outcome = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+      expect(outcome, SignUpOutcome.registered);
+
+      // Entering the code re-reads the account, which is where the idle check ran.
+      expect(await provider.verifyCode('123456'), true);
+      expect(auth.signOutCalled, false);
+      expect(provider.isAuthenticated, true);
+      expect(provider.wasLoggedOutForInactivity, false);
+    });
+
+    test('sign-up stays loading until the consent is saved, so no consent screen flashes', () async {
+      SharedPreferences.setMockInitialValues({});
+      final gate = Completer<void>();
+      final provider = buildProvider(
+        auth: MockGoTrueClient()..emitSignedIn = true,
+        patientsRepo: ThrowingPatientsRepository(),
+        verificationService: FakeVerificationService(),
+        provisioningService: _GatedProvisioningService(gate.future)..patient = patient(),
+      );
+      await pumpEventQueue();
+
+      final signUp = provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+      // The signed-in event has refreshed the account; the consent is not saved.
+      await pumpEventQueue();
+      expect(provider.isLoading, true);
+
+      gate.complete();
+      expect(await signUp, SignUpOutcome.registered);
+      expect(provider.isLoading, false);
+      expect(provider.hasConsented, true);
+    });
+
+    test('an auto-confirmed sign-up still waits for the emailed code', () async {
+      SharedPreferences.setMockInitialValues({});
+      // The server already holds email_verified_at, copied from Auth's
+      // automatic confirmation.
+      final profilesRepo = MockProfilesRepository()..emailVerifiedAt = DateTime(2026, 10, 27);
+      final provider = buildProvider(
+        auth: MockGoTrueClient()..emitSignedIn = true,
+        patientsRepo: ThrowingPatientsRepository(),
+        verificationService: FakeVerificationService(),
+        provisioningService: MockPatientProvisioningService()..patient = patient(),
+        profilesRepo: profilesRepo,
+      );
+      await pumpEventQueue();
+
+      final outcome = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(outcome, SignUpOutcome.registered);
+      expect(provider.needsEmailCode, true);
+      // Kept on the phone, so closing the app before the code still asks for it.
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('signup_code_pending_auth-user-1'), true);
+
+      expect(await provider.verifyCode('123456'), true);
+      expect(provider.needsEmailCode, false);
+      expect(prefs.getBool('signup_code_pending_auth-user-1'), isNull);
     });
 
     test('a verification code that fails to send after provisioning says to sign in', () async {
@@ -672,4 +798,32 @@ void main() {
       expect(provider.errorMessage, kSignUpSetupIncompleteMessage);
     });
   });
+}
+
+/// Holds provisioning until [gate] completes, as a slow network would.
+class _GatedProvisioningService extends MockPatientProvisioningService {
+  _GatedProvisioningService(this.gate);
+  final Future<void> gate;
+
+  @override
+  Future<Patient?> createPatientRecord({
+    required String firstName,
+    required String lastName,
+    required DateTime dateOfBirth,
+    required Gender gender,
+    required String contactNumber,
+    required String email,
+    required String address,
+  }) async {
+    await gate;
+    return super.createPatientRecord(
+      firstName: firstName,
+      lastName: lastName,
+      dateOfBirth: dateOfBirth,
+      gender: gender,
+      contactNumber: contactNumber,
+      email: email,
+      address: address,
+    );
+  }
 }
