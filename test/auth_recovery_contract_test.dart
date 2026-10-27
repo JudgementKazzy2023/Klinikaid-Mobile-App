@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:klinikaid_mobile/core/errors/failures.dart';
 import 'package:klinikaid_mobile/core/models/patient.dart';
@@ -11,6 +12,7 @@ import 'package:klinikaid_mobile/core/models/profile.dart';
 import 'package:klinikaid_mobile/core/repositories/patients_repository.dart';
 import 'package:klinikaid_mobile/core/repositories/profiles_repository.dart';
 import 'package:klinikaid_mobile/features/auth/data/password_reset_service.dart';
+import 'package:klinikaid_mobile/features/auth/data/pending_consent_store.dart';
 import 'package:klinikaid_mobile/features/auth/data/verification_service.dart';
 import 'package:klinikaid_mobile/features/auth/domain/password_reset_result.dart';
 import 'package:klinikaid_mobile/features/auth/domain/verification_state.dart';
@@ -289,7 +291,8 @@ void main() {
       expect(provider.errorMessage, isNull);
     });
 
-    test('a failed consent write leaves the patient on the agreement with the reason', () async {
+    test('a refused consent write is kept on the phone and sent on the next check', () async {
+      SharedPreferences.setMockInitialValues({});
       final profilesRepo = _FakeConsentProfilesRepository()..failWrite = true;
       final provider = _buildProvider(profilesRepo: profilesRepo);
       await Future<void>.delayed(Duration.zero);
@@ -307,9 +310,18 @@ void main() {
 
       final accepted = await provider.acceptConsent();
 
-      expect(accepted, false);
-      expect(provider.hasConsented, false);
-      expect(provider.errorMessage, 'Could not record consent.');
+      expect(accepted, true);
+      expect(provider.hasConsented, true);
+      expect(profilesRepo.consentWrites, isEmpty);
+      expect(await PendingConsentStore().read('auth-user-1'), isNotNull);
+
+      // Once the server takes the write, the next check (here, entering the
+      // email code) sends the kept consent and clears it.
+      profilesRepo.failWrite = false;
+      await provider.verifyCode('123456');
+      expect(profilesRepo.consentWrites, ['auth-user-1']);
+      expect(provider.hasConsented, true);
+      expect(await PendingConsentStore().read('auth-user-1'), isNull);
     });
   });
 

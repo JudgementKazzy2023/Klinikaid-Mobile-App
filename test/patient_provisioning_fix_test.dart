@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:klinikaid_mobile/core/errors/failures.dart';
 import 'package:klinikaid_mobile/core/models/patient.dart';
@@ -7,6 +8,7 @@ import 'package:klinikaid_mobile/core/models/profile.dart';
 import 'package:klinikaid_mobile/core/repositories/patients_repository.dart';
 import 'package:klinikaid_mobile/core/repositories/profiles_repository.dart';
 import 'package:klinikaid_mobile/features/auth/data/patient_provisioning_service.dart';
+import 'package:klinikaid_mobile/features/auth/data/pending_consent_store.dart';
 import 'package:klinikaid_mobile/features/auth/data/verification_service.dart';
 import 'package:klinikaid_mobile/features/auth/domain/signup_outcome.dart';
 import 'package:klinikaid_mobile/features/auth/domain/verification_state.dart';
@@ -591,7 +593,8 @@ void main() {
       expect(provider.errorMessage, 'User already registered');
     });
 
-    test('a consent write that fails after provisioning keeps the record and says to sign in', () async {
+    test('a consent write the server refuses still sends the code and skips the second consent', () async {
+      SharedPreferences.setMockInitialValues({});
       final auth = MockGoTrueClient();
       final profilesRepo = MockProfilesRepository()..failConsentWrite = true;
       final verificationService = FakeVerificationService();
@@ -615,29 +618,18 @@ void main() {
         address: '123 Test St',
       );
 
-      expect(outcome, SignUpOutcome.setupIncomplete);
+      expect(outcome, SignUpOutcome.registered);
       expect(provisioningService.callCount, 1);
-      expect(verificationService.sendCodeCalled, false);
-      expect(provider.errorMessage, kSignUpSetupIncompleteMessage);
-      expect(provider.isAuthenticated, false);
+      expect(verificationService.sendCodeCalled, true);
+      expect(auth.signOutCalled, false);
+      expect(provider.hasConsented, true);
+      expect(await PendingConsentStore().read('auth-user-1'), isNotNull);
 
-      // The retry is refused by Auth before any provisioning call, so the
-      // patient row is not duplicated.
-      auth.alreadyRegistered = true;
-      final retry = await provider.signUp(
-        email: 'jane@example.com',
-        password: 'Password123!',
-        firstName: 'Jane',
-        lastName: 'Patient',
-        dateOfBirth: DateTime(1990, 1, 1),
-        gender: Gender.female,
-        contactNumber: '09123456789',
-        address: '123 Test St',
-      );
-
-      expect(retry, SignUpOutcome.failed);
-      expect(provisioningService.callCount, 1);
-      expect(provider.errorMessage, 'User already registered');
+      // After the code, the consent screen stays skipped while the server
+      // still refuses the write.
+      expect(await provider.verifyCode('123456'), true);
+      expect(provider.hasConsented, true);
+      expect(profilesRepo.consentWrites, 2);
     });
 
     test('a verification code that fails to send after provisioning says to sign in', () async {

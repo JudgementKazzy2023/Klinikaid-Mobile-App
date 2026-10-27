@@ -19,6 +19,7 @@ import '../../domain/password_reset_result.dart';
 import '../../domain/password_change_result.dart';
 import '../../domain/signup_outcome.dart';
 import '../../data/mfa_service.dart';
+import '../../data/pending_consent_store.dart';
 import '../../domain/login_outcome.dart';
 import '../../domain/temporary_password.dart' as temporary_password;
 
@@ -33,6 +34,7 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
   final PermissionService _permissionService;
   final SessionActivityService _activityService;
   final MfaService _mfaService;
+  final _pendingConsent = PendingConsentStore();
   final LocalDatabase? localDatabase;
 
   User? _activeUser;
@@ -321,8 +323,11 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
       }
     } else {
       _needsMfaEnrollment = false;
-      // 2. Evaluate Privacy Consent (read exclusively from database profiles.accepted_privacy_at)
-      _hasConsented = _profile?.acceptedPrivacyAt != null;
+      // 2. Evaluate Privacy Consent: profiles.accepted_privacy_at, or consent
+      // given on this phone that the server has not stored yet.
+      _hasConsented = _profile?.acceptedPrivacyAt != null ||
+          await _syncPendingConsent(currentUser.id, epoch);
+      if (epoch != _identityEpoch) return;
 
       // 3. Evaluate Onboarding Status (linked patients row)
       //
@@ -698,11 +703,11 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
       // The patient row exists from here on. A failure in the steps below must
       // not be reported as a failed registration, or the user would retry and
       // hit "already registered" with no way forward.
+      // The registration form already took the consent, so the consent screen
+      // is not shown again, and the code is sent even if the server refused it.
+      await _recordConsent(user.id);
       var codeSent = false;
       try {
-        _profile = await _profilesRepo.recordPrivacyAcceptance(user.id, DateTime.now());
-        _hasConsented = true;
-        // Automatically send verification code upon successful signup
         codeSent = await sendVerificationCode(email);
       } catch (e) {
         debugPrint('[AuthProvider signUp] setup after provisioning failed: $e');
@@ -883,8 +888,7 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
     _errorMessage = null;
     notifyListeners();
 
-    // Consent without an account to attach it to is not consent. Reporting
-    // success here would open the app with nothing recorded on the server.
+    // Consent without an account to attach it to is not consent.
     final currentUser = _user;
     if (currentUser == null) {
       _errorMessage = 'Your session has expired. Sign in again to accept the agreement.';
@@ -893,24 +897,39 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
       return false;
     }
 
+    await _recordConsent(currentUser.id);
+    _isLoading = false;
+    notifyListeners();
+    return true;
+  }
+
+  /// Records the privacy consent on the server (the same timestamp-only write
+  /// the web agreement page makes). If the server refuses it, the consent is
+  /// kept on the phone and sent again on the next app start or sign-in.
+  Future<void> _recordConsent(String userId) async {
+    final acceptedAt = DateTime.now();
     try {
-      // Same write the web agreement page makes: the consent timestamp only.
-      _profile = await _profilesRepo.recordPrivacyAcceptance(currentUser.id, DateTime.now());
-      _hasConsented = true;
-      _isLoading = false;
-      notifyListeners();
-      return true;
-    } on Failure catch (e) {
-      _errorMessage = e.message;
-      _isLoading = false;
-      notifyListeners();
-      return false;
+      _profile = await _profilesRepo.recordPrivacyAcceptance(userId, acceptedAt);
     } catch (e) {
-      _errorMessage = e is AuthException ? e.message : e.toString();
-      _isLoading = false;
-      notifyListeners();
-      return false;
+      debugPrint('[AuthProvider] consent kept on the phone, server refused it: $e');
+      await _pendingConsent.save(userId, acceptedAt);
     }
+    _hasConsented = true;
+  }
+
+  /// Sends consent kept on the phone to the server. True when there was one,
+  /// whether or not the server took it this time.
+  Future<bool> _syncPendingConsent(String userId, int epoch) async {
+    final acceptedAt = await _pendingConsent.read(userId);
+    if (acceptedAt == null) return false;
+    try {
+      final profile = await _profilesRepo.recordPrivacyAcceptance(userId, acceptedAt);
+      if (epoch == _identityEpoch) _profile = profile;
+      await _pendingConsent.clear(userId);
+    } catch (e) {
+      debugPrint('[AuthProvider] pending consent still not stored: $e');
+    }
+    return true;
   }
 
   /// Inserts a patient onboarding record.
