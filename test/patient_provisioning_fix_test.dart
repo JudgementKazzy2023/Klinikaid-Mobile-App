@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:klinikaid_mobile/core/errors/failures.dart';
 import 'package:klinikaid_mobile/core/models/patient.dart';
@@ -652,6 +653,37 @@ void main() {
       expect(retry, SignUpOutcome.failed);
       expect(provisioningService.callCount, 1);
       expect(provider.errorMessage, 'User already registered');
+    });
+
+    test('a fresh sign-up is not signed out for an idle time saved long ago', () async {
+      // The last activity the phone saved is days old, from an earlier session.
+      SharedPreferences.setMockInitialValues({'last_activity_ms': 0});
+      final auth = MockGoTrueClient();
+      final provider = buildProvider(
+        auth: auth,
+        patientsRepo: ThrowingPatientsRepository(),
+        verificationService: FakeVerificationService(),
+        provisioningService: MockPatientProvisioningService()..patient = patient(),
+      );
+      await pumpEventQueue();
+
+      final outcome = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+      expect(outcome, SignUpOutcome.registered);
+
+      // Entering the code re-reads the account, which is where the idle check ran.
+      expect(await provider.verifyCode('123456'), true);
+      expect(auth.signOutCalled, false);
+      expect(provider.isAuthenticated, true);
+      expect(provider.wasLoggedOutForInactivity, false);
     });
 
     test('a verification code that fails to send after provisioning says to sign in', () async {

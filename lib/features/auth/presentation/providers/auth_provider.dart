@@ -241,6 +241,9 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
       final currentUser = _user;
       final epoch = _identityEpoch;
       if (currentUser == null) {
+       // No session was restored, so there is no idle time to judge: a later
+       // sign-in or sign-up is fresh, not a resumed session.
+       _isFirstAuthCheck = false;
        _hasConsented = false;
        _isOnboarded = false;
        _profile = null;
