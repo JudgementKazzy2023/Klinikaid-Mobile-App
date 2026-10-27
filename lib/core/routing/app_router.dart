@@ -214,7 +214,7 @@ class AppRouter {
       // 4. Role-based routing
       if (role == UserRole.patient) {
         // Enforce Email OTP Verification Gate
-        if (authProvider.profile?.emailVerifiedAt == null) {
+        if (authProvider.needsEmailCode) {
         if (location == '/verify') {
           return null; // Stay on verify screen
         }

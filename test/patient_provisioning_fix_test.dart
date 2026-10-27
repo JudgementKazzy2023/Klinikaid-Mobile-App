@@ -97,6 +97,9 @@ class MockProfilesRepository extends ProfilesRepository {
   int consentWrites = 0;
   DateTime? savedConsentAt;
 
+  /// Set when Auth auto-confirmed the address at sign-up.
+  DateTime? emailVerifiedAt;
+
   @override
   Future<Profile> getProfile(String id) async {
     return Profile(
@@ -104,6 +107,7 @@ class MockProfilesRepository extends ProfilesRepository {
       fullName: 'Jane Patient',
       role: UserRole.patient,
       acceptedPrivacyAt: savedConsentAt,
+      emailVerifiedAt: emailVerifiedAt,
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
     );
@@ -724,6 +728,42 @@ void main() {
       expect(await signUp, SignUpOutcome.registered);
       expect(provider.isLoading, false);
       expect(provider.hasConsented, true);
+    });
+
+    test('an auto-confirmed sign-up still waits for the emailed code', () async {
+      SharedPreferences.setMockInitialValues({});
+      // The server already holds email_verified_at, copied from Auth's
+      // automatic confirmation.
+      final profilesRepo = MockProfilesRepository()..emailVerifiedAt = DateTime(2026, 10, 27);
+      final provider = buildProvider(
+        auth: MockGoTrueClient()..emitSignedIn = true,
+        patientsRepo: ThrowingPatientsRepository(),
+        verificationService: FakeVerificationService(),
+        provisioningService: MockPatientProvisioningService()..patient = patient(),
+        profilesRepo: profilesRepo,
+      );
+      await pumpEventQueue();
+
+      final outcome = await provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+
+      expect(outcome, SignUpOutcome.registered);
+      expect(provider.needsEmailCode, true);
+      // Kept on the phone, so closing the app before the code still asks for it.
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('signup_code_pending_auth-user-1'), true);
+
+      expect(await provider.verifyCode('123456'), true);
+      expect(provider.needsEmailCode, false);
+      expect(prefs.getBool('signup_code_pending_auth-user-1'), isNull);
     });
 
     test('a verification code that fails to send after provisioning says to sign in', () async {

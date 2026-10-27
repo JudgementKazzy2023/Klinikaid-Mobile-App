@@ -60,6 +60,9 @@ class RouterAuth extends ChangeNotifier implements AuthProvider {
       : PermissionLoadState.loaded;
 
   @override
+  bool get needsEmailCode => profile?.emailVerifiedAt == null;
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
