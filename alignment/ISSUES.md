@@ -1,0 +1,24 @@
+# Ordered GitHub alignment work
+
+[Roadmap #9](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/9) tracks updates against mobile `fd37ec5` and web `1c879a2` (refreshed 2026-10-25; issue bodies keep their original pins). Each issue has pinned evidence, ownership, dependencies and acceptance checks. The numbers below are execution order, not an instruction to serialize independent work. Existing PRs are linked instead of duplicated.
+
+- 01 · P1 · [#10: Restore deterministic native verification before acceptance](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/10)
+- 02 · P1 · [#11: Complete session, account-switch and deferred-work isolation](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/11)
+- 03 · P1 · [#12: Preserve patient queue state across cache and realtime changes](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/12)
+- 04 · P1 · [#13: Align reception routing and vitals with the shared triage contract](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/13)
+- 05 · P1 · [#14: Report saved results and queue completion as distinct outcomes](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/14)
+- 06 · P1 · [#15: Complete laboratory recording and reference-data compatibility](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/15)
+- 07 · P1 · [#16: Deliver the reviewed patient submission contract and coordinated mobile adapter](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/16)
+- 08 · P1 · [#17: Verify shared authentication, onboarding and recovery contracts](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/17)
+- 09 · P1 · [#18: Align staff read/mutation permissions and authoritative side effects](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/18)
+- 10 · P2 · [#19: Make cached patient reads honest, scoped and complete](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/19)
+- 11 · P2 · [#20: Preserve chat turn identity and safe request lifecycle](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/20)
+- 12 · P2 · [#21: Make staff search, pagination and totals complete and truthful](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/21)
+- 13 · P2 · [#22: Share intended form, calendar and email validation across clients](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/22)
+- 14 · P2 · [#23: Establish Android release configuration and shipped-build provenance](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/23)
+
+Added after the initial list: [#70: Enforce the sign-in attempt limit server-side so it covers mobile and direct Auth calls](https://github.com/JudgementKazzy2023/Klinikaid-Mobile-App/issues/70) (`blocked:backend`, owner Setsuna-guwah).
+
+Backend-blocked tasks remain explicit. PR #3 was closed unmerged on 2026-10-24. Focused passing checks do not waive native gates, live-contract evidence or release ownership.
+
+Delivery: the MFA/transient portion of #11 (#24), the default-test repair under #10 (#25) and the queue/cache portion of #12 (#26) are merged. Closed-issue state is listed in [LEDGER.md](LEDGER.md).
