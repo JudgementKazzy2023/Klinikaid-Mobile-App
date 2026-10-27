@@ -13,7 +13,9 @@ class RagDocumentsRepository {
     try {
       final response = await _client
           .from('rag_documents')
-          .select()
+          // embedding is not granted to app users (web migration 23), so
+          // select=* fails with 42501. Name the readable columns.
+          .select('id, title, content, metadata, created_at')
           .order('created_at', ascending: false);
       
       return (response as List)
