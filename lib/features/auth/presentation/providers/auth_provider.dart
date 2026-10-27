@@ -184,7 +184,11 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
   bool get mustChangePassword => temporary_password.mustChangePassword(_user);
   bool get hasConsented => _hasConsented;
   bool get isOnboarded => _isOnboarded;
-  bool get isLoading => _isLoading;
+  // While sign-up runs, Auth's signed-in event refreshes the account before the
+  // consent is saved; staying loading keeps the router from showing the
+  // half-finished state (the consent screen) in between.
+  bool get isLoading => _isLoading || _signingUp;
+  bool _signingUp = false;
   String? get errorMessage => _errorMessage;
 
   /// Initializes the provider by checking current session and subscribing to auth changes.
@@ -660,6 +664,7 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
     required String address,
   }) async {
     _isLoading = true;
+    _signingUp = true;
     _errorMessage = null;
     notifyListeners();
 
@@ -716,6 +721,20 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
         return _endFailedSignUp(SignUpOutcome.setupIncomplete, kSignUpSetupIncompleteMessage);
       }
 
+      // The signed-in event's refresh may still be running with the account as
+      // it was before provisioning and consent. Let it finish, then keep what
+      // this sign-up established.
+      final profile = _profile;
+      while (_currentUpdateFuture != null) {
+        await _currentUpdateFuture;
+      }
+      if (_user?.id == user.id) {
+        _profile = profile ?? _profile;
+        _patient = provisionedPatient;
+        _patientRecordState = PatientRecordState.loaded;
+        _isOnboarded = true;
+        _hasConsented = true;
+      }
       _isLoading = false;
       notifyListeners();
       return SignUpOutcome.registered;
@@ -723,6 +742,9 @@ class AuthProvider extends ChangeNotifier implements PermissionSource {
       return _endFailedSignUp(SignUpOutcome.failed, e.message);
     } catch (e) {
       return _endFailedSignUp(SignUpOutcome.failed, e.toString());
+    } finally {
+      _signingUp = false;
+      notifyListeners();
     }
   }
 

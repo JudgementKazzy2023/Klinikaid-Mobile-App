@@ -23,6 +23,9 @@ class MockGoTrueClient extends GoTrueClient {
 
   /// Auth refuses the sign-up because the address already has an account.
   bool alreadyRegistered = false;
+
+  /// Announces the new session to listeners, as the SDK does.
+  bool emitSignedIn = false;
   int signUpCalls = 0;
 
   MockGoTrueClient() : super(autoRefreshToken: false);
@@ -60,6 +63,9 @@ class MockGoTrueClient extends GoTrueClient {
       tokenType: 'bearer',
       user: user,
     );
+    // Like the SDK: listeners hear about the new session as sign-up returns,
+    // while the caller carries on.
+    if (emitSignedIn) events.add(AuthState(AuthChangeEvent.signedIn, session));
     return AuthResponse(user: user, session: session);
   }
 
@@ -89,6 +95,7 @@ class MockSupabaseClient extends SupabaseClient {
 class MockProfilesRepository extends ProfilesRepository {
   bool failConsentWrite = false;
   int consentWrites = 0;
+  DateTime? savedConsentAt;
 
   @override
   Future<Profile> getProfile(String id) async {
@@ -96,6 +103,7 @@ class MockProfilesRepository extends ProfilesRepository {
       id: id,
       fullName: 'Jane Patient',
       role: UserRole.patient,
+      acceptedPrivacyAt: savedConsentAt,
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
     );
@@ -107,6 +115,7 @@ class MockProfilesRepository extends ProfilesRepository {
     if (failConsentWrite) {
       throw const DatabaseFailure('Could not record consent.');
     }
+    savedConsentAt = acceptedAt;
     return Profile(
       id: id,
       fullName: 'Jane Patient',
@@ -686,6 +695,37 @@ void main() {
       expect(provider.wasLoggedOutForInactivity, false);
     });
 
+    test('sign-up stays loading until the consent is saved, so no consent screen flashes', () async {
+      SharedPreferences.setMockInitialValues({});
+      final gate = Completer<void>();
+      final provider = buildProvider(
+        auth: MockGoTrueClient()..emitSignedIn = true,
+        patientsRepo: ThrowingPatientsRepository(),
+        verificationService: FakeVerificationService(),
+        provisioningService: _GatedProvisioningService(gate.future)..patient = patient(),
+      );
+      await pumpEventQueue();
+
+      final signUp = provider.signUp(
+        email: 'jane@example.com',
+        password: 'Password123!',
+        firstName: 'Jane',
+        lastName: 'Patient',
+        dateOfBirth: DateTime(1990, 1, 1),
+        gender: Gender.female,
+        contactNumber: '09123456789',
+        address: '123 Test St',
+      );
+      // The signed-in event has refreshed the account; the consent is not saved.
+      await pumpEventQueue();
+      expect(provider.isLoading, true);
+
+      gate.complete();
+      expect(await signUp, SignUpOutcome.registered);
+      expect(provider.isLoading, false);
+      expect(provider.hasConsented, true);
+    });
+
     test('a verification code that fails to send after provisioning says to sign in', () async {
       final auth = MockGoTrueClient();
       final verificationService = FakeVerificationService()..sendFails = true;
@@ -718,4 +758,32 @@ void main() {
       expect(provider.errorMessage, kSignUpSetupIncompleteMessage);
     });
   });
+}
+
+/// Holds provisioning until [gate] completes, as a slow network would.
+class _GatedProvisioningService extends MockPatientProvisioningService {
+  _GatedProvisioningService(this.gate);
+  final Future<void> gate;
+
+  @override
+  Future<Patient?> createPatientRecord({
+    required String firstName,
+    required String lastName,
+    required DateTime dateOfBirth,
+    required Gender gender,
+    required String contactNumber,
+    required String email,
+    required String address,
+  }) async {
+    await gate;
+    return super.createPatientRecord(
+      firstName: firstName,
+      lastName: lastName,
+      dateOfBirth: dateOfBirth,
+      gender: gender,
+      contactNumber: contactNumber,
+      email: email,
+      address: address,
+    );
+  }
 }
